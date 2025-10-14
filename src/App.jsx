@@ -431,8 +431,8 @@ export default function App() {
                   <h3>{m.name}</h3>
                   {m.specs && <p style={{ color: "#666" }}>{m.specs}</p>}
                   <p style={{ fontWeight: 700 }}>
-                    MRP: ₹{formatINRnoDecimals(m.mrp)}
-                  </p>
+  ₹{formatINRnoDecimals(m.mrp)}
+</p>
                   {m.category && (
                     <p style={{ color: "#777", fontSize: 12 }}>{m.category}</p>
                   )}
