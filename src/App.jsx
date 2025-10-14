@@ -79,7 +79,6 @@ export default function App() {
       }
       setShowLogin(false);
     });
-
     return () => sub.subscription.unsubscribe();
   }, []);
 
@@ -117,7 +116,6 @@ export default function App() {
     if (error) alert(error.message);
     else alert("Login link sent. Check your email.");
   };
-
   const signOut = async () => {
     await supabase.auth.signOut();
     setIsAdmin(false);
@@ -141,7 +139,6 @@ export default function App() {
 
     setSaving(true);
     try {
-      // 1) Upload image to Storage (safe filename)
       const ext = form.imageFile.name.split(".").pop().toLowerCase();
       const safeBase = form.name
         .trim()
@@ -165,7 +162,6 @@ export default function App() {
       if (urlErr) throw new Error("URL: " + urlErr.message);
       const image_url = urlData.publicUrl;
 
-      // 2) Insert into machines
       const payload = {
         name: form.name,
         category: form.category,
@@ -178,7 +174,6 @@ export default function App() {
       const { error: insErr } = await supabase.from("machines").insert(payload);
       if (insErr) throw new Error("INSERT: " + insErr.message);
 
-      // reset
       setForm({
         name: "",
         category: "",
@@ -238,7 +233,7 @@ export default function App() {
                 {isAdmin ? "Admin: ON" : "Not admin"}
               </span>
               <span style={{ color: "#777", fontSize: 12 }}>
-                UID: {session.user?.id?.slice(0, 8)}… (copy full from console)
+                UID: {session.user?.id?.slice(0, 8)}…
               </span>
             </>
           ) : (
@@ -395,72 +390,63 @@ export default function App() {
       </div>
 
       {/* Product grid */}
-<div style={{ maxWidth: 1100, margin: "0 auto 40px" }}>
-  {loading ? (
-    <p style={{ textAlign: "center" }}>Loading…</p>
-  ) : (
-    <div className="catalog-grid">
-      {filtered.map((m) => (
-        <div key={m.id} className="card">
-          {/* Thumbnail window (no cropping) */}
-          <div
-            style={{
-              height: 240,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              background: "#fff",
-              padding: 8,
-              borderBottom: "1px solid #eee",
-            }}
-          >
-            {m.image_url && (
-              <img
-                src={m.image_url}
-                alt={m.name}
-                loading="lazy"
-                onError={(e) => (e.currentTarget.style.display = "none")}
-                style={{
-                  maxWidth: "100%",
-                  maxHeight: "100%",
-                  width: "auto",
-                  height: "auto",
-                  objectFit: "contain",
-                  display: "block",
-                }}
-              />
-            )}
+      <div style={{ maxWidth: 1100, margin: "0 auto 40px" }}>
+        {loading ? (
+          <p style={{ textAlign: "center" }}>Loading…</p>
+        ) : (
+          <div className="catalog-grid">
+            {filtered.map((m) => (
+              <div key={m.id} className="card">
+                <div
+                  style={{
+                    height: 240,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    background: "#fff",
+                    padding: 8,
+                    borderBottom: "1px solid #eee",
+                  }}
+                >
+                  {m.image_url && (
+                    <img
+                      src={m.image_url}
+                      alt={m.name}
+                      loading="lazy"
+                      onError={(e) =>
+                        (e.currentTarget.style.display = "none")
+                      }
+                      style={{
+                        maxWidth: "100%",
+                        maxHeight: "100%",
+                        width: "auto",
+                        height: "auto",
+                        objectFit: "contain",
+                        display: "block",
+                      }}
+                    />
+                  )}
+                </div>
+                <div className="card-body">
+                  <h3>{m.name}</h3>
+                  {m.specs && <p style={{ color: "#666" }}>{m.specs}</p>}
+                  <p style={{ fontWeight: 700 }}>
+                    MRP: ₹{formatINRnoDecimals(m.mrp)}
+                  </p>
+                  {m.category && (
+                    <p style={{ color: "#777", fontSize: 12 }}>{m.category}</p>
+                  )}
+                </div>
+              </div>
+            ))}
           </div>
-
-          <div className="card-body">
-            <h3>{m.name}</h3>
-            {m.specs && <p style={{ color: "#666" }}>{m.specs}</p>}
-            <p style={{ fontWeight: 700 }}>MRP: ₹{formatINRnoDecimals(m.mrp)}</p>
-            {m.category && (
-              <p style={{ color: "#777", fontSize: 12 }}>{m.category}</p>
-            )}
-          </div>
-        </div>
-      ))}
-    </div>
-  )}
-  {msg && (
-    <p style={{ textAlign: "center", color: "crimson", marginTop: 10 }}>
-      {msg}
-    </p>
-  )}
-</div>
-        </div>
-      ))}
-    </div>
-  )}
-
-  {msg && (
-    <p style={{ textAlign: "center", color: "crimson", marginTop: 10 }}>
-      {msg}
-    </p>
-  )}
-</div>
+        )}
+        {msg && (
+          <p style={{ textAlign: "center", color: "crimson", marginTop: 10 }}>
+            {msg}
+          </p>
+        )}
+      </div>
     </div>
   );
 }
