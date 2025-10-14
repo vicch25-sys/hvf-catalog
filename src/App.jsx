@@ -35,7 +35,7 @@ export default function App() {
   const [session, setSession] = useState(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [loginEmail, setLoginEmail] = useState("");
-  const [showLogin, setShowLogin] = useState(false); // NEW: gate the login UI
+  const [showLogin, setShowLogin] = useState(false);
 
   const [form, setForm] = useState({
     name: "",
@@ -77,9 +77,9 @@ export default function App() {
       } else {
         setIsAdmin(false);
       }
-      // hide the email box once login state changes (clean look)
       setShowLogin(false);
     });
+
     return () => sub.subscription.unsubscribe();
   }, []);
 
@@ -117,6 +117,7 @@ export default function App() {
     if (error) alert(error.message);
     else alert("Login link sent. Check your email.");
   };
+
   const signOut = async () => {
     await supabase.auth.signOut();
     setIsAdmin(false);
@@ -140,9 +141,13 @@ export default function App() {
 
     setSaving(true);
     try {
-      /* 1) Upload image to Storage (safe filename) */
+      // 1) Upload image to Storage (safe filename)
       const ext = form.imageFile.name.split(".").pop().toLowerCase();
-      const safeBase = form.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 40);
+      const safeBase = form.name
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .slice(0, 40);
       const filePath = `products/${Date.now()}-${safeBase}.${ext}`;
 
       const { error: upErr } = await supabase.storage
@@ -160,7 +165,7 @@ export default function App() {
       if (urlErr) throw new Error("URL: " + urlErr.message);
       const image_url = urlData.publicUrl;
 
-      /* 2) Insert into machines */
+      // 2) Insert into machines
       const payload = {
         name: form.name,
         category: form.category,
@@ -173,6 +178,7 @@ export default function App() {
       const { error: insErr } = await supabase.from("machines").insert(payload);
       if (insErr) throw new Error("INSERT: " + insErr.message);
 
+      // reset
       setForm({
         name: "",
         category: "",
@@ -389,61 +395,44 @@ export default function App() {
       </div>
 
       {/* Product grid */}
-<div style={{ maxWidth: 1100, margin: "0 auto 40px" }}>
-  {loading ? (
-    <p style={{ textAlign: "center" }}>Loading…</p>
-  ) : (
-    <div className="catalog-grid">
-      {filtered.map((m) => (
-        <div key={m.id} className="card">
-          <div className="thumb">
-            {m.image_url && (
-              <img
-                src={m.image_url}
-                alt={m.name}
-                loading="lazy"
-                onError={(e) => (e.currentTarget.style.display = "none")}
-              />
-            )}
-          </div>
-          <div className="card-body">
-            <h3>{m.name}</h3>
-            {m.specs && <p style={{ color: "#666" }}>{m.specs}</p>}
-            <p style={{ fontWeight: 700 }}>
-              MRP: ₹{formatINRnoDecimals(m.mrp)}
-            </p>
-            {m.category && (
-              <p style={{ color: "#777", fontSize: 12 }}>{m.category}</p>
-            )}
-          </div>
-        </div>
-      ))}
-    </div>
-  )}
-  {msg && (
-    <p style={{ textAlign: "center", color: "crimson", marginTop: 10 }}>
-      {msg}
-    </p>
-  )}
-</div>
-                <div className="card-body">
-                  <h3>{m.name}</h3>
-                  {m.specs && <p style={{ color: "#666" }}>{m.specs}</p>}
-                  <p style={{ fontWeight: 700 }}>
-                    MRP: ₹{formatINRnoDecimals(m.mrp)}
-                  </p>
-                  {m.category && (
-                    <p style={{ color: "#777", fontSize: 12 }}>{m.category}</p>
-                  )}
+      <div style={{ maxWidth: 1100, margin: "0 auto 40px" }}>
+        {loading ? (
+          <p style={{ textAlign: "center" }}>Loading…</p>
+        ) : (
+          <>
+            <div className="catalog-grid">
+              {filtered.map((m) => (
+                <div key={m.id} className="card">
+                  <div className="thumb">
+                    {m.image_url && (
+                      <img
+                        src={m.image_url}
+                        alt={m.name}
+                        loading="lazy"
+                        onError={(e) => (e.currentTarget.style.display = "none")}
+                      />
+                    )}
+                  </div>
+                  <div className="card-body">
+                    <h3>{m.name}</h3>
+                    {m.specs && <p style={{ color: "#666" }}>{m.specs}</p>}
+                    <p style={{ fontWeight: 700 }}>
+                      MRP: ₹{formatINRnoDecimals(m.mrp)}
+                    </p>
+                    {m.category && (
+                      <p style={{ color: "#777", fontSize: 12 }}>{m.category}</p>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
-        )}
-        {msg && (
-          <p style={{ textAlign: "center", color: "crimson", marginTop: 10 }}>
-            {msg}
-          </p>
+              ))}
+            </div>
+
+            {msg && (
+              <p style={{ textAlign: "center", color: "crimson", marginTop: 10 }}>
+                {msg}
+              </p>
+            )}
+          </>
         )}
       </div>
     </div>
