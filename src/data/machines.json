@@ -1,0 +1,12 @@
+[
+  {
+    "id": "N70-ULTRA-PRO-MAX",
+    "name": "N70 Ultra Pro Max",
+    "category": "Rice Mill",
+    "mrp": 250000,
+    "sellPrice": 250000,
+    "costPrice": 115000,
+    "specs": "Production 600–800 kg/h • 3-phase 440V • 15 HP motor • Includes elevator",
+    "image": "/images/n70-ultra-pro-max.jpg"
+  }
+]

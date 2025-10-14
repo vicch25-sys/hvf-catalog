@@ -1,0 +1,68 @@
+/* Reset and layout fix */
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; }
+body { margin: 0; background: #f6f7f9; }
+/* === HVF catalog grid === */
+.catalog-grid {
+  display: grid;
+  gap: 16px;
+}
+
+/* Phone: 2 per row */
+@media (max-width: 640px) {
+  .catalog-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .card img {
+    height: 160px;
+  }
+}
+
+/* Tablet: 3 per row */
+@media (min-width: 641px) and (max-width: 1024px) {
+  .catalog-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  .card img {
+    height: 200px;
+  }
+}
+
+/* Laptop/Desktop: 4 per row */
+@media (min-width: 1025px) {
+  .catalog-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+  .card img {
+    height: 220px;
+  }
+}
+
+.card {
+  background: #fff;
+  border: 1px solid #e5e5e5;
+  border-radius: 12px;
+  overflow: hidden;
+  transition: transform .12s ease, box-shadow .12s ease;
+}
+.card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 22px rgba(0,0,0,0.08);
+}
+.card img {
+  width: 100%;
+  object-fit: cover;
+  display: block;
+  background: #f4f4f4;
+}
+.card-body {
+  padding: 12px;
+  text-align: center;
+}
+.card-body h3 {
+  margin: 6px 0;
+  font-size: 15px;
+}
+.card-body p {
+  margin: 4px 0;
+}
