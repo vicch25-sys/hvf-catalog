@@ -389,20 +389,43 @@ export default function App() {
       </div>
 
       {/* Product grid */}
-      <div style={{ maxWidth: 1100, margin: "0 auto 40px" }}>
-        {loading ? (
-          <p style={{ textAlign: "center" }}>Loading…</p>
-        ) : (
-          <div className="catalog-grid">
-            {filtered.map((m) => (
-              <div key={m.id} className="card">
-                {m.image_url && (
-                  <img
-                    src={m.image_url}
-                    alt={m.name}
-                    onError={(e) => (e.currentTarget.style.display = "none")}
-                  />
-                )}
+<div style={{ maxWidth: 1100, margin: "0 auto 40px" }}>
+  {loading ? (
+    <p style={{ textAlign: "center" }}>Loading…</p>
+  ) : (
+    <div className="catalog-grid">
+      {filtered.map((m) => (
+        <div key={m.id} className="card">
+          <div className="thumb">
+            {m.image_url && (
+              <img
+                src={m.image_url}
+                alt={m.name}
+                loading="lazy"
+                onError={(e) => (e.currentTarget.style.display = "none")}
+              />
+            )}
+          </div>
+          <div className="card-body">
+            <h3>{m.name}</h3>
+            {m.specs && <p style={{ color: "#666" }}>{m.specs}</p>}
+            <p style={{ fontWeight: 700 }}>
+              MRP: ₹{formatINRnoDecimals(m.mrp)}
+            </p>
+            {m.category && (
+              <p style={{ color: "#777", fontSize: 12 }}>{m.category}</p>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  )}
+  {msg && (
+    <p style={{ textAlign: "center", color: "crimson", marginTop: 10 }}>
+      {msg}
+    </p>
+  )}
+</div>
                 <div className="card-body">
                   <h3>{m.name}</h3>
                   {m.specs && <p style={{ color: "#666" }}>{m.specs}</p>}
