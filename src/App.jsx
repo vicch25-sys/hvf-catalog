@@ -35,6 +35,7 @@ export default function App() {
   const [session, setSession] = useState(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [loginEmail, setLoginEmail] = useState("");
+  const [showLogin, setShowLogin] = useState(false); // NEW: gate the login UI
 
   const [form, setForm] = useState({
     name: "",
@@ -76,6 +77,8 @@ export default function App() {
       } else {
         setIsAdmin(false);
       }
+      // hide the email box once login state changes (clean look)
+      setShowLogin(false);
     });
     return () => sub.subscription.unsubscribe();
   }, []);
@@ -137,13 +140,9 @@ export default function App() {
 
     setSaving(true);
     try {
-      /* 1) Upload image to Storage (safe filename, always works regardless of case/spaces) */
+      /* 1) Upload image to Storage (safe filename) */
       const ext = form.imageFile.name.split(".").pop().toLowerCase();
-      const safeBase = form.name
-        .trim()
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, "-")
-        .slice(0, 40);
+      const safeBase = form.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 40);
       const filePath = `products/${Date.now()}-${safeBase}.${ext}`;
 
       const { error: upErr } = await supabase.storage
@@ -164,7 +163,7 @@ export default function App() {
       /* 2) Insert into machines */
       const payload = {
         name: form.name,
-        category: form.category, // keep user’s case; we normalize only for filtering
+        category: form.category,
         mrp: Number(form.mrp),
         sell_price: form.sell_price ? Number(form.sell_price) : null,
         cost_price: form.cost_price ? Number(form.cost_price) : null,
@@ -174,7 +173,6 @@ export default function App() {
       const { error: insErr } = await supabase.from("machines").insert(payload);
       if (insErr) throw new Error("INSERT: " + insErr.message);
 
-      // reset
       setForm({
         name: "",
         category: "",
@@ -239,14 +237,41 @@ export default function App() {
             </>
           ) : (
             <div style={{ display: "inline-flex", gap: 8 }}>
-              <input
-                type="email"
-                placeholder="your@email.com"
-                value={loginEmail}
-                onChange={(e) => setLoginEmail(e.target.value)}
-                style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #ddd" }}
-              />
-              <button onClick={sendLoginLink}>Send Login Link</button>
+              {!showLogin ? (
+                <button
+                  onClick={() => setShowLogin(true)}
+                  style={{
+                    backgroundColor: "#333",
+                    color: "#fff",
+                    padding: "6px 12px",
+                    borderRadius: 6,
+                    cursor: "pointer",
+                  }}
+                >
+                  Login as Admin
+                </button>
+              ) : (
+                <>
+                  <input
+                    type="email"
+                    placeholder="your@email.com"
+                    value={loginEmail}
+                    onChange={(e) => setLoginEmail(e.target.value)}
+                    style={{
+                      padding: "6px 10px",
+                      borderRadius: 6,
+                      border: "1px solid #ddd",
+                    }}
+                  />
+                  <button onClick={sendLoginLink}>Send Login Link</button>
+                  <button
+                    onClick={() => setShowLogin(false)}
+                    style={{ marginLeft: 6 }}
+                  >
+                    Cancel
+                  </button>
+                </>
+              )}
             </div>
           )}
         </div>
