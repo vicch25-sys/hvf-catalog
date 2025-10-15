@@ -1,4 +1,3 @@
-
 import React, { useEffect, useMemo, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 
@@ -16,46 +15,6 @@ const formatINRnoDecimals = (val) =>
     maximumFractionDigits: 0,
   });
 
-/** Compress an image file WITHOUT changing pixel dimensions.
- * Tries WebP first (for smaller size); if browser can’t, falls back to JPEG.
- * Returns { blob, filename, mime }.
- */
-async function compressImageKeepSize(file, quality = 0.82) {
-  const bitmap = await createImageBitmap(file);
-  const canvas = document.createElement("canvas");
-  canvas.width = bitmap.width;
-  canvas.height = bitmap.height;
-  const ctx = canvas.getContext("2d");
-  ctx.drawImage(bitmap, 0, 0);
-
-  // detect webp support in current browser/canvas
-  const webpTest = canvas.toDataURL("image/webp").startsWith("data:image/webp");
-  const tryMime = webpTest ? "image/webp" : "image/jpeg";
-  const ext = webpTest ? ".webp" : ".jpg";
-
-  const blob = await new Promise((resolve) =>
-    canvas.toBlob((b) => resolve(b), tryMime, quality)
-  );
-
-  const base = file.name.replace(/\.[^.]+$/g, "");
-  return { blob, filename: `${base}${ext}`, mime: tryMime };
-}
-
-/** Compress an arbitrary image Blob to JPEG (keeps pixel dimensions).
- * Used for already-uploaded images so we can overwrite same .jpg/.png path safely.
- */
-async function compressBlobToJpeg(blob, quality = 0.82) {
-  const img = await createImageBitmap(blob);
-  const canvas = document.createElement("canvas");
-  canvas.width = img.width;
-  canvas.height = img.height;
-  const ctx = canvas.getContext("2d");
-  ctx.drawImage(img, 0, 0);
-  return await new Promise((resolve) =>
-    canvas.toBlob((b) => resolve(b), "image/jpeg", quality)
-  );
-}
-
 /* --- App --- */
 export default function App() {
   // data
@@ -70,8 +29,11 @@ export default function App() {
   // auth
   const [session, setSession] = useState(null);
   const [isAdmin, setIsAdmin] = useState(false);
+
+  // login UI (top-right)
   const [loginEmail, setLoginEmail] = useState("");
-  const [showLogin, setShowLogin] = useState(false);
+  const [showLoginMenu, setShowLoginMenu] = useState(false);
+  const [showAdminBox, setShowAdminBox] = useState(false); // reveal email input inside menu
 
   // staff quick view (PIN 2525)
   const [staffMode, setStaffMode] = useState(false);
@@ -97,7 +59,7 @@ export default function App() {
   });
   const [saving, setSaving] = useState(false);
 
-  // optimize existing
+  // (optional) existing-image optimizer state from earlier version
   const [optimizing, setOptimizing] = useState(false);
 
   /* ---------- auth ---------- */
@@ -130,7 +92,9 @@ export default function App() {
       } else {
         setIsAdmin(false);
       }
-      setShowLogin(false);
+      // tidy the menu when auth changes
+      setShowLoginMenu(false);
+      setShowAdminBox(false);
     });
     return () => sub.subscription.unsubscribe();
   }, []);
@@ -147,6 +111,8 @@ export default function App() {
   const signOut = async () => {
     await supabase.auth.signOut();
     setIsAdmin(false);
+    setShowLoginMenu(false);
+    setShowAdminBox(false);
   };
 
   /* ---------- load data ---------- */
@@ -204,6 +170,22 @@ export default function App() {
     else setForm((f) => ({ ...f, [name]: value }));
   };
 
+  // (keeps earlier on-upload compression if you had it; otherwise native upload)
+  async function compressImageKeepSize(file, quality = 0.82) {
+    const bitmap = await createImageBitmap(file);
+    const canvas = document.createElement("canvas");
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(bitmap, 0, 0);
+
+    const webpOk = canvas.toDataURL("image/webp").startsWith("data:image/webp");
+    const mime = webpOk ? "image/webp" : "image/jpeg";
+    return await new Promise((resolve) =>
+      canvas.toBlob((b) => resolve(b), mime, quality)
+    );
+  }
+
   const onSave = async (e) => {
     e.preventDefault();
     if (!isAdmin) return alert("Admins only.");
@@ -213,24 +195,23 @@ export default function App() {
 
     setSaving(true);
     try {
-      // 1) compress WITHOUT changing dimensions (client-side)
-      const compressed = await compressImageKeepSize(form.imageFile, 0.82);
+      // --- compress client-side without changing dimensions (safe to remove if not needed) ---
+      const compressedBlob = await compressImageKeepSize(form.imageFile, 0.82);
+      const ext = compressedBlob.type === "image/webp" ? "webp" : "jpg";
 
-      // 2) upload image (safe filename)
+      // 1) upload image (safe filename)
       const safeBase = form.name
         .trim()
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, "-")
         .slice(0, 40);
-      // keep original extension logic based on the compressed mime
-      const ext = compressed.mime === "image/webp" ? "webp" : "jpg";
       const filePath = `products/${Date.now()}-${safeBase}.${ext}`;
 
       const { error: upErr } = await supabase.storage
         .from("images")
-        .upload(filePath, compressed.blob, {
+        .upload(filePath, compressedBlob, {
           cacheControl: "3600",
-          contentType: compressed.mime,
+          contentType: compressedBlob.type,
           upsert: true,
         });
       if (upErr) throw new Error("UPLOAD: " + upErr.message);
@@ -241,7 +222,7 @@ export default function App() {
       if (urlErr) throw new Error("URL: " + urlErr.message);
       const image_url = urlData.publicUrl;
 
-      // 3) insert record
+      // 2) insert record
       const payload = {
         name: form.name,
         category: form.category,
@@ -264,60 +245,13 @@ export default function App() {
         imageFile: null,
       });
       await loadMachines();
-      alert("Product added ✅ (image optimized)");
+      alert("Product added ✅");
     } catch (err) {
       console.error(err);
       alert("Failed to add product: " + err.message);
     } finally {
       setSaving(false);
     }
-  };
-
-  /* ---------- optimize existing images (admin) ---------- */
-  const optimizeAllImages = async () => {
-    if (!isAdmin) return alert("Admins only.");
-    if (!confirm("Optimize all existing product images now?")) return;
-
-    setOptimizing(true);
-    let ok = 0,
-      fail = 0;
-
-    // This prefix lets us recover the storage path from the public URL
-    const publicPrefix = `${supabaseUrl}/storage/v1/object/public/images/`;
-
-    for (const m of items) {
-      try {
-        if (!m.image_url || !m.image_url.startsWith(publicPrefix)) continue;
-
-        const relPath = m.image_url.slice(publicPrefix.length); // e.g. products/123-name.jpg
-        // 1) download current image
-        const res = await fetch(m.image_url, { cache: "no-cache" });
-        if (!res.ok) throw new Error(`fetch ${res.status}`);
-        const blob = await res.blob();
-
-        // 2) recompress to JPEG (keep dimensions) so we can safely overwrite same path
-        const jpegBlob = await compressBlobToJpeg(blob, 0.82);
-
-        // 3) upload with upsert to overwrite in place (same URL keeps working)
-        const { error: upErr } = await supabase.storage
-          .from("images")
-          .upload(relPath, jpegBlob, {
-            upsert: true,
-            contentType: "image/jpeg",
-            cacheControl: "3600",
-          });
-        if (upErr) throw upErr;
-        ok++;
-      } catch (e) {
-        console.error("Optimize failed for", m.image_url, e);
-        fail++;
-      }
-    }
-
-    setOptimizing(false);
-    alert(`Optimization finished. Success: ${ok}${fail ? `, Failed: ${fail}` : ""}`);
-    // No DB changes needed; same URLs.
-    await loadMachines();
   };
 
   /* ---------- UI ---------- */
@@ -327,10 +261,175 @@ export default function App() {
         fontFamily: "Arial, sans-serif",
         minHeight: "100vh",
         background: "linear-gradient(to bottom right,#f8f9fa,#eef2f7)",
+        position: "relative",
       }}
     >
-      {/* Header */}
-      <div style={{ textAlign: "center", marginBottom: 18 }}>
+      {/* TOP-RIGHT LOGIN AREA */}
+      <div
+        style={{
+          position: "fixed",
+          top: 16, // decent gap from the top
+          right: 16, // decent gap from the right
+          zIndex: 1000,
+        }}
+      >
+        {!session ? (
+          <div style={{ position: "relative" }}>
+            <button
+              onClick={() => {
+                setShowLoginMenu((s) => !s);
+                setShowAdminBox(false);
+              }}
+              style={{
+                backgroundColor: "#333",
+                color: "#fff",
+                padding: "8px 14px",
+                borderRadius: 8,
+                cursor: "pointer",
+                border: "1px solid #222",
+              }}
+            >
+              Login
+            </button>
+
+            {showLoginMenu && (
+              <div
+                style={{
+                  position: "absolute",
+                  top: 44,
+                  right: 0,
+                  background: "#fff",
+                  border: "1px solid #e5e7eb",
+                  borderRadius: 10,
+                  boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+                  width: 280,
+                  padding: 10,
+                }}
+              >
+                {/* Staff quick login */}
+                <button
+                  onClick={toggleStaffLogin}
+                  style={{
+                    width: "100%",
+                    padding: "8px 10px",
+                    borderRadius: 8,
+                    border: "1px solid #ddd",
+                    background: staffMode ? "#ffeaea" : "#f9f9f9",
+                    color: staffMode ? "#b30000" : "#333",
+                    marginBottom: 8,
+                    cursor: "pointer",
+                  }}
+                >
+                  {staffMode ? "Logout Staff View" : "Login as Staff (PIN)"}
+                </button>
+
+                {/* Admin login */}
+                {!showAdminBox ? (
+                  <button
+                    onClick={() => setShowAdminBox(true)}
+                    style={{
+                      width: "100%",
+                      padding: "8px 10px",
+                      borderRadius: 8,
+                      border: "1px solid #ddd",
+                      background: "#f9f9f9",
+                      color: "#333",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Login as Admin
+                  </button>
+                ) : (
+                  <div style={{ display: "grid", gap: 8 }}>
+                    <input
+                      type="email"
+                      placeholder="your@email.com"
+                      value={loginEmail}
+                      onChange={(e) => setLoginEmail(e.target.value)}
+                      style={{
+                        padding: "8px 10px",
+                        borderRadius: 8,
+                        border: "1px solid #ddd",
+                      }}
+                    />
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button
+                        onClick={sendLoginLink}
+                        style={{
+                          flex: 1,
+                          padding: "8px 10px",
+                          borderRadius: 8,
+                          border: "1px solid #1677ff",
+                          background: "#1677ff",
+                          color: "#fff",
+                          cursor: "pointer",
+                        }}
+                      >
+                        Send Login Link
+                      </button>
+                      <button
+                        onClick={() => setShowAdminBox(false)}
+                        style={{
+                          padding: "8px 10px",
+                          borderRadius: 8,
+                          border: "1px solid #ddd",
+                          background: "#fff",
+                          color: "#333",
+                          cursor: "pointer",
+                        }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        ) : (
+          // When logged in (admin session)
+          <div
+            style={{
+              display: "flex",
+              gap: 8,
+              alignItems: "center",
+              background: "#fff",
+              border: "1px solid #e5e7eb",
+              borderRadius: 10,
+              padding: "6px 8px",
+              boxShadow: "0 8px 24px rgba(0,0,0,0.06)",
+            }}
+          >
+            <span
+              style={{
+                padding: "4px 8px",
+                borderRadius: 6,
+                background: isAdmin ? "#e8f6ed" : "#f7e8e8",
+                color: isAdmin ? "#1f7a3f" : "#b11e1e",
+                fontSize: 12,
+              }}
+            >
+              {isAdmin ? "Admin: ON" : "Not admin"}
+            </span>
+            <button
+              onClick={signOut}
+              style={{
+                background: "#f9f9f9",
+                color: "#333",
+                padding: "6px 10px",
+                borderRadius: 8,
+                cursor: "pointer",
+                border: "1px solid #ddd",
+              }}
+            >
+              Sign Out
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Header (centered brand) */}
+      <div style={{ textAlign: "center", marginBottom: 18, paddingTop: 12 }}>
         <img
           src="/hvf-logo.png"
           alt="HVF Agency"
@@ -340,81 +439,6 @@ export default function App() {
         <p style={{ color: "#777", marginTop: 6 }}>
           by HVF Agency, Moranhat, Assam
         </p>
-
-        {/* Auth Row (Admin + Staff quick view) */}
-        <div style={{ marginTop: 8 }}>
-          {/* Staff toggle always visible */}
-          <button
-            onClick={toggleStaffLogin}
-            style={{
-              marginRight: 8,
-              background: staffMode ? "#ffeaea" : "#f1f1f1",
-              color: staffMode ? "#b30000" : "#333",
-            }}
-          >
-            {staffMode ? "Logout Staff View" : "Login as Staff (PIN)"}
-          </button>
-
-          {session ? (
-            <>
-              <button onClick={signOut} style={{ marginRight: 8 }}>
-                Sign Out
-              </button>
-              <span
-                style={{
-                  padding: "4px 8px",
-                  borderRadius: 6,
-                  background: isAdmin ? "#e8f6ed" : "#f7e8e8",
-                  color: isAdmin ? "#1f7a3f" : "#b11e1e",
-                  marginRight: 8,
-                }}
-              >
-                {isAdmin ? "Admin: ON" : "Not admin"}
-              </span>
-              <span style={{ color: "#777", fontSize: 12 }}>
-                UID: {session.user?.id?.slice(0, 8)}…
-              </span>
-            </>
-          ) : (
-            <div style={{ display: "inline-flex", gap: 8 }}>
-              {!showLogin ? (
-                <button
-                  onClick={() => setShowLogin(true)}
-                  style={{
-                    backgroundColor: "#333",
-                    color: "#fff",
-                    padding: "6px 12px",
-                    borderRadius: 6,
-                    cursor: "pointer",
-                  }}
-                >
-                  Login as Admin
-                </button>
-              ) : (
-                <>
-                  <input
-                    type="email"
-                    placeholder="your@email.com"
-                    value={loginEmail}
-                    onChange={(e) => setLoginEmail(e.target.value)}
-                    style={{
-                      padding: "6px 10px",
-                      borderRadius: 6,
-                      border: "1px solid #ddd",
-                    }}
-                  />
-                  <button onClick={sendLoginLink}>Send Login Link</button>
-                  <button
-                    onClick={() => setShowLogin(false)}
-                    style={{ marginLeft: 6 }}
-                  >
-                    Cancel
-                  </button>
-                </>
-              )}
-            </div>
-          )}
-        </div>
       </div>
 
       {/* Admin tools row */}
@@ -424,14 +448,11 @@ export default function App() {
             maxWidth: 1100,
             margin: "0 auto 10px",
             display: "flex",
-            justifyContent: "space-between",
+            justifyContent: "flex-end",
             gap: 8,
           }}
         >
           <button onClick={onAddCategory}>+ Add Category</button>
-          <button onClick={optimizing ? undefined : optimizeAllImages} disabled={optimizing}>
-            {optimizing ? "Optimizing images…" : "Optimize existing images"}
-          </button>
         </div>
       )}
 
