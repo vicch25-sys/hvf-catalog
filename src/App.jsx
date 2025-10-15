@@ -15,26 +15,27 @@ const formatINRnoDecimals = (val) =>
     maximumFractionDigits: 0,
   });
 
-/* --- App --- */
 export default function App() {
+  // data
   const [items, setItems] = useState([]);
-  const [categories, setCategories] = useState([]); // dynamic from DB
+  const [categories, setCategories] = useState([]);
   const [category, setCategory] = useState("All");
+
+  // ui / status
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState("");
 
+  // auth
   const [session, setSession] = useState(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [loginEmail, setLoginEmail] = useState("");
+  const [showLogin, setShowLogin] = useState(false);
 
-  // Staff view (PIN: 2525) — shows selling price in red
+  // staff pin auth
   const [isStaff, setIsStaff] = useState(false);
   const STAFF_PIN = "2525";
 
-  // hide/show admin email login box
-  const [showLogin, setShowLogin] = useState(false);
-  const [loginEmail, setLoginEmail] = useState("");
-
-  // Add-item form
+  // add-product form
   const [form, setForm] = useState({
     name: "",
     category: "",
@@ -44,8 +45,9 @@ export default function App() {
     specs: "",
     imageFile: null,
   });
+  const [saving, setSaving] = useState(false);
 
-  /* --- Auth: read session and is_admin --- */
+  /* ---------- auth ---------- */
   useEffect(() => {
     const init = async () => {
       const { data } = await supabase.auth.getSession();
@@ -80,7 +82,33 @@ export default function App() {
     return () => sub.subscription.unsubscribe();
   }, []);
 
-  /* --- Data: load machines & categories --- */
+  const sendLoginLink = async () => {
+    if (!loginEmail) return alert("Enter email first.");
+    const { error } = await supabase.auth.signInWithOtp({
+      email: loginEmail,
+      options: { emailRedirectTo: window.location.origin },
+    });
+    if (error) alert(error.message);
+    else alert("Login link sent. Check your email.");
+  };
+
+  const signOut = async () => {
+    await supabase.auth.signOut();
+    setIsAdmin(false);
+  };
+
+  /* ---------- staff pin ---------- */
+  const askStaffPin = () => {
+    const pin = prompt("Enter 4-digit staff PIN:");
+    if (pin === STAFF_PIN) {
+      setIsStaff(true);
+    } else if (pin != null) {
+      alert("Wrong PIN.");
+    }
+  };
+  const staffSignOut = () => setIsStaff(false);
+
+  /* ---------- load data ---------- */
   const loadMachines = async () => {
     setLoading(true);
     const { data, error } = await supabase
@@ -97,7 +125,7 @@ export default function App() {
       .from("categories")
       .select("name")
       .order("name", { ascending: true });
-    if (!error) setCategories((data || []).map((d) => d.name));
+    if (!error) setCategories((data || []).map((r) => r.name));
   };
 
   useEffect(() => {
@@ -105,7 +133,7 @@ export default function App() {
     loadCategories();
   }, []);
 
-  /* --- Filters --- */
+  /* ---------- filters ---------- */
   const filtered = useMemo(() => {
     if (category === "All") return items;
     return items.filter(
@@ -113,59 +141,27 @@ export default function App() {
     );
   }, [items, category]);
 
-  /* --- Auth actions --- */
-  const sendLoginLink = async () => {
-    if (!loginEmail) return alert("Enter email first.");
-    const { error } = await supabase.auth.signInWithOtp({
-      email: loginEmail,
-      options: { emailRedirectTo: window.location.origin },
-    });
-    if (error) alert(error.message);
-    else alert("Login link sent. Check your email.");
-  };
-
-  const signOut = async () => {
-    await supabase.auth.signOut();
-    setIsAdmin(false);
-  };
-
-  /* --- Staff PIN --- */
-  const askStaffPin = () => {
-    const pin = prompt("Enter 4-digit staff PIN:");
-    if (pin === STAFF_PIN) {
-      setIsStaff(true);
-    } else if (pin != null) {
-      alert("Wrong PIN.");
-    }
-  };
-  const staffSignOut = () => setIsStaff(false);
-
-  /* --- Add Category (admin) --- */
+  /* ---------- add category (admin) ---------- */
   const onAddCategory = async () => {
-    const name = prompt("New category name:");
+    const name = (prompt("New category name:") || "").trim();
     if (!name) return;
-    const trimmed = name.trim();
-    if (!trimmed) return;
 
-    const { error } = await supabase
-      .from("categories")
-      .insert({ name: trimmed });
+    const { error } = await supabase.from("categories").insert({ name });
     if (error) {
       alert(error.message);
       return;
     }
     await loadCategories();
-    alert("Category added.");
+    setCategory("All");
+    alert("Category added ✅");
   };
 
-  /* --- Form handlers --- */
+  /* ---------- add product (admin) ---------- */
   const onChange = (e) => {
     const { name, value, files } = e.target;
     if (files) setForm((f) => ({ ...f, imageFile: files[0] || null }));
     else setForm((f) => ({ ...f, [name]: value }));
   };
-
-  const [saving, setSaving] = useState(false);
 
   const onSave = async (e) => {
     e.preventDefault();
@@ -176,7 +172,6 @@ export default function App() {
 
     setSaving(true);
     try {
-      /* 1) Upload image to Storage (safe filename) */
       const ext = form.imageFile.name.split(".").pop().toLowerCase();
       const safeBase = form.name
         .trim()
@@ -200,7 +195,6 @@ export default function App() {
       if (urlErr) throw new Error("URL: " + urlErr.message);
       const image_url = urlData.publicUrl;
 
-      /* 2) Insert into machines */
       const payload = {
         name: form.name,
         category: form.category,
@@ -232,7 +226,7 @@ export default function App() {
     }
   };
 
-  /* --- UI --- */
+  /* ---------- UI ---------- */
   return (
     <div
       style={{
@@ -254,8 +248,7 @@ export default function App() {
         </p>
 
         {/* Auth Row */}
-        <div style={{ marginTop: 10, display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
-          {/* Admin segment */}
+        <div style={{ marginTop: 8, display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
           {session ? (
             <>
               <button onClick={signOut}>Sign Out</button>
@@ -267,7 +260,7 @@ export default function App() {
                   color: isAdmin ? "#1f7a3f" : "#b11e1e",
                 }}
               >
-                Admin: {isAdmin ? "ON" : "OFF"}
+                {isAdmin ? "Admin: ON" : "Not admin"}
               </span>
               <span style={{ color: "#777", fontSize: 12 }}>
                 UID: {session.user?.id?.slice(0, 8)}…
@@ -308,7 +301,6 @@ export default function App() {
             </>
           )}
 
-          {/* Staff segment */}
           {!isStaff ? (
             <button onClick={askStaffPin}>Login as Staff</button>
           ) : (
@@ -317,101 +309,102 @@ export default function App() {
         </div>
       </div>
 
-      {/* Admin Add Form + Add Category */}
+      {/* Admin Add Category button */}
       {isAdmin && (
-        <>
-          <div style={{ maxWidth: 1100, margin: "0 auto 8px", textAlign: "right" }}>
-            <button onClick={onAddCategory}>+ Add Category</button>
-          </div>
+        <div style={{ maxWidth: 1100, margin: "0 auto 10px", textAlign: "right" }}>
+          <button onClick={onAddCategory}>+ Add Category</button>
+        </div>
+      )}
 
-          <form
-            onSubmit={onSave}
+      {/* Admin Add Product Form */}
+      {isAdmin && (
+        <form
+          onSubmit={onSave}
+          style={{
+            maxWidth: 1100,
+            margin: "0 auto 18px",
+            background: "#fff",
+            padding: 12,
+            borderRadius: 10,
+            border: "1px solid #e8e8e8",
+          }}
+        >
+          <div
             style={{
-              maxWidth: 1100,
-              margin: "0 auto 18px",
-              background: "#fff",
-              padding: 12,
-              borderRadius: 10,
-              border: "1px solid #e8e8e8",
+              display: "grid",
+              gridTemplateColumns: "1.2fr 1.2fr 1fr 1fr 1fr",
+              gap: 10,
+              alignItems: "center",
             }}
           >
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "1.2fr 1.2fr 1fr 1fr 1fr",
-                gap: 10,
-                alignItems: "center",
-              }}
+            <input
+              name="name"
+              placeholder="Name *"
+              value={form.name}
+              onChange={onChange}
+              required
+            />
+            <select
+              name="category"
+              value={form.category}
+              onChange={onChange}
+              required
             >
-              <input
-                name="name"
-                placeholder="Name *"
-                value={form.name}
-                onChange={onChange}
-                required
-              />
-              <select
-                name="category"
-                value={form.category}
-                onChange={onChange}
-                required
-              >
-                <option value="">Select category *</option>
-                {categories.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </select>
-              <input
-                name="mrp"
-                type="number"
-                placeholder="MRP *"
-                value={form.mrp}
-                onChange={onChange}
-                required
-              />
-              <input
-                name="sell_price"
-                type="number"
-                placeholder="Selling Price"
-                value={form.sell_price}
-                onChange={onChange}
-              />
-              <input
-                name="cost_price"
-                type="number"
-                placeholder="Cost Price"
-                value={form.cost_price}
-                onChange={onChange}
-              />
-            </div>
+              <option value="">Select category *</option>
+              {categories.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+            <input
+              name="mrp"
+              type="number"
+              placeholder="MRP *"
+              value={form.mrp}
+              onChange={onChange}
+              required
+            />
+            <input
+              name="sell_price"
+              type="number"
+              placeholder="Selling Price"
+              value={form.sell_price}
+              onChange={onChange}
+            />
+            <input
+              name="cost_price"
+              type="number"
+              placeholder="Cost Price"
+              value={form.cost_price}
+              onChange={onChange}
+            />
+          </div>
 
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "1.5fr 1fr",
-                gap: 10,
-                marginTop: 10,
-                alignItems: "center",
-              }}
-            >
-              <input
-                name="specs"
-                placeholder="Specs / Description"
-                value={form.specs}
-                onChange={onChange}
-              />
-              <input type="file" accept="image/*" onChange={onChange} />
-            </div>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1.5fr 1fr",
+              gap: 10,
+              marginTop: 10,
+              alignItems: "center",
+            }}
+          >
+            <input
+              name="specs"
+              placeholder="Specs / Description"
+              value={form.specs}
+              onChange={onChange}
+            />
+            <input type="file" accept="image/*" onChange={onChange} />
+          </div>
 
-            <div style={{ marginTop: 10, textAlign: "center" }}>
-              <button type="submit" disabled={saving}>
-                {saving ? "Saving…" : "Save Product"}
-              </button>
-            </div>
-          </form>
-        </>
+          <div style={{ marginTop: 10, textAlign: "center" }}>
+            <button type="submit" disabled={saving}>
+              {saving ? "Saving…" : "Save Product"}
+            </button>
+          </div>
+        </form>
       )}
 
       {/* Category pills */}
@@ -442,8 +435,21 @@ export default function App() {
           <div className="catalog-grid">
             {filtered.map((m) => (
               <div key={m.id} className="card">
-                {/* PERFECT FIT: white background, no cropping */}
-                <div className="thumb">
+                {/* Image: perfectly centered on pure white, no crop */}
+                <div
+                  className="thumb"
+                  style={{
+                    height: 240,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    background: "#ffffff",
+                    borderBottom: "1px solid #eee",
+                    borderTopLeftRadius: 10,
+                    borderTopRightRadius: 10,
+                    overflow: "hidden",
+                  }}
+                >
                   {m.image_url && (
                     <img
                       src={m.image_url}
@@ -465,13 +471,8 @@ export default function App() {
                 <div className="card-body">
                   <h3>{m.name}</h3>
                   {m.specs && <p style={{ color: "#666" }}>{m.specs}</p>}
+                  <p style={{ fontWeight: 700 }}>₹{formatINRnoDecimals(m.mrp)}</p>
 
-                  {/* MRP: always show */}
-                  <p style={{ fontWeight: 700 }}>
-                    ₹{formatINRnoDecimals(m.mrp)}
-                  </p>
-
-                  {/* Selling price: only for staff/admin */}
                   {(isAdmin || isStaff) && m.sell_price && (
                     <p style={{ color: "red", fontWeight: 600 }}>
                       ₹{formatINRnoDecimals(m.sell_price)}
