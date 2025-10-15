@@ -598,10 +598,10 @@ export default function App() {
                   <div style={{ fontSize: 12, color: "#666" }}>Phone</div>
                   <input value={qHeader.phone} onChange={(e) => setQHeader({ ...qHeader, phone: e.target.value })} />
                 </label>
-                <label style={{ gridColumn: "1 / span 2" }}>
-                  <div style={{ fontSize: 12, color: "#666" }}>Address</div>
-                  <input value={qHeader.address} onChange={(e) => setQHeader({ ...qHeader, address: e.target.value })} />
-                </label>
+                <div style={{ gridColumn: "1 / span 2", marginTop: 8, fontSize: 14 }}>
+  Dear Sir/Madam,<br />
+  With reference to your enquiry we are pleased to offer you as under:
+</div>
                 <label style={{ gridColumn: "1 / span 2" }}>
                   <div style={{ fontSize: 12, color: "#666" }}>Subject</div>
                   <input value={qHeader.subject} onChange={(e) => setQHeader({ ...qHeader, subject: e.target.value })} />
