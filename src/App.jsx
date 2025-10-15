@@ -1,3 +1,4 @@
+
 import React, { useEffect, useMemo, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 
@@ -14,6 +15,46 @@ const formatINRnoDecimals = (val) =>
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   });
+
+/** Compress an image file WITHOUT changing pixel dimensions.
+ * Tries WebP first (for smaller size); if browser can’t, falls back to JPEG.
+ * Returns { blob, filename, mime }.
+ */
+async function compressImageKeepSize(file, quality = 0.82) {
+  const bitmap = await createImageBitmap(file);
+  const canvas = document.createElement("canvas");
+  canvas.width = bitmap.width;
+  canvas.height = bitmap.height;
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(bitmap, 0, 0);
+
+  // detect webp support in current browser/canvas
+  const webpTest = canvas.toDataURL("image/webp").startsWith("data:image/webp");
+  const tryMime = webpTest ? "image/webp" : "image/jpeg";
+  const ext = webpTest ? ".webp" : ".jpg";
+
+  const blob = await new Promise((resolve) =>
+    canvas.toBlob((b) => resolve(b), tryMime, quality)
+  );
+
+  const base = file.name.replace(/\.[^.]+$/g, "");
+  return { blob, filename: `${base}${ext}`, mime: tryMime };
+}
+
+/** Compress an arbitrary image Blob to JPEG (keeps pixel dimensions).
+ * Used for already-uploaded images so we can overwrite same .jpg/.png path safely.
+ */
+async function compressBlobToJpeg(blob, quality = 0.82) {
+  const img = await createImageBitmap(blob);
+  const canvas = document.createElement("canvas");
+  canvas.width = img.width;
+  canvas.height = img.height;
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(img, 0, 0);
+  return await new Promise((resolve) =>
+    canvas.toBlob((b) => resolve(b), "image/jpeg", quality)
+  );
+}
 
 /* --- App --- */
 export default function App() {
@@ -55,6 +96,9 @@ export default function App() {
     imageFile: null,
   });
   const [saving, setSaving] = useState(false);
+
+  // optimize existing
+  const [optimizing, setOptimizing] = useState(false);
 
   /* ---------- auth ---------- */
   useEffect(() => {
@@ -169,20 +213,24 @@ export default function App() {
 
     setSaving(true);
     try {
-      // 1) upload image (safe filename)
-      const ext = form.imageFile.name.split(".").pop().toLowerCase();
+      // 1) compress WITHOUT changing dimensions (client-side)
+      const compressed = await compressImageKeepSize(form.imageFile, 0.82);
+
+      // 2) upload image (safe filename)
       const safeBase = form.name
         .trim()
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, "-")
         .slice(0, 40);
+      // keep original extension logic based on the compressed mime
+      const ext = compressed.mime === "image/webp" ? "webp" : "jpg";
       const filePath = `products/${Date.now()}-${safeBase}.${ext}`;
 
       const { error: upErr } = await supabase.storage
         .from("images")
-        .upload(filePath, form.imageFile, {
+        .upload(filePath, compressed.blob, {
           cacheControl: "3600",
-          contentType: form.imageFile.type || "image/jpeg",
+          contentType: compressed.mime,
           upsert: true,
         });
       if (upErr) throw new Error("UPLOAD: " + upErr.message);
@@ -193,7 +241,7 @@ export default function App() {
       if (urlErr) throw new Error("URL: " + urlErr.message);
       const image_url = urlData.publicUrl;
 
-      // 2) insert record
+      // 3) insert record
       const payload = {
         name: form.name,
         category: form.category,
@@ -216,13 +264,60 @@ export default function App() {
         imageFile: null,
       });
       await loadMachines();
-      alert("Product added ✅");
+      alert("Product added ✅ (image optimized)");
     } catch (err) {
       console.error(err);
       alert("Failed to add product: " + err.message);
     } finally {
       setSaving(false);
     }
+  };
+
+  /* ---------- optimize existing images (admin) ---------- */
+  const optimizeAllImages = async () => {
+    if (!isAdmin) return alert("Admins only.");
+    if (!confirm("Optimize all existing product images now?")) return;
+
+    setOptimizing(true);
+    let ok = 0,
+      fail = 0;
+
+    // This prefix lets us recover the storage path from the public URL
+    const publicPrefix = `${supabaseUrl}/storage/v1/object/public/images/`;
+
+    for (const m of items) {
+      try {
+        if (!m.image_url || !m.image_url.startsWith(publicPrefix)) continue;
+
+        const relPath = m.image_url.slice(publicPrefix.length); // e.g. products/123-name.jpg
+        // 1) download current image
+        const res = await fetch(m.image_url, { cache: "no-cache" });
+        if (!res.ok) throw new Error(`fetch ${res.status}`);
+        const blob = await res.blob();
+
+        // 2) recompress to JPEG (keep dimensions) so we can safely overwrite same path
+        const jpegBlob = await compressBlobToJpeg(blob, 0.82);
+
+        // 3) upload with upsert to overwrite in place (same URL keeps working)
+        const { error: upErr } = await supabase.storage
+          .from("images")
+          .upload(relPath, jpegBlob, {
+            upsert: true,
+            contentType: "image/jpeg",
+            cacheControl: "3600",
+          });
+        if (upErr) throw upErr;
+        ok++;
+      } catch (e) {
+        console.error("Optimize failed for", m.image_url, e);
+        fail++;
+      }
+    }
+
+    setOptimizing(false);
+    alert(`Optimization finished. Success: ${ok}${fail ? `, Failed: ${fail}` : ""}`);
+    // No DB changes needed; same URLs.
+    await loadMachines();
   };
 
   /* ---------- UI ---------- */
@@ -322,10 +417,21 @@ export default function App() {
         </div>
       </div>
 
-      {/* Admin Add Category button */}
+      {/* Admin tools row */}
       {isAdmin && (
-        <div style={{ maxWidth: 1100, margin: "0 auto 10px", textAlign: "right" }}>
+        <div
+          style={{
+            maxWidth: 1100,
+            margin: "0 auto 10px",
+            display: "flex",
+            justifyContent: "space-between",
+            gap: 8,
+          }}
+        >
           <button onClick={onAddCategory}>+ Add Category</button>
+          <button onClick={optimizing ? undefined : optimizeAllImages} disabled={optimizing}>
+            {optimizing ? "Optimizing images…" : "Optimize existing images"}
+          </button>
         </div>
       )}
 
