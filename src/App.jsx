@@ -2,11 +2,11 @@ import React, { useEffect, useMemo, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 
 /* --- Supabase client --- */
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-const supabase = createClient(supabaseUrl, supabaseKey, {
-  auth: { persistSession: true, autoRefreshToken: true },
-});
+const supabase = createClient(
+  import.meta.env.VITE_SUPABASE_URL,
+  import.meta.env.VITE_SUPABASE_ANON_KEY,
+  { auth: { persistSession: true, autoRefreshToken: true } }
+);
 
 /* --- Helpers --- */
 const formatINRnoDecimals = (val) =>
@@ -15,28 +15,21 @@ const formatINRnoDecimals = (val) =>
     maximumFractionDigits: 0,
   });
 
-const CATEGORIES = [
-  "Rice mills and machines",
-  "Food processing machinery",
-  "Coding and packaging machinery",
-  "Power Tools",
-  "Lawn and Garden Tools",
-  "Weeders and tillers",
-  "Other machinery",
-];
-
-/* --- App --- */
 export default function App() {
+  /* data */
   const [items, setItems] = useState([]);
+  const [categories, setCategories] = useState([]); // dynamic!
   const [category, setCategory] = useState("All");
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState("");
 
+  /* auth */
   const [session, setSession] = useState(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [loginEmail, setLoginEmail] = useState("");
   const [showLogin, setShowLogin] = useState(false);
 
+  /* add product form */
   const [form, setForm] = useState({
     name: "",
     category: "",
@@ -46,17 +39,25 @@ export default function App() {
     specs: "",
     imageFile: null,
   });
+  const [saving, setSaving] = useState(false);
 
-  /* --- Auth: read session and is_admin --- */
+  /* add category */
+  const [showCatBox, setShowCatBox] = useState(false);
+  const [newCat, setNewCat] = useState("");
+  const [addingCat, setAddingCat] = useState(false);
+
+  /* ---- auth bootstrap ---- */
   useEffect(() => {
     const init = async () => {
       const { data } = await supabase.auth.getSession();
       setSession(data.session ?? null);
-      if (data.session?.user?.id) {
+
+      const uid = data.session?.user?.id;
+      if (uid) {
         const { data: prof } = await supabase
           .from("profiles")
           .select("is_admin")
-          .eq("user_id", data.session.user.id)
+          .eq("user_id", uid)
           .maybeSingle();
         setIsAdmin(!!prof?.is_admin);
       } else {
@@ -82,7 +83,7 @@ export default function App() {
     return () => sub.subscription.unsubscribe();
   }, []);
 
-  /* --- Data: load machines --- */
+  /* ---- load data ---- */
   const loadMachines = async () => {
     setLoading(true);
     const { data, error } = await supabase
@@ -94,11 +95,20 @@ export default function App() {
     setLoading(false);
   };
 
+  const loadCategories = async () => {
+    const { data, error } = await supabase
+      .from("categories")
+      .select("name")
+      .order("name", { ascending: true });
+    if (!error) setCategories(data?.map((d) => d.name) || []);
+  };
+
   useEffect(() => {
     loadMachines();
+    loadCategories();
   }, []);
 
-  /* --- Filters --- */
+  /* ---- filter ---- */
   const filtered = useMemo(() => {
     if (category === "All") return items;
     return items.filter(
@@ -106,7 +116,7 @@ export default function App() {
     );
   }, [items, category]);
 
-  /* --- Auth actions --- */
+  /* ---- auth actions ---- */
   const sendLoginLink = async () => {
     if (!loginEmail) return alert("Enter email first.");
     const { error } = await supabase.auth.signInWithOtp({
@@ -121,14 +131,12 @@ export default function App() {
     setIsAdmin(false);
   };
 
-  /* --- Form handlers --- */
+  /* ---- form handlers ---- */
   const onChange = (e) => {
     const { name, value, files } = e.target;
     if (files) setForm((f) => ({ ...f, imageFile: files[0] || null }));
     else setForm((f) => ({ ...f, [name]: value }));
   };
-
-  const [saving, setSaving] = useState(false);
 
   const onSave = async (e) => {
     e.preventDefault();
@@ -139,12 +147,9 @@ export default function App() {
 
     setSaving(true);
     try {
+      // 1) upload image with a safe filename
       const ext = form.imageFile.name.split(".").pop().toLowerCase();
-      const safeBase = form.name
-        .trim()
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, "-")
-        .slice(0, 40);
+      const safeBase = form.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 40);
       const filePath = `products/${Date.now()}-${safeBase}.${ext}`;
 
       const { error: upErr } = await supabase.storage
@@ -162,6 +167,7 @@ export default function App() {
       if (urlErr) throw new Error("URL: " + urlErr.message);
       const image_url = urlData.publicUrl;
 
+      // 2) insert machine
       const payload = {
         name: form.name,
         category: form.category,
@@ -171,6 +177,7 @@ export default function App() {
         specs: form.specs || "",
         image_url,
       };
+
       const { error: insErr } = await supabase.from("machines").insert(payload);
       if (insErr) throw new Error("INSERT: " + insErr.message);
 
@@ -193,7 +200,26 @@ export default function App() {
     }
   };
 
-  /* --- UI --- */
+  /* ---- add category (admin) ---- */
+  const addCategory = async () => {
+    const name = newCat.trim();
+    if (!name) return;
+    setAddingCat(true);
+    try {
+      const { error } = await supabase.from("categories").insert({ name });
+      if (error) throw error;
+      setNewCat("");
+      setShowCatBox(false);
+      await loadCategories();
+      alert("Category added ✅");
+    } catch (e) {
+      alert(e.message);
+    } finally {
+      setAddingCat(false);
+    }
+  };
+
+  /* ---- UI ---- */
   return (
     <div
       style={{
@@ -265,10 +291,7 @@ export default function App() {
                     }}
                   />
                   <button onClick={sendLoginLink}>Send Login Link</button>
-                  <button
-                    onClick={() => setShowLogin(false)}
-                    style={{ marginLeft: 6 }}
-                  >
+                  <button onClick={() => setShowLogin(false)} style={{ marginLeft: 6 }}>
                     Cancel
                   </button>
                 </>
@@ -277,6 +300,39 @@ export default function App() {
           )}
         </div>
       </div>
+
+      {/* Admin tools: Add Category */}
+      {isAdmin && (
+        <div
+          style={{
+            maxWidth: 1100,
+            margin: "0 auto 8px",
+            display: "flex",
+            justifyContent: "flex-end",
+            gap: 8,
+            alignItems: "center",
+          }}
+        >
+          {!showCatBox ? (
+            <button onClick={() => setShowCatBox(true)}>+ Add Category</button>
+          ) : (
+            <>
+              <input
+                placeholder="Category name"
+                value={newCat}
+                onChange={(e) => setNewCat(e.target.value)}
+                style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #ddd" }}
+              />
+              <button onClick={addCategory} disabled={addingCat}>
+                {addingCat ? "Adding…" : "Add"}
+              </button>
+              <button onClick={() => { setShowCatBox(false); setNewCat(""); }}>
+                Cancel
+              </button>
+            </>
+          )}
+        </div>
+      )}
 
       {/* Admin Add Form */}
       {isAdmin && (
@@ -313,7 +369,7 @@ export default function App() {
               required
             >
               <option value="">Select category *</option>
-              {CATEGORIES.map((c) => (
+              {categories.map((c) => (
                 <option key={c} value={c}>
                   {c}
                 </option>
@@ -371,7 +427,7 @@ export default function App() {
 
       {/* Category pills */}
       <div style={{ textAlign: "center", marginBottom: 12 }}>
-        {["All", ...CATEGORIES].map((c) => (
+        {["All", ...categories].map((c) => (
           <button
             key={c}
             onClick={() => setCategory(c)}
@@ -397,42 +453,21 @@ export default function App() {
           <div className="catalog-grid">
             {filtered.map((m) => (
               <div key={m.id} className="card">
-                <div
-                  style={{
-                    height: 240,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    background: "#fff",
-                    padding: 8,
-                    borderBottom: "1px solid #eee",
-                  }}
-                >
+                <div className="thumb">
                   {m.image_url && (
                     <img
                       src={m.image_url}
                       alt={m.name}
                       loading="lazy"
-                      onError={(e) =>
-                        (e.currentTarget.style.display = "none")
-                      }
-                      style={{
-                        maxWidth: "100%",
-                        maxHeight: "100%",
-                        width: "auto",
-                        height: "auto",
-                        objectFit: "contain",
-                        display: "block",
-                      }}
+                      onError={(e) => (e.currentTarget.style.display = "none")}
+                      style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain", display: "block" }}
                     />
                   )}
                 </div>
                 <div className="card-body">
                   <h3>{m.name}</h3>
                   {m.specs && <p style={{ color: "#666" }}>{m.specs}</p>}
-                  <p style={{ fontWeight: 700 }}>
-  ₹{formatINRnoDecimals(m.mrp)}
-</p>
+                  <p style={{ fontWeight: 700 }}>₹{formatINRnoDecimals(m.mrp)}</p>
                   {m.category && (
                     <p style={{ color: "#777", fontSize: 12 }}>{m.category}</p>
                   )}
