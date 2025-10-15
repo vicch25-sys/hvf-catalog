@@ -19,7 +19,7 @@ const formatINRnoDecimals = (val) =>
 export default function App() {
   // data
   const [items, setItems] = useState([]);
-  const [categories, setCategories] = useState([]); // dynamic
+  const [categories, setCategories] = useState([]);
   const [category, setCategory] = useState("All");
 
   // ui / status
@@ -31,6 +31,11 @@ export default function App() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [loginEmail, setLoginEmail] = useState("");
   const [showLogin, setShowLogin] = useState(false);
+
+  // staff mode (PIN = 2525)
+  const [isStaff, setIsStaff] = useState(
+    () => localStorage.getItem("isStaff") === "1"
+  );
 
   // add-product form
   const [form, setForm] = useState({
@@ -93,6 +98,21 @@ export default function App() {
     setIsAdmin(false);
   };
 
+  /* ---------- staff PIN ---------- */
+  const loginStaff = () => {
+    const pin = prompt("Enter staff PIN:");
+    if (pin === "2525") {
+      setIsStaff(true);
+      localStorage.setItem("isStaff", "1");
+    } else {
+      alert("Wrong PIN.");
+    }
+  };
+  const logoutStaff = () => {
+    setIsStaff(false);
+    localStorage.removeItem("isStaff");
+  };
+
   /* ---------- load data ---------- */
   const loadMachines = async () => {
     setLoading(true);
@@ -131,7 +151,6 @@ export default function App() {
     const name = (prompt("New category name:") || "").trim();
     if (!name) return;
 
-    // allow any case; store original but ensure uniqueness via LOWER(name)
     const { error } = await supabase.from("categories").insert({ name });
     if (error) {
       alert(error.message);
@@ -235,8 +254,32 @@ export default function App() {
           by HVF Agency, Moranhat, Assam
         </p>
 
-        {/* Auth Row */}
+        {/* Auth / Staff Row */}
         <div style={{ marginTop: 8 }}>
+          {/* Staff controls are visible to everyone */}
+          {isStaff ? (
+            <span style={{ marginRight: 8 }}>
+              <span
+                style={{
+                  padding: "4px 8px",
+                  borderRadius: 6,
+                  background: "#fff4f4",
+                  color: "#b11e1e",
+                  border: "1px solid #f0caca",
+                  marginRight: 6,
+                }}
+              >
+                Staff mode: ON
+              </span>
+              <button onClick={logoutStaff}>Logout Staff</button>
+            </span>
+          ) : (
+            <button onClick={loginStaff} style={{ marginRight: 8 }}>
+              Login as Staff
+            </button>
+          )}
+
+          {/* Admin controls */}
           {session ? (
             <>
               <button onClick={signOut} style={{ marginRight: 8 }}>
@@ -258,7 +301,7 @@ export default function App() {
               </span>
             </>
           ) : (
-            <div style={{ display: "inline-flex", gap: 8 }}>
+            <span style={{ display: "inline-flex", gap: 8 }}>
               {!showLogin ? (
                 <button
                   onClick={() => setShowLogin(true)}
@@ -294,7 +337,7 @@ export default function App() {
                   </button>
                 </>
               )}
-            </div>
+            </span>
           )}
         </div>
       </div>
@@ -433,7 +476,7 @@ export default function App() {
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
-                    background: "#ffffff", // <- pure white (no grey bars)
+                    background: "#ffffff",
                     borderBottom: "1px solid #eee",
                     borderTopLeftRadius: 10,
                     borderTopRightRadius: 10,
@@ -462,8 +505,16 @@ export default function App() {
                 <div className="card-body">
                   <h3>{m.name}</h3>
                   {m.specs && <p style={{ color: "#666" }}>{m.specs}</p>}
-                  {/* Price without "MRP:" label */}
+                  {/* public price (no "MRP:" label) */}
                   <p style={{ fontWeight: 700 }}>₹{formatINRnoDecimals(m.mrp)}</p>
+
+                  {/* staff/admin price */}
+                  {(isStaff || isAdmin) && m.sell_price != null && (
+                    <p style={{ color: "crimson", fontWeight: 700, marginTop: 4 }}>
+                      Selling: ₹{formatINRnoDecimals(m.sell_price)}
+                    </p>
+                  )}
+
                   {m.category && (
                     <p style={{ color: "#777", fontSize: 12 }}>{m.category}</p>
                   )}
