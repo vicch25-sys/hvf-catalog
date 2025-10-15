@@ -461,74 +461,53 @@ export default function App() {
       </div>
 
       {/* Product grid */}
-      <div style={{ maxWidth: 1100, margin: "0 auto 40px" }}>
-        {loading ? (
-          <p style={{ textAlign: "center" }}>Loading…</p>
-        ) : (
-          <div className="catalog-grid">
-            {filtered.map((m) => (
-              <div key={m.id} className="card">
-                {/* White thumbnail area, centered image, no crop */}
-                <div
-                  className="thumb"
-                  style={{
-                    height: 240,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    background: "#ffffff",
-                    borderBottom: "1px solid #eee",
-                    borderTopLeftRadius: 10,
-                    borderTopRightRadius: 10,
-                    overflow: "hidden",
-                  }}
-                >
-                  {m.image_url && (
-                    <img
-                      src={m.image_url}
-                      alt={m.name}
-                      loading="lazy"
-                      style={{
-                        maxWidth: "100%",
-                        maxHeight: "100%",
-                        width: "auto",
-                        height: "auto",
-                        objectFit: "contain",
-                        display: "block",
-                        background: "transparent",
-                      }}
-                      onError={(e) => (e.currentTarget.style.display = "none")}
-                    />
-                  )}
-                </div>
-
-                <div className="card-body">
-                  <h3>{m.name}</h3>
-                  {m.specs && <p style={{ color: "#666" }}>{m.specs}</p>}
-                  {/* public price (no "MRP:" label) */}
-                  <p style={{ fontWeight: 700 }}>₹{formatINRnoDecimals(m.mrp)}</p>
-
-                  {/* staff/admin price */}
-                  {(isStaff || isAdmin) && m.sell_price != null && (
-                    <p style={{ color: "crimson", fontWeight: 700, marginTop: 4 }}>
-                      Selling: ₹{formatINRnoDecimals(m.sell_price)}
-                    </p>
-                  )}
-
-                  {m.category && (
-                    <p style={{ color: "#777", fontSize: 12 }}>{m.category}</p>
-                  )}
-                </div>
-              </div>
-            ))}
+<div style={{ maxWidth: 1100, margin: "0 auto 40px" }}>
+  {loading ? (
+    <p style={{ textAlign: "center" }}>Loading…</p>
+  ) : (
+    <div className="catalog-grid">
+      {filtered.map((m) => (
+        <div key={m.id} className="card">
+          <div className="thumb">
+            {m.image_url && (
+              <img
+                src={m.image_url}
+                alt={m.name}
+                loading="lazy"
+                onError={(e) => (e.currentTarget.style.display = "none")}
+              />
+            )}
           </div>
-        )}
-        {msg && (
-          <p style={{ textAlign: "center", color: "crimson", marginTop: 10 }}>
-            {msg}
-          </p>
-        )}
-      </div>
+          <div className="card-body">
+            <h3>{m.name}</h3>
+            {m.specs && <p style={{ color: "#666" }}>{m.specs}</p>}
+            
+            {/* Always show MRP */}
+            <p style={{ fontWeight: 700 }}>
+              ₹{formatINRnoDecimals(m.mrp)}
+            </p>
+
+            {/* Show selling price only if staff OR admin is logged in */}
+            {(isAdmin || isStaff) && m.sell_price && (
+              <p style={{ color: "red", fontWeight: 600 }}>
+                ₹{formatINRnoDecimals(m.sell_price)}
+              </p>
+            )}
+
+            {m.category && (
+              <p style={{ color: "#777", fontSize: 12 }}>{m.category}</p>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  )}
+  {msg && (
+    <p style={{ textAlign: "center", color: "crimson", marginTop: 10 }}>
+      {msg}
+    </p>
+  )}
+</div>
     </div>
   );
 }
