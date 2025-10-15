@@ -11,7 +11,7 @@ const supabase = createClient(supabaseUrl, supabaseKey, {
 });
 
 /* --- Helpers --- */
-const formatINR = (n) =>
+const inr = (n) =>
   Number(n ?? 0).toLocaleString("en-IN", {
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
@@ -25,42 +25,58 @@ const todayStr = () => {
   return `${dd}/${mm}/${yyyy}`;
 };
 
+/* Create APP/H### by counting existing quotes */
+async function getNextQuoteNumber() {
+  const { count, error } = await supabase
+    .from("quotes")
+    .select("*", { count: "exact", head: true });
+  if (error) throw error;
+  const next = (count || 0) + 1;
+  return `APP/H${String(next).padStart(3, "0")}`;
+}
+
 /* --- App --- */
 export default function App() {
-  // catalog data
+  /*** DATA ***/
   const [items, setItems] = useState([]);
   const [categories, setCategories] = useState([]);
   const [category, setCategory] = useState("All");
-
-  // ui / status
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState("");
 
-  // auth
+  /*** AUTH / MENUS ***/
   const [session, setSession] = useState(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [loginEmail, setLoginEmail] = useState("");
-  const [showLogin, setShowLogin] = useState(false);
+  const [showLoginBox, setShowLoginBox] = useState(false);
 
   // staff quick view (PIN 2525)
   const [staffMode, setStaffMode] = useState(false);
-  const toggleStaffLogin = () => {
+  const toggleStaff = () => {
     if (staffMode) return setStaffMode(false);
     const pin = prompt("Enter staff PIN:");
     if ((pin || "").trim() === "2525") setStaffMode(true);
     else alert("Wrong PIN");
   };
 
-  // quotation mode (PIN 9990)
-  const [quoteMode, setQuoteMode] = useState(false);
-  const toggleQuoteLogin = () => {
-    if (quoteMode) return setQuoteMode(false);
+  // quotation “cart” mode (PIN 9990)
+  const [quoteMode, setQuoteMode] = useState(false);    // true = show qty steppers on catalog
+  const [page, setPage] = useState("catalog");          // "catalog" | "quoteEditor"
+  const enableQuoteMode = () => {
+    if (quoteMode) {
+      // toggle off -> clear cart UI but keep items
+      setQuoteMode(false);
+      setPage("catalog");
+      return;
+    }
     const pin = prompt("Enter quotation PIN:");
-    if ((pin || "").trim() === "9990") setQuoteMode(true);
-    else alert("Wrong PIN");
+    if ((pin || "").trim() === "9990") {
+      setQuoteMode(true);
+      setPage("catalog");
+    } else alert("Wrong PIN");
   };
 
-  // add-product form
+  /*** ADD/EDIT FORM (admin) ***/
   const [form, setForm] = useState({
     name: "",
     category: "",
@@ -72,7 +88,7 @@ export default function App() {
   });
   const [saving, setSaving] = useState(false);
 
-  /* ---------- auth ---------- */
+  /* ---------- AUTH ---------- */
   useEffect(() => {
     const init = async () => {
       const { data } = await supabase.auth.getSession();
@@ -84,9 +100,7 @@ export default function App() {
           .eq("user_id", data.session.user.id)
           .maybeSingle();
         setIsAdmin(!!prof?.is_admin);
-      } else {
-        setIsAdmin(false);
-      }
+      } else setIsAdmin(false);
     };
     init();
 
@@ -99,10 +113,8 @@ export default function App() {
           .eq("user_id", s.user.id)
           .maybeSingle()
           .then(({ data }) => setIsAdmin(!!data?.is_admin));
-      } else {
-        setIsAdmin(false);
-      }
-      setShowLogin(false);
+      } else setIsAdmin(false);
+      setShowLoginBox(false);
     });
     return () => sub.subscription.unsubscribe();
   }, []);
@@ -121,7 +133,7 @@ export default function App() {
     setIsAdmin(false);
   };
 
-  /* ---------- load data ---------- */
+  /* ---------- LOAD DATA ---------- */
   const loadMachines = async () => {
     setLoading(true);
     const { data, error } = await supabase
@@ -132,21 +144,16 @@ export default function App() {
     else setItems(data || []);
     setLoading(false);
   };
-
   const loadCategories = async () => {
-    const { data, error } = await supabase
-      .from("categories")
-      .select("name")
-      .order("name", { ascending: true });
-    if (!error) setCategories((data || []).map((r) => r.name));
+    const { data } = await supabase.from("categories").select("name").order("name");
+    setCategories((data || []).map((r) => r.name));
   };
-
   useEffect(() => {
     loadMachines();
     loadCategories();
   }, []);
 
-  /* ---------- filters + search ---------- */
+  /* ---------- SEARCH / FILTER ---------- */
   const [search, setSearch] = useState("");
   const filtered = useMemo(() => {
     let arr = items;
@@ -156,7 +163,7 @@ export default function App() {
       );
     }
     if (search.trim()) {
-      const q = search.trim().toLowerCase();
+      const q = search.toLowerCase();
       arr = arr.filter(
         (m) =>
           (m.name || "").toLowerCase().includes(q) ||
@@ -166,46 +173,23 @@ export default function App() {
     return arr;
   }, [items, category, search]);
 
-  /* ---------- add category (admin) ---------- */
-  const onAddCategory = async () => {
-    const name = (prompt("New category name:") || "").trim();
-    if (!name) return;
-
-    const { error } = await supabase.from("categories").insert({ name });
-    if (error) {
-      alert(error.message);
-      return;
-    }
-    await loadCategories();
-    setCategory("All");
-    alert("Category added ✅");
-  };
-
-  /* ---------- add product (admin) ---------- */
+  /* ---------- ADMIN: ADD PRODUCT ---------- */
   const onChange = (e) => {
     const { name, value, files } = e.target;
     if (files) setForm((f) => ({ ...f, imageFile: files[0] || null }));
     else setForm((f) => ({ ...f, [name]: value }));
   };
-
   const onSave = async (e) => {
     e.preventDefault();
     if (!isAdmin) return alert("Admins only.");
     if (!form.name || !form.category || !form.mrp || !form.imageFile) {
       return alert("Name, Category, MRP and Image are required.");
     }
-
     setSaving(true);
     try {
-      // 1) upload image (safe filename)
       const ext = form.imageFile.name.split(".").pop().toLowerCase();
-      const safeBase = form.name
-        .trim()
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, "-")
-        .slice(0, 40);
+      const safeBase = form.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 40);
       const filePath = `products/${Date.now()}-${safeBase}.${ext}`;
-
       const { error: upErr } = await supabase.storage
         .from("images")
         .upload(filePath, form.imageFile, {
@@ -214,14 +198,12 @@ export default function App() {
           upsert: true,
         });
       if (upErr) throw new Error("UPLOAD: " + upErr.message);
-
       const { data: urlData, error: urlErr } = supabase.storage
         .from("images")
         .getPublicUrl(filePath);
       if (urlErr) throw new Error("URL: " + urlErr.message);
       const image_url = urlData.publicUrl;
 
-      // 2) insert record
       const payload = {
         name: form.name,
         category: form.category,
@@ -233,199 +215,212 @@ export default function App() {
       };
       const { error: insErr } = await supabase.from("machines").insert(payload);
       if (insErr) throw new Error("INSERT: " + insErr.message);
-
       setForm({
-        name: "",
-        category: "",
-        mrp: "",
-        sell_price: "",
-        cost_price: "",
-        specs: "",
-        imageFile: null,
+        name: "", category: "", mrp: "", sell_price: "", cost_price: "", specs: "", imageFile: null,
       });
       await loadMachines();
       alert("Product added ✅");
     } catch (err) {
       console.error(err);
-      alert("Failed to add product: " + err.message);
+      alert(err.message);
     } finally {
       setSaving(false);
     }
   };
 
-  /* ---------- quotation state ---------- */
-  const [quote, setQuote] = useState({
-    ref: "", // APP/H###
+  /* ---------- QUOTE CART (works only in quoteMode on catalog) ---------- */
+  // cart: id -> {id,name,specs,unit,qty}
+  const [cart, setCart] = useState({});
+  const cartList = Object.values(cart);
+  const cartCount = cartList.reduce((a, r) => a + (r.qty || 0), 0);
+  const cartSubtotal = cartList.reduce((a, r) => a + (r.qty || 0) * (r.unit || 0), 0);
+
+  const inc = (m) =>
+    setCart((c) => {
+      const prev = c[m.id] || { id: m.id, name: m.name, specs: m.specs || "", unit: Number(m.mrp || 0), qty: 0 };
+      return { ...c, [m.id]: { ...prev, qty: prev.qty + 1 } };
+    });
+  const dec = (m) =>
+    setCart((c) => {
+      const prev = c[m.id];
+      if (!prev) return c;
+      const q = Math.max(0, prev.qty - 1);
+      const nx = { ...prev, qty: q };
+      const obj = { ...c };
+      if (q === 0) delete obj[m.id];
+      else obj[m.id] = nx;
+      return obj;
+    });
+
+  /* ---------- QUOTE EDITOR HEADER (appears only after clicking View Quote) ---------- */
+  const [qHeader, setQHeader] = useState({
+    number: "",
     date: todayStr(),
     customer_name: "",
     address: "",
     phone: "",
     subject: "",
-    rows: [
-      { name: "", specs: "", qty: 1, unit: 0 },
-      { name: "", specs: "", qty: 1, unit: 0 },
-      { name: "", specs: "", qty: 1, unit: 0 },
-      { name: "", specs: "", qty: 1, unit: 0 },
-    ],
   });
 
-  const addRow = () =>
-    setQuote((q) => ({
-      ...q,
-      rows: [...q.rows, { name: "", specs: "", qty: 1, unit: 0 }],
-    }));
-  const delRow = (i) =>
-    setQuote((q) => ({ ...q, rows: q.rows.filter((_, idx) => idx !== i) }));
-  const setRow = (i, patch) =>
-    setQuote((q) => {
-      const rows = [...q.rows];
-      rows[i] = { ...rows[i], ...patch };
-      return { ...q, rows };
-    });
-
-  const subTotal = quote.rows.reduce(
-    (sum, r) => sum + Number(r.qty || 0) * Number(r.unit || 0),
-    0
-  );
-  const grandTotal = subTotal;
-
-  // cart add from catalog when in quoteMode
-  const addToQuote = (it) => {
-    setQuote((q) => ({
-      ...q,
-      rows: [
-        ...q.rows,
-        { name: it.name || "", specs: it.specs || "", qty: 1, unit: it.mrp || 0 },
-      ],
-    }));
+  const goToEditor = async () => {
+    if (cartList.length === 0) return alert("Add at least 1 item to the quote.");
+    if (!qHeader.number) {
+      try {
+        const num = await getNextQuoteNumber();
+        setQHeader((h) => ({ ...h, number: num, date: todayStr() }));
+      } catch {
+        setQHeader((h) => ({ ...h, number: `APP/H${Date.now().toString().slice(-3)}` }));
+      }
+    }
+    setPage("quoteEditor");
   };
 
-  /* ---------- ref number helper (APP/H001…) ---------- */
-  const getNextRef = async () => {
-    // Uses table quote_counters(seq) with single row id=1
-    const { data: counter } = await supabase
-      .from("quote_counters")
-      .select("seq")
-      .eq("id", 1)
-      .maybeSingle();
-    let next = (counter?.seq ?? 0) + 1;
-    await supabase
-      .from("quote_counters")
-      .upsert({ id: 1, seq: next }, { onConflict: "id" });
-    return `APP/H${String(next).padStart(3, "0")}`;
-  };
+  const backToCatalog = () => setPage("catalog");
 
-  /* ---------- save / load quotes ---------- */
+  /* ---------- SAVE USING YOUR SCHEMA (quotes + quote_items) ---------- */
   const saveQuote = async () => {
     try {
-      const ref = quote.ref || (await getNextRef());
-      const payload = {
-        ref,
-        date: quote.date,
-        customer_name: quote.customer_name,
-        address: quote.address,
-        phone: quote.phone,
-        subject: quote.subject,
-        rows: quote.rows,
-        subtotal: subTotal,
-        grand_total: grandTotal,
-      };
-      await supabase.from("quotes").upsert(payload, { onConflict: "ref" });
-      setQuote((q) => ({ ...q, ref }));
+      const number = qHeader.number || (await getNextQuoteNumber());
+      // 1) insert master
+      const { data: qins, error: qerr } = await supabase
+        .from("quotes")
+        .insert({
+          number,
+          customer_name: qHeader.customer_name || null,
+          phone: qHeader.phone || null,
+          total: cartSubtotal,
+        })
+        .select("id,number")
+        .single();
+      if (qerr) throw qerr;
+
+      const rows = cartList.map((r) => ({
+        quote_id: qins.id,
+        name: r.name,
+        specs: r.specs || null,
+        qty: r.qty,
+        mrp: r.unit,
+      }));
+      if (rows.length) {
+        const { error: ierr } = await supabase.from("quote_items").insert(rows);
+        if (ierr) throw ierr;
+      }
+      setQHeader((h) => ({ ...h, number }));
       alert("Saved ✅");
+      return qins.number;
     } catch (e) {
       console.error(e);
       alert("Save failed: " + e.message);
+      return null;
     }
   };
 
-  const [savedQuotes, setSavedQuotes] = useState([]);
+  /* ---------- LOAD SAVED LIST / EDIT / PDF ---------- */
+  const [saved, setSaved] = useState([]);
   const loadSaved = async () => {
     const { data } = await supabase
       .from("quotes")
-      .select("ref,date,customer_name,grand_total")
+      .select("id,number,customer_name,total,created_at")
       .order("created_at", { ascending: false });
-    setSavedQuotes(data || []);
+    setSaved(data || []);
+  };
+  const editSaved = async (number) => {
+    const { data: q } = await supabase.from("quotes").select("id,number,customer_name,phone").eq("number", number).maybeSingle();
+    if (!q) return;
+    const { data: lines } = await supabase
+      .from("quote_items")
+      .select("name,specs,qty,mrp")
+      .eq("quote_id", q.id);
+
+    // reconstruct cart
+    const newCart = {};
+    (lines || []).forEach((ln, idx) => {
+      const id = `saved-${idx}`;
+      newCart[id] = { id, name: ln.name, specs: ln.specs || "", unit: Number(ln.mrp || 0), qty: Number(ln.qty || 0) };
+    });
+    setCart(newCart);
+    setQHeader((h) => ({
+      ...h,
+      number: q.number,
+      customer_name: q.customer_name || "",
+      phone: q.phone || "",
+      date: todayStr(),
+    }));
+    setQuoteMode(true);
+    setPage("quoteEditor");
   };
 
-  /* ---------- PDF export (clean doc, not the web page) ---------- */
+  /* ---------- CLEAN PDF (NOT web print) ---------- */
   const exportPDF = async () => {
-    if (!quote.ref) await saveQuote();
+    if (cartList.length === 0) return alert("Nothing to print.");
+    // make sure it has a number and also persist if user wants
+    const num = qHeader.number || (await getNextQuoteNumber());
+    setQHeader((h) => ({ ...h, number: num }));
 
-    const doc = new jsPDF({ unit: "pt", format: "a4" }); // 595x842 pt
-    const pageWidth = doc.internal.pageSize.getWidth();
+    const doc = new jsPDF({ unit: "pt", format: "a4" });
+    const pw = doc.internal.pageSize.getWidth();
 
-    // Logo
+    // logo
     try {
-      // uses your existing /public/hvf-logo.png
-      // (Vite will serve it at /hvf-logo.png)
       const img = new Image();
       img.crossOrigin = "anonymous";
       img.src = "/hvf-logo.png";
-      await new Promise((res) => (img.onload = res));
-      const logoW = 120;
-      const logoH = (img.height * logoW) / img.width;
-      doc.addImage(img, "PNG", (pageWidth - logoW) / 2, 28, logoW, logoH);
+      await new Promise((r) => (img.onload = r));
+      const w = 110;
+      const h = (img.height * w) / img.width;
+      doc.addImage(img, "PNG", (pw - w) / 2, 24, w, h);
     } catch {}
 
-    // Title
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(18);
-    doc.text("HVF Machinery Catalog", pageWidth / 2, 95, { align: "center" });
+    doc.setFontSize(16);
+    doc.text("QUOTATION", pw - 60, 88, { align: "right" });
 
-    // Header (left)
+    // left side
     doc.setFontSize(10);
     doc.setFont("helvetica", "normal");
-    const leftX = 40;
-    const rightX = pageWidth - 220;
+    const L = 40;
+    const R = pw - 220;
+    doc.text(`Customer Name: ${qHeader.customer_name || ""}`, L, 100);
+    doc.text(`Address: ${qHeader.address || ""}`, L, 115);
+    doc.text(`Phone: ${qHeader.phone || ""}`, L, 130);
+    doc.text(`Subject: ${qHeader.subject || ""}`, L, 145);
 
-    doc.text(`Customer Name: ${quote.customer_name || ""}`, leftX, 130);
-    doc.text(`Address: ${quote.address || ""}`, leftX, 145);
-    doc.text(`Phone: ${quote.phone || ""}`, leftX, 160);
-    doc.text(`Subject: ${quote.subject || ""}`, leftX, 175);
+    doc.text(`Ref: ${num}`, R, 100);
+    doc.text(`Date: ${qHeader.date || todayStr()}`, R, 115);
 
-    // Header (right)
-    doc.setFont("helvetica", "bold");
-    doc.text("QUOTATION", rightX + 90, 120, { align: "center" });
-    doc.setFont("helvetica", "normal");
-    doc.text(`Ref: ${quote.ref || "APP/H###"}`, rightX, 140);
-    doc.text(`Date: ${quote.date || todayStr()}`, rightX, 155);
-
-    // Table
-    const body = quote.rows.map((r, i) => [
+    const body = cartList.map((r, i) => [
       String(i + 1),
       r.name || "",
       r.specs || "",
       String(r.qty || 0),
-      `₹${formatINR(r.unit || 0)}`,
-      `₹${formatINR((r.qty || 0) * (r.unit || 0))}`,
+      `₹${inr(r.unit || 0)}`,
+      `₹${inr((r.qty || 0) * (r.unit || 0))}`,
     ]);
 
     doc.autoTable({
-      startY: 200,
+      startY: 170,
+      head: [["Sl.", "Description", "Specs / Description", "Qty", "Unit Price", "Total (Incl. GST)"]],
       styles: { fontSize: 10 },
       headStyles: { fillColor: [240, 240, 240] },
-      head: [["Sl.", "Description", "Specs / Description", "Qty", "Unit Price", "Total (Incl. GST)"]],
-      body,
       columnStyles: {
-        0: { halign: "center", cellWidth: 30 },
-        1: { cellWidth: 160 },
+        0: { cellWidth: 28, halign: "center" },
+        1: { cellWidth: 170 },
         2: { cellWidth: 170 },
-        3: { halign: "center", cellWidth: 40 },
-        4: { halign: "right", cellWidth: 90 },
-        5: { halign: "right", cellWidth: 100 },
+        3: { cellWidth: 40, halign: "center" },
+        4: { cellWidth: 90, halign: "right" },
+        5: { cellWidth: 100, halign: "right" },
       },
+      body,
     });
 
-    // Totals
     const y = doc.lastAutoTable.finalY + 16;
-    doc.text(`Subtotal: ₹${formatINR(subTotal)}`, pageWidth - 180, y);
-    doc.text(`Grand Total: ₹${formatINR(grandTotal)}`, pageWidth - 180, y + 18);
+    doc.text(`Subtotal: ₹${inr(cartSubtotal)}`, pw - 180, y);
+    doc.text(`Grand Total: ₹${inr(cartSubtotal)}`, pw - 180, y + 18);
 
-    // Terms & Bank (simple; you can expand later)
-    const ty = y + 55;
+    // simple terms
+    const ty = y + 50;
     doc.setFont("helvetica", "bold");
-    doc.text("Terms & Conditions:", leftX, ty);
+    doc.text("Terms & Conditions:", L, ty);
     doc.setFont("helvetica", "normal");
     doc.text(
       [
@@ -433,75 +428,32 @@ export default function App() {
         "This quotation is valid for one month only.",
         "Delivery ex-stock/2 weeks. Goods once sold cannot be taken back.",
       ],
-      leftX,
+      L,
       ty + 14
     );
 
-    const by = ty + 70;
-    doc.setFont("helvetica", "bold");
-    doc.text("Bank Details:", leftX, by);
-    doc.setFont("helvetica", "normal");
-    doc.text(
-      [
-        "HVF AGENCY",
-        "ICICI BANK (Moran Branch)  A/C: 19956550412",
-        "IFSC: ICIC0001995",
-      ],
-      leftX,
-      by + 14
-    );
-
-    doc.save(`${quote.ref || "quotation"}.pdf`);
+    doc.save(`${num}.pdf`);
   };
 
-  /* ---------- UI ---------- */
+  /*** UI ***/
   return (
-    <div
-      style={{
-        fontFamily: "Arial, sans-serif",
-        minHeight: "100vh",
-        background: "linear-gradient(to bottom right,#f8f9fa,#eef2f7)",
-      }}
-    >
-      {/* top bar */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 16px" }}>
-        <div />
-        <div>
-          <div className="login-menu" style={{ position: "relative" }}>
-            <details>
-              <summary style={{ cursor: "pointer", padding: "6px 12px", borderRadius: 6, background: "#f2f2f2" }}>
-                Login
-              </summary>
-              <div
-                style={{
-                  position: "absolute",
-                  right: 0,
-                  marginTop: 6,
-                  background: "#fff",
-                  border: "1px solid #e5e7eb",
-                  borderRadius: 8,
-                  padding: 8,
-                  minWidth: 200,
-                  boxShadow: "0 8px 24px rgba(0,0,0,.08)",
-                  zIndex: 5,
-                }}
-              >
-                <button onClick={toggleStaffLogin} style={{ width: "100%", marginBottom: 6 }}>
-                  {staffMode ? "Logout Staff View" : "Login as Staff (PIN)"}
-                </button>
-                <button
-                  onClick={() => setShowLogin(true)}
-                  style={{ width: "100%", marginBottom: 6 }}
-                >
-                  Login as Admin (Email)
-                </button>
-                <button onClick={toggleQuoteLogin} style={{ width: "100%" }}>
-                  {quoteMode ? "Exit Quotation Mode" : "Login for Quotation (PIN)"}
-                </button>
-              </div>
-            </details>
+    <div style={{ fontFamily: "Arial, sans-serif", minHeight: "100vh", background: "linear-gradient(to bottom right,#f8f9fa,#eef2f7)" }}>
+      {/* top-right Login menu */}
+      <div style={{ display: "flex", justifyContent: "flex-end", padding: "8px 16px" }}>
+        <details>
+          <summary style={{ cursor: "pointer", padding: "6px 12px", borderRadius: 6, background: "#f2f2f2" }}>Login</summary>
+          <div style={{ position: "absolute", right: 16, marginTop: 6, background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8, padding: 8, minWidth: 210, boxShadow: "0 8px 24px rgba(0,0,0,.08)" }}>
+            <button onClick={toggleStaff} style={{ width: "100%", marginBottom: 6 }}>
+              {staffMode ? "Logout Staff View" : "Login as Staff (PIN)"}
+            </button>
+            <button onClick={() => setShowLoginBox(true)} style={{ width: "100%", marginBottom: 6 }}>
+              Login as Admin (Email)
+            </button>
+            <button onClick={enableQuoteMode} style={{ width: "100%" }}>
+              {quoteMode ? "Exit Quotation Mode" : "Login for Quotation (PIN)"}
+            </button>
           </div>
-        </div>
+        </details>
       </div>
 
       {/* Header */}
@@ -510,113 +462,31 @@ export default function App() {
         <h1 style={{ margin: 0 }}>HVF Machinery Catalog</h1>
         <p style={{ color: "#777", marginTop: 6 }}>by HVF Agency, Moranhat, Assam</p>
 
-        {/* Admin email login row */}
-        {!session && showLogin && (
+        {/* inline admin email box */}
+        {!session && showLoginBox && (
           <div style={{ display: "inline-flex", gap: 8 }}>
-            <input
-              type="email"
-              placeholder="your@email.com"
-              value={loginEmail}
-              onChange={(e) => setLoginEmail(e.target.value)}
-              style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #ddd" }}
-            />
+            <input type="email" placeholder="your@email.com" value={loginEmail} onChange={(e) => setLoginEmail(e.target.value)} style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #ddd" }} />
             <button onClick={sendLoginLink}>Send Login Link</button>
-            <button onClick={() => setShowLogin(false)} style={{ marginLeft: 6 }}>
-              Cancel
-            </button>
+            <button onClick={() => setShowLoginBox(false)} style={{ marginLeft: 6 }}>Cancel</button>
           </div>
         )}
         {session && (
           <div style={{ marginTop: 8 }}>
             <button onClick={signOut} style={{ marginRight: 8 }}>Sign Out</button>
-            <span
-              style={{
-                padding: "4px 8px",
-                borderRadius: 6,
-                background: isAdmin ? "#e8f6ed" : "#f7e8e8",
-                color: isAdmin ? "#1f7a3f" : "#b11e1e",
-                marginRight: 8,
-              }}
-            >
+            <span style={{ padding: "4px 8px", borderRadius: 6, background: isAdmin ? "#e8f6ed" : "#f7e8e8", color: isAdmin ? "#1f7a3f" : "#b11e1e", marginRight: 8 }}>
               {isAdmin ? "Admin: ON" : "Not admin"}
             </span>
-            <span style={{ color: "#777", fontSize: 12 }}>
-              UID: {session.user?.id?.slice(0, 8)}…
-            </span>
+            <span style={{ color: "#777", fontSize: 12 }}>UID: {session?.user?.id?.slice(0, 8)}…</span>
           </div>
         )}
       </div>
 
       {/* Search */}
       <div style={{ maxWidth: 1100, margin: "0 auto 10px", padding: "0 12px" }}>
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search products…"
-          style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: "1px solid #e5e7eb" }}
-        />
+        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search products…" style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: "1px solid #e5e7eb" }} />
       </div>
 
-      {/* Admin Add Category button */}
-      {isAdmin && !quoteMode && (
-        <div style={{ maxWidth: 1100, margin: "0 auto 10px", textAlign: "right" }}>
-          <button onClick={onAddCategory}>+ Add Category</button>
-        </div>
-      )}
-
-      {/* Admin Add Product Form */}
-      {isAdmin && !quoteMode && (
-        <form
-          onSubmit={onSave}
-          style={{
-            maxWidth: 1100,
-            margin: "0 auto 18px",
-            background: "#fff",
-            padding: 12,
-            borderRadius: 10,
-            border: "1px solid #e8e8e8",
-          }}
-        >
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1.2fr 1.2fr 1fr 1fr 1fr",
-              gap: 10,
-              alignItems: "center",
-            }}
-          >
-            <input name="name" placeholder="Name *" value={form.name} onChange={onChange} required />
-            <select name="category" value={form.category} onChange={onChange} required>
-              <option value="">Select category *</option>
-              {categories.map((c) => (
-                <option key={c} value={c}>{c}</option>
-              ))}
-            </select>
-            <input name="mrp" type="number" placeholder="MRP *" value={form.mrp} onChange={onChange} required />
-            <input name="sell_price" type="number" placeholder="Selling Price" value={form.sell_price} onChange={onChange} />
-            <input name="cost_price" type="number" placeholder="Cost Price" value={form.cost_price} onChange={onChange} />
-          </div>
-
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1.5fr 1fr",
-              gap: 10,
-              marginTop: 10,
-              alignItems: "center",
-            }}
-          >
-            <input name="specs" placeholder="Specs / Description" value={form.specs} onChange={onChange} />
-            <input type="file" accept="image/*" onChange={onChange} />
-          </div>
-
-          <div style={{ marginTop: 10, textAlign: "center" }}>
-            <button type="submit" disabled={saving}>{saving ? "Saving…" : "Save Product"}</button>
-          </div>
-        </form>
-      )}
-
-      {/* Category pills */}
+      {/* Categories */}
       <div style={{ textAlign: "center", marginBottom: 12 }}>
         {["All", ...categories].map((c) => (
           <button
@@ -636,8 +506,8 @@ export default function App() {
         ))}
       </div>
 
-      {/* Either Catalog (default) OR Quotation editor */}
-      {!quoteMode ? (
+      {/* PAGE: CATALOG or QUOTE EDITOR */}
+      {page === "catalog" && (
         <div style={{ maxWidth: 1100, margin: "0 auto 40px" }}>
           {loading ? (
             <p style={{ textAlign: "center" }}>Loading…</p>
@@ -645,6 +515,7 @@ export default function App() {
             <div className="catalog-grid">
               {filtered.map((m) => (
                 <div key={m.id} className="card">
+                  {/* white thumbnail container */}
                   <div
                     className="thumb"
                     style={{
@@ -652,7 +523,7 @@ export default function App() {
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
-                      background: "#ffffff",
+                      background: "#fff",
                       borderBottom: "1px solid #eee",
                       borderTopLeftRadius: 10,
                       borderTopRightRadius: 10,
@@ -681,93 +552,71 @@ export default function App() {
                   <div className="card-body">
                     <h3>{m.name}</h3>
                     {m.specs && <p style={{ color: "#666" }}>{m.specs}</p>}
-
-                    {/* MRP (no label) */}
-                    <p style={{ fontWeight: 700 }}>₹{formatINR(m.mrp)}</p>
-
-                    {/* Staff/Admin prices */}
+                    <p style={{ fontWeight: 700 }}>₹{inr(m.mrp)}</p>
                     {(staffMode || isAdmin) && m.sell_price != null && (
-                      <div
-                        style={{
-                          fontWeight: 700,
-                          marginTop: -2,
-                          marginBottom: 6,
-                          display: "inline-flex",
-                          alignItems: "baseline",
-                          gap: 8,
-                        }}
-                      >
-                        <span style={{ color: "#d32f2f" }}>
-                          ₹{formatINR(m.sell_price)}
-                        </span>
+                      <div style={{ fontWeight: 700, marginTop: -2, marginBottom: 6, display: "inline-flex", alignItems: "baseline", gap: 8 }}>
+                        <span style={{ color: "#d32f2f" }}>₹{inr(m.sell_price)}</span>
                         {isAdmin && m.cost_price != null && (
                           <>
                             <span style={{ color: "#bbb" }}>/</span>
-                            <span style={{ color: "#d4a106" }}>
-                              ₹{formatINR(m.cost_price)}
-                            </span>
+                            <span style={{ color: "#d4a106" }}>₹{inr(m.cost_price)}</span>
                           </>
                         )}
                       </div>
                     )}
+                    {m.category && <p style={{ color: "#777", fontSize: 12 }}>{m.category}</p>}
 
-                    {m.category && (
-                      <p style={{ color: "#777", fontSize: 12 }}>{m.category}</p>
-                    )}
-
-                    {/* Add to quote when in quoteMode? (hide) */}
-                    {!quoteMode && (
-                      <button onClick={() => { setQuote((q) => ({ ...q, date: todayStr() })); setQuoteMode(false); }}>
-                        &nbsp;
-                      </button>
-                    )}
+                    {/* qty steppers appear ONLY in quotation mode */}
                     {quoteMode && (
-                      <button onClick={() => addToQuote(m)}>Add to Quote</button>
+                      <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+                        <button onClick={() => dec(m)}>-</button>
+                        <div style={{ minWidth: 28, textAlign: "center" }}>
+                          {cart[m.id]?.qty || 0}
+                        </div>
+                        <button onClick={() => inc(m)}>+</button>
+                      </div>
                     )}
                   </div>
                 </div>
               ))}
             </div>
           )}
-          {msg && (
-            <p style={{ textAlign: "center", color: "crimson", marginTop: 10 }}>
-              {msg}
-            </p>
-          )}
+          {msg && <p style={{ textAlign: "center", color: "crimson", marginTop: 10 }}>{msg}</p>}
         </div>
-      ) : (
-        // ======= QUOTATION EDITOR =======
+      )}
+
+      {page === "quoteEditor" && (
         <div style={{ maxWidth: 1100, margin: "0 auto 40px", background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, padding: 14 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-            <div style={{ flex: 1, paddingRight: 10 }}>
+          {/* header block */}
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 16 }}>
+            <div style={{ flex: 1 }}>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                 <label>
                   <div style={{ fontSize: 12, color: "#666" }}>Customer Name</div>
-                  <input value={quote.customer_name} onChange={(e) => setQuote({ ...quote, customer_name: e.target.value })} />
+                  <input value={qHeader.customer_name} onChange={(e) => setQHeader({ ...qHeader, customer_name: e.target.value })} />
                 </label>
                 <label>
                   <div style={{ fontSize: 12, color: "#666" }}>Phone</div>
-                  <input value={quote.phone} onChange={(e) => setQuote({ ...quote, phone: e.target.value })} />
+                  <input value={qHeader.phone} onChange={(e) => setQHeader({ ...qHeader, phone: e.target.value })} />
                 </label>
                 <label style={{ gridColumn: "1 / span 2" }}>
                   <div style={{ fontSize: 12, color: "#666" }}>Address</div>
-                  <input value={quote.address} onChange={(e) => setQuote({ ...quote, address: e.target.value })} />
+                  <input value={qHeader.address} onChange={(e) => setQHeader({ ...qHeader, address: e.target.value })} />
                 </label>
                 <label style={{ gridColumn: "1 / span 2" }}>
                   <div style={{ fontSize: 12, color: "#666" }}>Subject</div>
-                  <input value={quote.subject} onChange={(e) => setQuote({ ...quote, subject: e.target.value })} />
+                  <input value={qHeader.subject} onChange={(e) => setQHeader({ ...qHeader, subject: e.target.value })} />
                 </label>
               </div>
             </div>
-
             <div style={{ width: 240, textAlign: "right" }}>
               <div style={{ fontWeight: 700, marginBottom: 6 }}>QUOTATION</div>
-              <div>Ref: {quote.ref || "APP/H###"}</div>
-              <div>Date: {quote.date}</div>
+              <div>Ref: {qHeader.number || "APP/H###"}</div>
+              <div>Date: {qHeader.date}</div>
             </div>
           </div>
 
-          {/* Table */}
+          {/* rows */}
           <div style={{ marginTop: 12 }}>
             <table className="qtable">
               <thead>
@@ -778,112 +627,71 @@ export default function App() {
                   <th style={{ width: 80 }}>Qty</th>
                   <th style={{ width: 120 }}>Unit Price</th>
                   <th style={{ width: 130 }}>Total (Incl. GST)</th>
-                  <th style={{ width: 40 }}></th>
                 </tr>
               </thead>
               <tbody>
-                {quote.rows.map((r, i) => (
-                  <tr key={i}>
+                {cartList.map((r, i) => (
+                  <tr key={r.id}>
                     <td>{i + 1}</td>
                     <td>
-                      <input
-                        value={r.name}
-                        onChange={(e) => setRow(i, { name: e.target.value })}
-                        placeholder="Item name"
-                      />
+                      <input value={r.name} onChange={(e) => setCart((c) => ({ ...c, [r.id]: { ...r, name: e.target.value } }))} />
                     </td>
                     <td>
-                      <input
-                        value={r.specs}
-                        onChange={(e) => setRow(i, { specs: e.target.value })}
-                        placeholder="Specs / description"
-                      />
+                      <input value={r.specs} onChange={(e) => setCart((c) => ({ ...c, [r.id]: { ...r, specs: e.target.value } }))} />
                     </td>
                     <td>
                       <input
                         type="number"
-                        step="1"
-                        min="0"
                         value={r.qty}
-                        onChange={(e) => setRow(i, { qty: Number(e.target.value) })}
+                        min={0}
+                        onChange={(e) =>
+                          setCart((c) => ({ ...c, [r.id]: { ...r, qty: Number(e.target.value) } }))
+                        }
                       />
                     </td>
                     <td>
                       <input
                         type="number"
-                        step="1"
-                        min="0"
                         value={r.unit}
-                        onChange={(e) => setRow(i, { unit: Number(e.target.value) })}
+                        min={0}
+                        onChange={(e) =>
+                          setCart((c) => ({ ...c, [r.id]: { ...r, unit: Number(e.target.value) } }))
+                        }
                       />
                     </td>
                     <td style={{ textAlign: "right", fontWeight: 700 }}>
-                      ₹{formatINR((r.qty || 0) * (r.unit || 0))}
-                    </td>
-                    <td>
-                      <button onClick={() => delRow(i)}>×</button>
+                      ₹{inr((r.qty || 0) * (r.unit || 0))}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
 
-            <div style={{ marginTop: 8 }}>
-              <button onClick={addRow}>+ Add Row</button>
-            </div>
-
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 24, marginTop: 16 }}>
-              <div>Subtotal <b>₹{formatINR(subTotal)}</b></div>
-              <div>Grand Total <b>₹{formatINR(grandTotal)}</b></div>
+              <div>Subtotal <b>₹{inr(cartSubtotal)}</b></div>
+              <div>Grand Total <b>₹{inr(cartSubtotal)}</b></div>
             </div>
 
             <div style={{ marginTop: 14, display: "flex", gap: 8 }}>
-              <button onClick={saveQuote}>Save</button>
+              <button onClick={async () => { const n = await saveQuote(); if (n && !qHeader.number) setQHeader((h) => ({ ...h, number: n })); }}>
+                Save
+              </button>
               <button onClick={exportPDF}>Export / Print PDF</button>
-              <button onClick={() => setQuoteMode(false)}>Back to Catalog</button>
-            </div>
-
-            {/* Terms (view-only on page) */}
-            <div style={{ marginTop: 18 }}>
-              <h4>Terms & Conditions</h4>
-              <ul style={{ marginTop: 6, color: "#444" }}>
-                <li>Price will be including GST where applicable.</li>
-                <li>This quotation is valid for one month only.</li>
-                <li>Delivery ex-stock/2 weeks.</li>
-                <li>Goods once sold cannot be taken back.</li>
-              </ul>
+              <button onClick={backToCatalog}>Back to Catalog</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* FLOATING controls (bottom-right): View Quote + Saved Quotes (works in both modes) */}
-      <div
-        style={{
-          position: "fixed",
-          right: 16,
-          bottom: 16,
-          display: "flex",
-          flexDirection: "column",
-          gap: 8,
-          zIndex: 20,
-        }}
-      >
+      {/* FLOATING bottom-right controls */}
+      <div style={{ position: "fixed", right: 16, bottom: 16, display: "flex", flexDirection: "column", gap: 8, zIndex: 20 }}>
         {quoteMode && (
-          <button
-            onClick={() => {
-              const c = quote.rows.filter((r) => (r.qty || 0) > 0).length;
-              alert(`You have ${c} rows in the quote.`);
-            }}
-          >
-            View Quote ({quote.rows.filter((r) => (r.qty || 0) > 0).length})
-          </button>
+          <button onClick={goToEditor}>View Quote ({cartCount})</button>
         )}
         <button
           onClick={() => {
             loadSaved();
-            const list = document.getElementById("saved-quotes-pop");
-            list.style.display = "block";
+            document.getElementById("saved-pop").style.display = "block";
           }}
         >
           Saved Quotes
@@ -892,7 +700,7 @@ export default function App() {
 
       {/* Saved quotes popup */}
       <div
-        id="saved-quotes-pop"
+        id="saved-pop"
         style={{
           display: "none",
           position: "fixed",
@@ -911,73 +719,23 @@ export default function App() {
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
           <b>Saved Quotes</b>
-          <button onClick={() => (document.getElementById("saved-quotes-pop").style.display = "none")}>✕</button>
+          <button onClick={() => (document.getElementById("saved-pop").style.display = "none")}>✕</button>
         </div>
-        {savedQuotes.length === 0 ? (
+        {saved.length === 0 ? (
           <div style={{ color: "#777" }}>No saved quotes yet.</div>
         ) : (
-          savedQuotes.map((q) => (
-            <div
-              key={q.ref}
-              style={{
-                border: "1px solid #eee",
-                borderRadius: 8,
-                padding: 8,
-                marginBottom: 6,
-                display: "grid",
-                gridTemplateColumns: "1fr auto",
-                gap: 8,
-              }}
-            >
+          saved.map((q) => (
+            <div key={q.number} style={{ border: "1px solid #eee", borderRadius: 8, padding: 8, marginBottom: 6, display: "grid", gridTemplateColumns: "1fr auto", gap: 8 }}>
               <div>
-                <div><b>{q.ref}</b> — {q.customer_name}</div>
-                <div style={{ fontSize: 12, color: "#666" }}>
-                  {q.date} • ₹{formatINR(q.grand_total)}
-                </div>
+                <div><b>{q.number}</b> — {q.customer_name || "—"}</div>
+                <div style={{ fontSize: 12, color: "#666" }}>₹{inr(q.total || 0)}</div>
               </div>
               <div style={{ display: "flex", gap: 6 }}>
+                <button onClick={() => editSaved(q.number)}>Edit</button>
                 <button
                   onClick={async () => {
-                    const { data } = await supabase
-                      .from("quotes")
-                      .select("*")
-                      .eq("ref", q.ref)
-                      .maybeSingle();
-                    if (data) {
-                      setQuote({
-                        ref: data.ref,
-                        date: data.date,
-                        customer_name: data.customer_name || "",
-                        address: data.address || "",
-                        phone: data.phone || "",
-                        subject: data.subject || "",
-                        rows: data.rows || [],
-                      });
-                      setQuoteMode(true);
-                    }
-                  }}
-                >
-                  Edit
-                </button>
-                <button
-                  onClick={async () => {
-                    const { data } = await supabase
-                      .from("quotes")
-                      .select("*")
-                      .eq("ref", q.ref)
-                      .maybeSingle();
-                    if (data) {
-                      setQuote({
-                        ref: data.ref,
-                        date: data.date,
-                        customer_name: data.customer_name || "",
-                        address: data.address || "",
-                        phone: data.phone || "",
-                        subject: data.subject || "",
-                        rows: data.rows || [],
-                      });
-                      await exportPDF();
-                    }
+                    await editSaved(q.number);
+                    await exportPDF();
                   }}
                 >
                   PDF

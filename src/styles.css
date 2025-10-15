@@ -105,3 +105,7 @@ a { text-decoration: none; color: inherit; }
 .qtable th, .qtable td { border: 1px solid #e5e7eb; padding: 6px 8px; }
 .qtable thead th { background: #f7f7f7; font-weight: 600; }
 .qtable input { width: 100%; padding: 6px 8px; border: 1px solid #e5e7eb; border-radius: 6px; }
+.qtable { width: 100%; border-collapse: collapse; }
+.qtable th, .qtable td { border: 1px solid #e5e7eb; padding: 6px 8px; }
+.qtable thead th { background: #f7f7f7; font-weight: 600; }
+.qtable input { width: 100%; padding: 6px 8px; border: 1px solid #e5e7eb; border-radius: 6px; }
