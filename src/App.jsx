@@ -15,10 +15,11 @@ const formatINRnoDecimals = (val) =>
     maximumFractionDigits: 0,
   });
 
+/* --- App --- */
 export default function App() {
   // data
   const [items, setItems] = useState([]);
-  const [categories, setCategories] = useState([]);
+  const [categories, setCategories] = useState([]); // dynamic
   const [category, setCategory] = useState("All");
 
   // ui / status
@@ -31,9 +32,17 @@ export default function App() {
   const [loginEmail, setLoginEmail] = useState("");
   const [showLogin, setShowLogin] = useState(false);
 
-  // staff pin auth
-  const [isStaff, setIsStaff] = useState(false);
-  const STAFF_PIN = "2525";
+  // staff quick view (PIN 2525)
+  const [staffMode, setStaffMode] = useState(false);
+  const toggleStaffLogin = () => {
+    if (staffMode) {
+      setStaffMode(false);
+      return;
+    }
+    const pin = prompt("Enter staff PIN:");
+    if ((pin || "").trim() === "2525") setStaffMode(true);
+    else alert("Wrong PIN");
+  };
 
   // add-product form
   const [form, setForm] = useState({
@@ -91,22 +100,10 @@ export default function App() {
     if (error) alert(error.message);
     else alert("Login link sent. Check your email.");
   };
-
   const signOut = async () => {
     await supabase.auth.signOut();
     setIsAdmin(false);
   };
-
-  /* ---------- staff pin ---------- */
-  const askStaffPin = () => {
-    const pin = prompt("Enter 4-digit staff PIN:");
-    if (pin === STAFF_PIN) {
-      setIsStaff(true);
-    } else if (pin != null) {
-      alert("Wrong PIN.");
-    }
-  };
-  const staffSignOut = () => setIsStaff(false);
 
   /* ---------- load data ---------- */
   const loadMachines = async () => {
@@ -172,6 +169,7 @@ export default function App() {
 
     setSaving(true);
     try {
+      // 1) upload image (safe filename)
       const ext = form.imageFile.name.split(".").pop().toLowerCase();
       const safeBase = form.name
         .trim()
@@ -195,6 +193,7 @@ export default function App() {
       if (urlErr) throw new Error("URL: " + urlErr.message);
       const image_url = urlData.publicUrl;
 
+      // 2) insert record
       const payload = {
         name: form.name,
         category: form.category,
@@ -247,17 +246,32 @@ export default function App() {
           by HVF Agency, Moranhat, Assam
         </p>
 
-        {/* Auth Row */}
-        <div style={{ marginTop: 8, display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
+        {/* Auth Row (Admin + Staff quick view) */}
+        <div style={{ marginTop: 8 }}>
+          {/* Staff toggle always visible */}
+          <button
+            onClick={toggleStaffLogin}
+            style={{
+              marginRight: 8,
+              background: staffMode ? "#ffeaea" : "#f1f1f1",
+              color: staffMode ? "#b30000" : "#333",
+            }}
+          >
+            {staffMode ? "Logout Staff View" : "Login as Staff (PIN)"}
+          </button>
+
           {session ? (
             <>
-              <button onClick={signOut}>Sign Out</button>
+              <button onClick={signOut} style={{ marginRight: 8 }}>
+                Sign Out
+              </button>
               <span
                 style={{
                   padding: "4px 8px",
                   borderRadius: 6,
                   background: isAdmin ? "#e8f6ed" : "#f7e8e8",
                   color: isAdmin ? "#1f7a3f" : "#b11e1e",
+                  marginRight: 8,
                 }}
               >
                 {isAdmin ? "Admin: ON" : "Not admin"}
@@ -267,7 +281,7 @@ export default function App() {
               </span>
             </>
           ) : (
-            <>
+            <div style={{ display: "inline-flex", gap: 8 }}>
               {!showLogin ? (
                 <button
                   onClick={() => setShowLogin(true)}
@@ -282,7 +296,7 @@ export default function App() {
                   Login as Admin
                 </button>
               ) : (
-                <div style={{ display: "inline-flex", gap: 8 }}>
+                <>
                   <input
                     type="email"
                     placeholder="your@email.com"
@@ -295,16 +309,15 @@ export default function App() {
                     }}
                   />
                   <button onClick={sendLoginLink}>Send Login Link</button>
-                  <button onClick={() => setShowLogin(false)}>Cancel</button>
-                </div>
+                  <button
+                    onClick={() => setShowLogin(false)}
+                    style={{ marginLeft: 6 }}
+                  >
+                    Cancel
+                  </button>
+                </>
               )}
-            </>
-          )}
-
-          {!isStaff ? (
-            <button onClick={askStaffPin}>Login as Staff</button>
-          ) : (
-            <button onClick={staffSignOut}>Sign out (Staff)</button>
+            </div>
           )}
         </div>
       </div>
@@ -435,7 +448,7 @@ export default function App() {
           <div className="catalog-grid">
             {filtered.map((m) => (
               <div key={m.id} className="card">
-                {/* Image: perfectly centered on pure white, no crop */}
+                {/* White thumbnail area, centered image, no crop */}
                 <div
                   className="thumb"
                   style={{
@@ -462,6 +475,7 @@ export default function App() {
                         height: "auto",
                         objectFit: "contain",
                         display: "block",
+                        background: "transparent",
                       }}
                       onError={(e) => (e.currentTarget.style.display = "none")}
                     />
@@ -471,12 +485,37 @@ export default function App() {
                 <div className="card-body">
                   <h3>{m.name}</h3>
                   {m.specs && <p style={{ color: "#666" }}>{m.specs}</p>}
+
+                  {/* Always show MRP (no label) */}
                   <p style={{ fontWeight: 700 }}>₹{formatINRnoDecimals(m.mrp)}</p>
 
-                  {(isAdmin || isStaff) && m.sell_price && (
-                    <p style={{ color: "red", fontWeight: 600 }}>
-                      ₹{formatINRnoDecimals(m.sell_price)}
-                    </p>
+                  {/* Staff/Admin sensitive prices */}
+                  {(staffMode || isAdmin) && m.sell_price != null && (
+                    <div
+                      style={{
+                        fontWeight: 700,
+                        marginTop: -2,
+                        marginBottom: 6,
+                        display: "inline-flex",
+                        alignItems: "baseline",
+                        gap: 8,
+                      }}
+                    >
+                      {/* Selling (red) */}
+                      <span style={{ color: "#d32f2f" }}>
+                        ₹{formatINRnoDecimals(m.sell_price)}
+                      </span>
+
+                      {/* For Admin only, show slash + Cost (yellow) */}
+                      {isAdmin && m.cost_price != null && (
+                        <>
+                          <span style={{ color: "#bbb" }}>/</span>
+                          <span style={{ color: "#d4a106" }}>
+                            ₹{formatINRnoDecimals(m.cost_price)}
+                          </span>
+                        </>
+                      )}
+                    </div>
                   )}
 
                   {m.category && (
