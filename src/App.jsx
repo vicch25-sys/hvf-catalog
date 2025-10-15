@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 import jsPDF from "jspdf";
-import "jspdf-autotable";
+import autoTable from "jspdf-autotable";
 
 /* --- Supabase client --- */
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
@@ -397,22 +397,21 @@ export default function App() {
       `₹${inr((r.qty || 0) * (r.unit || 0))}`,
     ]);
 
-    doc.autoTable({
-      startY: 170,
-      head: [["Sl.", "Description", "Specs / Description", "Qty", "Unit Price", "Total (Incl. GST)"]],
-      styles: { fontSize: 10 },
-      headStyles: { fillColor: [240, 240, 240] },
-      columnStyles: {
-        0: { cellWidth: 28, halign: "center" },
-        1: { cellWidth: 170 },
-        2: { cellWidth: 170 },
-        3: { cellWidth: 40, halign: "center" },
-        4: { cellWidth: 90, halign: "right" },
-        5: { cellWidth: 100, halign: "right" },
-      },
-      body,
-    });
-
+    autoTable(doc, {
+  startY: 170,
+  head: [["Sl.", "Description", "Specs / Description", "Qty", "Unit Price", "Total (Incl. GST)"]],
+  styles: { fontSize: 10 },
+  headStyles: { fillColor: [240, 240, 240] },
+  columnStyles: {
+    0: { cellWidth: 28, halign: "center" },
+    1: { cellWidth: 170 },
+    2: { cellWidth: 170 },
+    3: { cellWidth: 40, halign: "center" },
+    4: { cellWidth: 90, halign: "right" },
+    5: { cellWidth: 100, halign: "right" },
+  },
+  body,
+});
     const y = doc.lastAutoTable.finalY + 16;
     doc.text(`Subtotal: ₹${inr(cartSubtotal)}`, pw - 180, y);
     doc.text(`Grand Total: ₹${inr(cartSubtotal)}`, pw - 180, y + 18);
@@ -432,7 +431,7 @@ export default function App() {
       ty + 14
     );
 
-    doc.save(`${num}.pdf`);
+    window.open(doc.output("bloburl"), "_blank");
   };
 
   /*** UI ***/
