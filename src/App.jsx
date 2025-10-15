@@ -9,50 +9,74 @@ const supabase = createClient(supabaseUrl, supabaseKey, {
 });
 
 /* --- Helpers --- */
-const formatINR = (val) =>
+const formatINRnoDecimals = (val) =>
   Number(val ?? 0).toLocaleString("en-IN", {
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   });
 
-/* ===================== App ===================== */
+// Build next quote ref like APP/H001, APP/H002...
+const buildNextRef = async () => {
+  const { data } = await supabase
+    .from("quotes")
+    .select("ref")
+    .order("created_at", { ascending: false })
+    .limit(1);
+  const last = data?.[0]?.ref || "";
+  const num = parseInt(last.replace(/[^0-9]/g, "") || "0", 10) + 1;
+  const padded = String(num).padStart(3, "0");
+  return `APP/H${padded}`;
+};
+
+/* --- App --- */
 export default function App() {
-  /* data */
+  // catalog data
   const [items, setItems] = useState([]);
   const [categories, setCategories] = useState([]);
   const [category, setCategory] = useState("All");
 
-  /* ui / status */
+  // ui / status
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState("");
-  const [search, setSearch] = useState("");
 
-  /* auth */
+  // top-right menu
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  // auth
   const [session, setSession] = useState(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [loginEmail, setLoginEmail] = useState("");
-  const [showLoginChoices, setShowLoginChoices] = useState(false);
-  const [showAdminEmail, setShowAdminEmail] = useState(false);
+  const [showLogin, setShowLogin] = useState(false);
 
-  /* staff quick view (PIN 2525) */
+  // staff quick view (PIN 2525)
   const [staffMode, setStaffMode] = useState(false);
 
-  /* quotation mode (PIN 9990) */
+  // quotation access (PIN 9990)
   const [quoteMode, setQuoteMode] = useState(false);
-  const [view, setView] = useState("catalog"); // "catalog" | "quote" | "quotesList"
-  const [cart, setCart] = useState({}); // { machineId: qty }
 
-  /* add-product form (admin) */
-  const [form, setForm] = useState({
-    name: "",
-    category: "",
-    mrp: "",
-    sell_price: "",
-    cost_price: "",
-    specs: "",
-    imageFile: null,
-  });
-  const [saving, setSaving] = useState(false);
+  // search
+  const [search, setSearch] = useState("");
+
+  // cart for quotation
+  const [cart, setCart] = useState({}); // id -> {qty, snap:{name,specs,mrp,sell_price,cost_price,category,image_url}}
+  const cartCount = useMemo(
+    () => Object.values(cart).reduce((n, r) => n + (r.qty || 0), 0),
+    [cart]
+  );
+
+  // quote editor state (navigation-less "page")
+  const [editingQuote, setEditingQuote] = useState(null); // {ref, customer_name, phone, subject, rows:[{...}]}
+
+  // saved quotes list
+  const [savedQuotes, setSavedQuotes] = useState([]);
+  const loadSavedQuotes = async () => {
+    const { data, error } = await supabase
+      .from("quotes")
+      .select("id, ref, customer_name, created_at, grand_total")
+      .order("created_at", { ascending: false })
+      .limit(50);
+    if (!error) setSavedQuotes(data || []);
+  };
 
   /* ---------- auth ---------- */
   useEffect(() => {
@@ -84,8 +108,7 @@ export default function App() {
       } else {
         setIsAdmin(false);
       }
-      setShowAdminEmail(false);
-      setShowLoginChoices(false);
+      setShowLogin(false);
     });
     return () => sub.subscription.unsubscribe();
   }, []);
@@ -129,38 +152,53 @@ export default function App() {
     loadCategories();
   }, []);
 
-  /* ---------- filters (incl. search) ---------- */
+  /* ---------- filters ---------- */
   const filtered = useMemo(() => {
-    let list = items;
+    let arr = items;
     if (category !== "All") {
-      list = list.filter(
+      arr = arr.filter(
         (m) => (m.category || "").toLowerCase() === category.toLowerCase()
       );
     }
     if (search.trim()) {
       const q = search.trim().toLowerCase();
-      list = list.filter(
+      arr = arr.filter(
         (m) =>
           (m.name || "").toLowerCase().includes(q) ||
           (m.specs || "").toLowerCase().includes(q) ||
           (m.category || "").toLowerCase().includes(q)
       );
     }
-    return list;
+    return arr;
   }, [items, category, search]);
 
-  /* ---------- categories (admin) ---------- */
+  /* ---------- admin: add category ---------- */
   const onAddCategory = async () => {
     const name = (prompt("New category name:") || "").trim();
     if (!name) return;
+
     const { error } = await supabase.from("categories").insert({ name });
-    if (error) return alert(error.message);
+    if (error) {
+      alert(error.message);
+      return;
+    }
     await loadCategories();
     setCategory("All");
     alert("Category added ✅");
   };
 
-  /* ---------- add product (admin) ---------- */
+  /* ---------- admin: add product ---------- */
+  const [form, setForm] = useState({
+    name: "",
+    category: "",
+    mrp: "",
+    sell_price: "",
+    cost_price: "",
+    specs: "",
+    imageFile: null,
+  });
+  const [saving, setSaving] = useState(false);
+
   const onChange = (e) => {
     const { name, value, files } = e.target;
     if (files) setForm((f) => ({ ...f, imageFile: files[0] || null }));
@@ -230,101 +268,166 @@ export default function App() {
     }
   };
 
-  /* ---------- staff & quotation logins ---------- */
-  const doStaffToggle = () => {
+  /* ---------- menu actions ---------- */
+  const toggleStaffLogin = () => {
     if (staffMode) return setStaffMode(false);
     const pin = prompt("Enter staff PIN:");
     if ((pin || "").trim() === "2525") setStaffMode(true);
     else alert("Wrong PIN");
   };
-  const doQuoteToggle = () => {
+
+  const toggleQuoteLogin = async () => {
     if (quoteMode) {
       setQuoteMode(false);
-      setView("catalog");
       setCart({});
+      setEditingQuote(null);
       return;
     }
     const pin = prompt("Enter quotation PIN:");
     if ((pin || "").trim() === "9990") {
       setQuoteMode(true);
-      setView("catalog");
+      loadSavedQuotes();
     } else {
       alert("Wrong PIN");
     }
   };
 
-  /* ---------- cart helpers (quotation) ---------- */
-  const inc = (id) =>
-    setCart((c) => ({ ...c, [id]: (c[id] || 0) + 1 }));
-  const dec = (id) =>
-    setCart((c) => {
-      const n = (c[id] || 0) - 1;
-      const copy = { ...c };
-      if (n <= 0) delete copy[id];
-      else copy[id] = n;
-      return copy;
+  /* ---------- cart helpers ---------- */
+  const addQty = (m, delta) => {
+    setCart((prev) => {
+      const cur = prev[m.id] || {
+        qty: 0,
+        snap: {
+          name: m.name,
+          specs: m.specs,
+          mrp: m.mrp,
+          sell_price: m.sell_price,
+          cost_price: m.cost_price,
+          category: m.category,
+          image_url: m.image_url,
+        },
+      };
+      const nextQty = Math.max(0, cur.qty + delta);
+      const next = { ...prev };
+      if (nextQty === 0) delete next[m.id];
+      else next[m.id] = { ...cur, qty: nextQty };
+      return next;
     });
-  const totalQty = Object.values(cart).reduce((a, b) => a + b, 0);
+  };
 
-  const cartItems = useMemo(() => {
-    const map = new Map(items.map((m) => [m.id, m]));
-    return Object.entries(cart).map(([id, qty]) => ({
+  const openQuoteEditorFromCart = async () => {
+    if (cartCount === 0) return alert("Add some items first.");
+    const ref = await buildNextRef();
+    const rows = Object.values(cart).map(({ qty, snap }) => ({
+      name: snap.name,
+      specs: snap.specs || "",
       qty,
-      ...map.get(id),
+      unit_price: snap.mrp || 0, // default to MRP (editable)
+      gst_percent: 0, // editable later
     }));
-  }, [cart, items]);
+    setEditingQuote({
+      id: null,
+      ref,
+      customer_name: "",
+      phone: "",
+      subject: "",
+      rows,
+      date: new Date(),
+    });
+    window.scrollTo(0, 0);
+  };
 
-  /* ---------- quote number ---------- */
-  async function nextQuoteNumber() {
-    // Get last number and increment; fallback to APP/H001
-    const { data } = await supabase
+  const editSavedQuote = async (qid) => {
+    const { data, error } = await supabase
       .from("quotes")
-      .select("number")
-      .order("created_at", { ascending: false })
-      .limit(1);
-    const last = data?.[0]?.number || "APP/H001";
-    const m = last.match(/^(.*\/H)(\d+)$/i);
-    if (!m) return "APP/H001";
-    const n = String(Number(m[2]) + 1).padStart(3, "0");
-    return `${m[1]}${n}`;
-  }
+      .select("*")
+      .eq("id", qid)
+      .maybeSingle();
+    if (error || !data) return alert("Could not load quote.");
+    const rows = (data.items || []).map((r) => ({
+      name: r.name,
+      specs: r.specs || "",
+      qty: Number(r.qty || 0),
+      unit_price: Number(r.unit_price || 0),
+      gst_percent: Number(r.gst_percent || 0),
+    }));
+    setEditingQuote({
+      id: data.id,
+      ref: data.ref,
+      customer_name: data.customer_name || "",
+      phone: data.phone || "",
+      subject: data.subject || "",
+      rows,
+      date: new Date(data.created_at),
+    });
+    window.scrollTo(0, 0);
+  };
 
-  /* ---------- save quote ---------- */
-  async function saveQuote(rows, customerName, phone) {
-    try {
-      const qno = await nextQuoteNumber();
-      const total = rows.reduce((sum, r) => sum + r.mrp * r.qty, 0);
-      const { data: q, error: qErr } = await supabase
-        .from("quotes")
-        .insert({
-          number: qno,
-          customer_name: customerName || null,
-          phone: phone || null,
-          total,
-        })
-        .select()
-        .single();
-      if (qErr) throw qErr;
+  /* ---------- compute totals for editor ---------- */
+  const computeTotals = (rows) => {
+    const subtotal = rows.reduce(
+      (s, r) => s + Number(r.qty || 0) * Number(r.unit_price || 0),
+      0
+    );
+    const gst_total = rows.reduce((s, r) => {
+      const line = Number(r.qty || 0) * Number(r.unit_price || 0);
+      return s + (line * Number(r.gst_percent || 0)) / 100;
+    }, 0);
+    return {
+      subtotal,
+      gst_total,
+      grand_total: subtotal + gst_total,
+    };
+  };
 
-      const payload = rows.map((r) => ({
-        quote_id: q.id,
+  const saveQuote = async () => {
+    if (!editingQuote) return;
+    const rows = editingQuote.rows.filter((r) => Number(r.qty) > 0);
+    if (rows.length === 0) return alert("At least one item is required.");
+    const t = computeTotals(rows);
+    const payload = {
+      ref: editingQuote.ref,
+      customer_name: editingQuote.customer_name || null,
+      phone: editingQuote.phone || null,
+      subject: editingQuote.subject || null,
+      items: rows.map((r) => ({
         name: r.name,
         specs: r.specs || "",
-        qty: r.qty,
-        mrp: r.mrp,
-      }));
-      const { error: liErr } = await supabase.from("quote_items").insert(payload);
-      if (liErr) throw liErr;
+        qty: Number(r.qty || 0),
+        unit_price: Number(r.unit_price || 0),
+        gst_percent: Number(r.gst_percent || 0),
+        total:
+          Number(r.qty || 0) * Number(r.unit_price || 0) +
+          (Number(r.qty || 0) *
+            Number(r.unit_price || 0) *
+            Number(r.gst_percent || 0)) /
+            100,
+      })),
+      subtotal: t.subtotal,
+      gst_total: t.gst_total,
+      grand_total: t.grand_total,
+    };
 
-      alert(`Saved quotation ${qno} ✅`);
-      return qno;
-    } catch (e) {
-      alert("Save failed: " + e.message);
-      return null;
+    if (editingQuote.id) {
+      const { error } = await supabase
+        .from("quotes")
+        .update(payload)
+        .eq("id", editingQuote.id);
+      if (error) return alert(error.message);
+      alert("Quote updated ✅");
+    } else {
+      const { error } = await supabase.from("quotes").insert(payload);
+      if (error) return alert(error.message);
+      alert("Quote saved ✅");
     }
-  }
+    await loadSavedQuotes();
+  };
 
-  /* ---------- views ---------- */
+  const printQuote = () => {
+    window.print();
+  };
+
+  /* ---------- UI ---------- */
   return (
     <div
       style={{
@@ -333,125 +436,126 @@ export default function App() {
         background: "linear-gradient(to bottom right,#f8f9fa,#eef2f7)",
       }}
     >
-      {/* Header */}
-      <div style={{ position: "relative", textAlign: "center", marginBottom: 18 }}>
-        <img
-          src="/hvf-logo.png"
-          alt="HVF Agency"
-          style={{ width: 160, height: "auto", marginBottom: 8 }}
-        />
-        <h1 style={{ margin: 0 }}>HVF Machinery Catalog</h1>
-        <p style={{ color: "#777", marginTop: 6 }}>by HVF Agency, Moranhat, Assam</p>
+      {/* Top bar */}
+      <div style={{ position: "relative" }}>
+        <div style={{ textAlign: "center", marginBottom: 18 }}>
+          <img
+            src="/hvf-logo.png"
+            alt="HVF Agency"
+            style={{ width: 160, height: "auto", marginBottom: 8 }}
+          />
+          <h1 style={{ margin: 0 }}>HVF Machinery Catalog</h1>
+          <p style={{ color: "#777", marginTop: 6 }}>
+            by HVF Agency, Moranhat, Assam
+          </p>
+        </div>
 
-        {/* Top-right Login menu */}
-        <div style={{ position: "absolute", top: 10, right: 14 }}>
-          <div style={{ position: "relative", display: "inline-block" }}>
-            <button
-              onClick={() => setShowLoginChoices((v) => !v)}
-              style={{
-                padding: "6px 12px",
-                borderRadius: 6,
-                border: "1px solid #ddd",
-                background: "#fff",
-              }}
-            >
-              Login ▾
-            </button>
-
-            {showLoginChoices && (
+        {/* Top-right login menu */}
+        <div
+          style={{
+            position: "absolute",
+            top: 12,
+            right: 12,
+          }}
+        >
+          <div style={{ position: "relative" }}>
+            <button onClick={() => setMenuOpen((b) => !b)}>Login ▾</button>
+            {menuOpen && (
               <div
                 style={{
                   position: "absolute",
+                  top: "110%",
                   right: 0,
-                  marginTop: 6,
                   background: "#fff",
                   border: "1px solid #ddd",
                   borderRadius: 8,
-                  padding: 8,
-                  width: 220,
-                  zIndex: 5,
-                  boxShadow: "0 8px 24px rgba(0,0,0,.08)",
+                  padding: 10,
+                  minWidth: 220,
+                  boxShadow: "0 8px 20px rgba(0,0,0,.08)",
+                  zIndex: 10,
                 }}
               >
+                {/* Staff quick view */}
                 <button
-                  style={{ width: "100%", marginBottom: 6 }}
                   onClick={() => {
-                    setShowAdminEmail(false);
-                    doStaffToggle();
+                    setMenuOpen(false);
+                    toggleStaffLogin();
+                  }}
+                  style={{
+                    width: "100%",
+                    marginBottom: 6,
+                    background: staffMode ? "#ffeaea" : "#f1f1f1",
+                    color: staffMode ? "#b30000" : "#333",
                   }}
                 >
                   {staffMode ? "Logout Staff View" : "Login as Staff (PIN)"}
                 </button>
 
+                {/* Quotation access */}
                 <button
+                  onClick={() => {
+                    setMenuOpen(false);
+                    toggleQuoteLogin();
+                  }}
                   style={{ width: "100%", marginBottom: 6 }}
-                  onClick={() => {
-                    setShowAdminEmail((s) => !s);
-                  }}
                 >
-                  {session ? "Sign Out (Admin)" : "Login as Admin (email)"}
+                  {quoteMode ? "Exit Quotation Mode" : "Login for Quotation"}
                 </button>
 
-                <button
-                  style={{ width: "100%" }}
-                  onClick={() => {
-                    setShowAdminEmail(false);
-                    doQuoteToggle();
-                  }}
-                >
-                  {quoteMode ? "Exit Quotation Mode" : "Login for Quotation (PIN)"}
-                </button>
-
-                {showAdminEmail && !session && (
-                  <div style={{ marginTop: 8 }}>
-                    <input
-                      type="email"
-                      placeholder="your@email.com"
-                      value={loginEmail}
-                      onChange={(e) => setLoginEmail(e.target.value)}
-                      style={{
-                        width: "100%",
-                        padding: "6px 10px",
-                        borderRadius: 6,
-                        border: "1px solid #ddd",
-                        marginBottom: 6,
+                {/* Admin login / logout */}
+                {session ? (
+                  <>
+                    <button
+                      onClick={() => {
+                        setMenuOpen(false);
+                        signOut();
                       }}
-                    />
-                    <button style={{ width: "100%" }} onClick={sendLoginLink}>
-                      Send Login Link
+                      style={{ width: "100%" }}
+                    >
+                      Sign Out (Admin)
                     </button>
-                  </div>
-                )}
-
-                {session && (
-                  <div style={{ marginTop: 8 }}>
-                    <button style={{ width: "100%" }} onClick={signOut}>
-                      Sign Out
-                    </button>
-                  </div>
+                    <div style={{ fontSize: 12, color: "#666", marginTop: 6 }}>
+                      {isAdmin ? "Admin: ON" : "Not admin"} · UID:{" "}
+                      {session.user?.id?.slice(0, 8)}…
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    {!showLogin ? (
+                      <button
+                        onClick={() => setShowLogin(true)}
+                        style={{ width: "100%" }}
+                      >
+                        Login as Admin (Magic Link)
+                      </button>
+                    ) : (
+                      <div style={{ display: "grid", gap: 6 }}>
+                        <input
+                          type="email"
+                          placeholder="your@email.com"
+                          value={loginEmail}
+                          onChange={(e) => setLoginEmail(e.target.value)}
+                          style={{
+                            padding: "6px 10px",
+                            borderRadius: 6,
+                            border: "1px solid #ddd",
+                          }}
+                        />
+                        <button onClick={sendLoginLink}>Send Login Link</button>
+                        <button onClick={() => setShowLogin(false)}>
+                          Cancel
+                        </button>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             )}
           </div>
         </div>
-
-        {/* Global search */}
-        <div style={{ marginTop: 10 }}>
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by name/specs/category…"
-            style={{
-              width: "min(680px, 90vw)",
-              padding: "8px 12px",
-              borderRadius: 8,
-              border: "1px solid #ddd",
-            }}
-          />
-        </div>
       </div>
 
-      {/* Admin controls */}
+      {/* Admin Add Category button */}
       {isAdmin && (
         <div style={{ maxWidth: 1100, margin: "0 auto 10px", textAlign: "right" }}>
           <button onClick={onAddCategory}>+ Add Category</button>
@@ -479,8 +583,19 @@ export default function App() {
               alignItems: "center",
             }}
           >
-            <input name="name" placeholder="Name *" value={form.name} onChange={onChange} required />
-            <select name="category" value={form.category} onChange={onChange} required>
+            <input
+              name="name"
+              placeholder="Name *"
+              value={form.name}
+              onChange={onChange}
+              required
+            />
+            <select
+              name="category"
+              value={form.category}
+              onChange={onChange}
+              required
+            >
               <option value="">Select category *</option>
               {categories.map((c) => (
                 <option key={c} value={c}>
@@ -488,9 +603,28 @@ export default function App() {
                 </option>
               ))}
             </select>
-            <input name="mrp" type="number" placeholder="MRP *" value={form.mrp} onChange={onChange} required />
-            <input name="sell_price" type="number" placeholder="Selling Price" value={form.sell_price} onChange={onChange} />
-            <input name="cost_price" type="number" placeholder="Cost Price" value={form.cost_price} onChange={onChange} />
+            <input
+              name="mrp"
+              type="number"
+              placeholder="MRP *"
+              value={form.mrp}
+              onChange={onChange}
+              required
+            />
+            <input
+              name="sell_price"
+              type="number"
+              placeholder="Selling Price"
+              value={form.sell_price}
+              onChange={onChange}
+            />
+            <input
+              name="cost_price"
+              type="number"
+              placeholder="Cost Price"
+              value={form.cost_price}
+              onChange={onChange}
+            />
           </div>
 
           <div
@@ -502,7 +636,12 @@ export default function App() {
               alignItems: "center",
             }}
           >
-            <input name="specs" placeholder="Specs / Description" value={form.specs} onChange={onChange} />
+            <input
+              name="specs"
+              placeholder="Specs / Description"
+              value={form.specs}
+              onChange={onChange}
+            />
             <input type="file" accept="image/*" onChange={onChange} />
           </div>
 
@@ -513,6 +652,30 @@ export default function App() {
           </div>
         </form>
       )}
+
+      {/* Search + Cart (quotation mode) */}
+      <div style={{ maxWidth: 1100, margin: "0 auto 10px", display: "flex", gap: 8, alignItems: "center" }}>
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search products…"
+          style={{
+            flex: 1,
+            padding: "8px 10px",
+            borderRadius: 8,
+            border: "1px solid #ddd",
+            background: "#fff",
+          }}
+        />
+        {quoteMode && (
+          <>
+            <button onClick={openQuoteEditorFromCart}>
+              View Quote ({cartCount})
+            </button>
+            <button onClick={loadSavedQuotes}>Saved Quotes</button>
+          </>
+        )}
+      </div>
 
       {/* Category pills */}
       <div style={{ textAlign: "center", marginBottom: 12 }}>
@@ -534,391 +697,432 @@ export default function App() {
         ))}
       </div>
 
-      {/* ===== Views ===== */}
-      {view === "catalog" && (
-        <CatalogGrid
-          loading={loading}
-          list={filtered}
-          msg={msg}
-          staffMode={staffMode}
-          isAdmin={isAdmin}
-          quoteMode={quoteMode}
-          cart={cart}
-          inc={inc}
-          dec={dec}
-        />
-      )}
-
-      {view === "quote" && (
-        <QuotePage
-          items={cartItems}
-          onBack={() => setView("catalog")}
-          onSave={saveQuote}
-        />
-      )}
-
-      {view === "quotesList" && <SavedQuotes onBack={() => setView("catalog")} />}
-
-      {/* Floating quote button */}
-      {quoteMode && view === "catalog" && (
-        <div style={{ position: "fixed", right: 16, bottom: 16 }}>
-          <button
-            onClick={() => setView("quote")}
-            style={{
-              position: "relative",
-              padding: "10px 14px",
-              borderRadius: 24,
-              border: "1px solid #ddd",
-              background: "#fff",
-              boxShadow: "0 8px 20px rgba(0,0,0,.12)",
-              fontWeight: 600,
-            }}
-          >
-            View Quote
-            <span
-              style={{
-                position: "absolute",
-                top: -8,
-                right: -8,
-                background: "#1677ff",
-                color: "#fff",
-                fontSize: 12,
-                borderRadius: 12,
-                padding: "2px 7px",
-              }}
-            >
-              {totalQty}
-            </span>
-          </button>
-
-          <div style={{ marginTop: 8, textAlign: "right" }}>
-            <button onClick={() => setView("quotesList")}>Saved Quotes</button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-/* ===================== CatalogGrid ===================== */
-function CatalogGrid({ loading, list, msg, staffMode, isAdmin, quoteMode, cart, inc, dec }) {
-  return (
-    <div style={{ maxWidth: 1100, margin: "0 auto 40px" }}>
-      {loading ? (
-        <p style={{ textAlign: "center" }}>Loading…</p>
-      ) : (
-        <div className="catalog-grid">
-          {list.map((m) => (
-            <div key={m.id} className="card" style={{ position: "relative" }}>
-              {/* White thumbnail area, centered image, no crop */}
-              <div
-                className="thumb"
-                style={{
-                  height: 240,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  background: "#ffffff",
-                  borderBottom: "1px solid #eee",
-                  borderTopLeftRadius: 10,
-                  borderTopRightRadius: 10,
-                  overflow: "hidden",
+      {/* Product grid OR Quote Editor / Saved Quotes */}
+      <div style={{ maxWidth: 1100, margin: "0 auto 40px" }}>
+        {editingQuote ? (
+          <QuoteEditor
+            editingQuote={editingQuote}
+            setEditingQuote={setEditingQuote}
+            computeTotals={computeTotals}
+            saveQuote={saveQuote}
+            printQuote={printQuote}
+          />
+        ) : (
+          <>
+            {quoteMode && savedQuotes.length > 0 && (
+              <SavedQuotesPanel
+                quotes={savedQuotes}
+                onEdit={editSavedQuote}
+                onPrint={async (id) => {
+                  await editSavedQuote(id);
+                  setTimeout(() => printQuote(), 300);
                 }}
-              >
-                {m.image_url && (
-                  <img
-                    src={m.image_url}
-                    alt={m.name}
-                    loading="lazy"
-                    style={{
-                      maxWidth: "100%",
-                      maxHeight: "100%",
-                      width: "auto",
-                      height: "auto",
-                      objectFit: "contain",
-                      display: "block",
-                      background: "transparent",
-                    }}
-                    onError={(e) => (e.currentTarget.style.display = "none")}
-                  />
-                )}
-              </div>
+              />
+            )}
 
-              <div className="card-body">
-                <h3>{m.name}</h3>
-                {m.specs && <p style={{ color: "#666" }}>{m.specs}</p>}
+            {loading ? (
+              <p style={{ textAlign: "center" }}>Loading…</p>
+            ) : (
+              <div className="catalog-grid">
+                {filtered.map((m) => (
+                  <div key={m.id} className="card">
+                    {/* White, centered, no-crop thumbnail */}
+                    <div
+                      className="thumb"
+                      style={{
+                        height: 240,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        background: "#ffffff",
+                        borderBottom: "1px solid #eee",
+                        borderTopLeftRadius: 10,
+                        borderTopRightRadius: 10,
+                        overflow: "hidden",
+                      }}
+                    >
+                      {m.image_url && (
+                        <img
+                          src={m.image_url}
+                          alt={m.name}
+                          loading="lazy"
+                          style={{
+                            maxWidth: "100%",
+                            maxHeight: "100%",
+                            width: "auto",
+                            height: "auto",
+                            objectFit: "contain",
+                            display: "block",
+                            background: "transparent",
+                          }}
+                          onError={(e) =>
+                            (e.currentTarget.style.display = "none")
+                          }
+                        />
+                      )}
+                    </div>
 
-                {/* Always show MRP (no label) */}
-                <p style={{ fontWeight: 700 }}>₹{formatINR(m.mrp)}</p>
+                    <div className="card-body">
+                      <h3>{m.name}</h3>
+                      {m.specs && (
+                        <p style={{ color: "#666" }}>{m.specs}</p>
+                      )}
 
-                {/* Staff/Admin sensitive prices */}
-                {(staffMode || isAdmin) && m.sell_price != null && (
-                  <div
-                    style={{
-                      fontWeight: 700,
-                      marginTop: -2,
-                      marginBottom: 6,
-                      display: "inline-flex",
-                      alignItems: "baseline",
-                      gap: 8,
-                    }}
-                  >
-                    <span style={{ color: "#d32f2f" }}>
-                      ₹{formatINR(m.sell_price)}
-                    </span>
-                    {isAdmin && m.cost_price != null && (
-                      <>
-                        <span style={{ color: "#bbb" }}>/</span>
-                        <span style={{ color: "#d4a106" }}>
-                          ₹{formatINR(m.cost_price)}
-                        </span>
-                      </>
+                      {/* Always show MRP (no label) */}
+                      <p style={{ fontWeight: 700 }}>
+                        ₹{formatINRnoDecimals(m.mrp)}
+                      </p>
+
+                      {/* Staff/Admin sensitive prices */}
+                      {(staffMode || isAdmin) && m.sell_price != null && (
+                        <div
+                          style={{
+                            fontWeight: 700,
+                            marginTop: -2,
+                            marginBottom: 6,
+                            display: "inline-flex",
+                            alignItems: "baseline",
+                            gap: 8,
+                          }}
+                        >
+                          {/* Selling (red) */}
+                          <span style={{ color: "#d32f2f" }}>
+                            ₹{formatINRnoDecimals(m.sell_price)}
+                          </span>
+
+                          {/* For Admin only, add slash + Cost (yellow) */}
+                          {isAdmin && m.cost_price != null && (
+                            <>
+                              <span style={{ color: "#bbb" }}>/</span>
+                              <span style={{ color: "#d4a106" }}>
+                                ₹{formatINRnoDecimals(m.cost_price)}
+                              </span>
+                            </>
+                          )}
+                        </div>
+                      )}
+
+                      {m.category && (
+                        <p style={{ color: "#777", fontSize: 12 }}>
+                          {m.category}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Quotation qty controls */}
+                    {quoteMode && (
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "center",
+                          gap: 8,
+                          marginBottom: 10,
+                        }}
+                      >
+                        <button onClick={() => addQty(m, -1)}>-</button>
+                        <div
+                          style={{
+                            minWidth: 32,
+                            textAlign: "center",
+                            background: "#f7f7f7",
+                            borderRadius: 6,
+                            padding: "4px 6px",
+                            border: "1px solid #eee",
+                          }}
+                        >
+                          {cart[m.id]?.qty || 0}
+                        </div>
+                        <button onClick={() => addQty(m, 1)}>+</button>
+                      </div>
                     )}
                   </div>
-                )}
-
-                {m.category && (
-                  <p style={{ color: "#777", fontSize: 12 }}>{m.category}</p>
-                )}
+                ))}
               </div>
+            )}
+          </>
+        )}
 
-              {/* Quotation qty steppers */}
-              {quoteMode && (
-                <div
-                  style={{
-                    position: "absolute",
-                    top: 10,
-                    right: 10,
-                    background: "#fff",
-                    border: "1px solid #e5e5e5",
-                    borderRadius: 20,
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 8,
-                    padding: "4px 8px",
-                  }}
-                >
-                  <button onClick={() => dec(m.id)}>-</button>
-                  <span style={{ minWidth: 14, textAlign: "center" }}>{cart[m.id] || 0}</span>
-                  <button onClick={() => inc(m.id)}>+</button>
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-      {msg && <p style={{ textAlign: "center", color: "crimson", marginTop: 10 }}>{msg}</p>}
+        {msg && (
+          <p style={{ textAlign: "center", color: "crimson", marginTop: 10 }}>
+            {msg}
+          </p>
+        )}
+      </div>
     </div>
   );
 }
 
-/* ===================== QuotePage ===================== */
-function QuotePage({ items, onBack, onSave }) {
-  const [rows, setRows] = useState(
-    items.map((r) => ({
-      id: r.id,
-      name: r.name,
-      specs: r.specs || "",
-      qty: r.qty || 1,
-      mrp: Number(r.mrp) || 0,
-    }))
-  );
-  const [customerName, setCustomerName] = useState("");
-  const [phone, setPhone] = useState("");
+/* ---------------- Quote Editor ---------------- */
+function QuoteEditor({
+  editingQuote,
+  setEditingQuote,
+  computeTotals,
+  saveQuote,
+  printQuote,
+}) {
+  const rows = editingQuote.rows;
+  const totals = computeTotals(rows);
 
-  const total = rows.reduce((sum, r) => sum + r.qty * r.mrp, 0);
-
-  const update = (i, field, value) =>
-    setRows((rs) => {
-      const copy = [...rs];
-      copy[i] = { ...copy[i], [field]: field === "qty" || field === "mrp" ? Number(value) : value };
-      return copy;
-    });
-
-  const remove = (i) => setRows((rs) => rs.filter((_, idx) => idx !== i));
-
-  const doPrint = () => {
-    window.print();
+  const setRow = (i, patch) => {
+    const next = rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r));
+    setEditingQuote({ ...editingQuote, rows: next });
   };
 
-  const doSave = async () => {
-    const qno = await onSave(rows, customerName, phone);
-    if (qno) onBack();
+  const addEmptyRow = () => {
+    setEditingQuote({
+      ...editingQuote,
+      rows: [
+        ...rows,
+        { name: "", specs: "", qty: 1, unit_price: 0, gst_percent: 0 },
+      ],
+    });
+  };
+
+  const removeRow = (i) => {
+    const next = rows.filter((_, idx) => idx !== i);
+    setEditingQuote({ ...editingQuote, rows: next });
   };
 
   return (
-    <div style={{ maxWidth: 1100, margin: "0 auto 40px", background: "#fff", padding: 16, borderRadius: 10, border: "1px solid #eee" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-        <h2 style={{ margin: 0 }}>Quotation</h2>
-        <div>
-          <button onClick={onBack} style={{ marginRight: 8 }}>← Back</button>
-          <button onClick={doSave} style={{ marginRight: 8 }}>Save</button>
-          <button onClick={doPrint}>Export as PDF</button>
+    <div
+      style={{
+        background: "#fff",
+        border: "1px solid #e8e8e8",
+        borderRadius: 10,
+        padding: 16,
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+        <div style={{ display: "grid", gap: 6, minWidth: 280 }}>
+          <label>
+            Customer Name
+            <input
+              value={editingQuote.customer_name}
+              onChange={(e) =>
+                setEditingQuote({ ...editingQuote, customer_name: e.target.value })
+              }
+            />
+          </label>
+          <label>
+            Phone
+            <input
+              value={editingQuote.phone}
+              onChange={(e) =>
+                setEditingQuote({ ...editingQuote, phone: e.target.value })
+              }
+            />
+          </label>
+          <label>
+            Subject
+            <input
+              value={editingQuote.subject}
+              onChange={(e) =>
+                setEditingQuote({ ...editingQuote, subject: e.target.value })
+              }
+            />
+          </label>
+        </div>
+
+        <div style={{ textAlign: "right" }}>
+          <div style={{ fontWeight: 700, fontSize: 18 }}>QUOTATION</div>
+          <div>Ref: {editingQuote.ref}</div>
+          <div>Date: {new Date(editingQuote.date).toLocaleDateString("en-IN")}</div>
         </div>
       </div>
 
-      {/* Header fields */}
-      <div style={{ display: "flex", gap: 12, marginBottom: 12 }}>
-        <input
-          placeholder="Customer Name"
-          value={customerName}
-          onChange={(e) => setCustomerName(e.target.value)}
-          style={{ flex: 1, padding: "6px 10px", border: "1px solid #ddd", borderRadius: 6 }}
-        />
-        <input
-          placeholder="Phone"
-          value={phone}
-          onChange={(e) => setPhone(e.target.value)}
-          style={{ width: 220, padding: "6px 10px", border: "1px solid #ddd", borderRadius: 6 }}
-        />
-      </div>
-
-      {/* Table */}
-      <div style={{ overflowX: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+      <div style={{ marginTop: 14, overflowX: "auto" }}>
+        <table
+          style={{
+            width: "100%",
+            borderCollapse: "collapse",
+            fontSize: 14,
+          }}
+        >
           <thead>
-            <tr style={{ background: "#f6f6f6" }}>
-              <th style={th}>#</th>
+            <tr>
+              <th style={th}>Sl.</th>
               <th style={th}>Description</th>
               <th style={th}>Qty</th>
-              <th style={th}>MRP (₹)</th>
-              <th style={th}>Line Total (₹)</th>
+              <th style={th}>Unit Price</th>
+              <th style={th}>GST %</th>
+              <th style={th}>Total (Incl. GST)</th>
               <th style={th}></th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((r, i) => (
-              <tr key={i}>
-                <td style={td}>{i + 1}</td>
-                <td style={{ ...td, minWidth: 320 }}>
-                  <input
-                    value={r.name}
-                    onChange={(e) => update(i, "name", e.target.value)}
-                    style={inputCell}
-                  />
-                  <textarea
-                    rows={2}
-                    placeholder="Specs / Description (optional)"
-                    value={r.specs}
-                    onChange={(e) => update(i, "specs", e.target.value)}
-                    style={{ ...inputCell, marginTop: 6 }}
-                  />
-                </td>
-                <td style={td}>
-                  <input
-                    type="number"
-                    min={1}
-                    value={r.qty}
-                    onChange={(e) => update(i, "qty", e.target.value)}
-                    style={inputCell}
-                  />
-                </td>
-                <td style={td}>
-                  <input
-                    type="number"
-                    min={0}
-                    value={r.mrp}
-                    onChange={(e) => update(i, "mrp", e.target.value)}
-                    style={inputCell}
-                  />
-                </td>
-                <td style={td}>&#8377;{formatINR(r.qty * r.mrp)}</td>
-                <td style={td}>
-                  <button onClick={() => remove(i)}>Remove</button>
-                </td>
-              </tr>
-            ))}
-            {rows.length === 0 && (
-              <tr>
-                <td style={td} colSpan={6}>
-                  No items. Go back and add some from the catalog.
-                </td>
-              </tr>
-            )}
+            {rows.map((r, i) => {
+              const line = Number(r.qty || 0) * Number(r.unit_price || 0);
+              const lineGst =
+                (line * Number(r.gst_percent || 0)) / 100;
+              const lineTotal = line + lineGst;
+              return (
+                <tr key={i}>
+                  <td style={tdCenter}>{i + 1}</td>
+                  <td style={td}>
+                    <input
+                      value={r.name}
+                      onChange={(e) => setRow(i, { name: e.target.value })}
+                      placeholder="Item name"
+                    />
+                    <div>
+                      <input
+                        value={r.specs}
+                        onChange={(e) => setRow(i, { specs: e.target.value })}
+                        placeholder="Specs / description"
+                        style={{ color: "#666" }}
+                      />
+                    </div>
+                  </td>
+                  <td style={tdCenter}>
+                    <input
+                      type="number"
+                      value={r.qty}
+                      onChange={(e) => setRow(i, { qty: Number(e.target.value || 0) })}
+                      style={{ width: 70, textAlign: "right" }}
+                    />
+                  </td>
+                  <td style={tdRight}>
+                    <input
+                      type="number"
+                      value={r.unit_price}
+                      onChange={(e) =>
+                        setRow(i, { unit_price: Number(e.target.value || 0) })
+                      }
+                      style={{ width: 120, textAlign: "right" }}
+                    />
+                  </td>
+                  <td style={tdRight}>
+                    <input
+                      type="number"
+                      value={r.gst_percent}
+                      onChange={(e) =>
+                        setRow(i, { gst_percent: Number(e.target.value || 0) })
+                      }
+                      style={{ width: 80, textAlign: "right" }}
+                    />
+                  </td>
+                  <td style={tdRight}>₹{formatINRnoDecimals(lineTotal)}</td>
+                  <td style={tdCenter}>
+                    <button onClick={() => removeRow(i)}>✕</button>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
           <tfoot>
             <tr>
-              <td style={td} colSpan={4} align="right">
-                <strong>Total</strong>
+              <td colSpan={7} style={{ paddingTop: 8 }}>
+                <button onClick={addEmptyRow}>+ Add Row</button>
               </td>
-              <td style={td}>
-                <strong>&#8377;{formatINR(total)}</strong>
-              </td>
-              <td style={td}></td>
             </tr>
           </tfoot>
         </table>
       </div>
 
-      {/* Print styles (basic) */}
-      <style>
-        {`@media print {
-          body { background: #fff !important; }
-          button, input, textarea { display: none !important; }
-          .catalog-grid { display: none !important; }
-        }`}
-      </style>
-    </div>
-  );
-}
-
-const th = { padding: "8px 10px", textAlign: "left", borderBottom: "1px solid #eee" };
-const td = { padding: "8px 10px", borderBottom: "1px solid #f1f1f1", verticalAlign: "top" };
-const inputCell = {
-  width: "100%",
-  padding: "6px 8px",
-  border: "1px solid #ddd",
-  borderRadius: 6,
-  font: "inherit",
-};
-
-/* ===================== SavedQuotes ===================== */
-function SavedQuotes({ onBack }) {
-  const [rows, setRows] = useState(null);
-  useEffect(() => {
-    (async () => {
-      const { data } = await supabase
-        .from("quotes")
-        .select("id, number, created_at, customer_name, phone, total")
-        .order("created_at", { ascending: false })
-        .limit(50);
-      setRows(data || []);
-    })();
-  }, []);
-  return (
-    <div style={{ maxWidth: 1100, margin: "0 auto 40px", background: "#fff", padding: 16, borderRadius: 10, border: "1px solid #eee" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-        <h2 style={{ margin: 0 }}>Saved Quotations</h2>
-        <button onClick={onBack}>← Back</button>
+      {/* Totals */}
+      <div style={{ marginTop: 12, display: "grid", justifyContent: "end" }}>
+        <div style={{ minWidth: 300 }}>
+          <div style={sumRow}>
+            <span>Subtotal</span>
+            <b>₹{formatINRnoDecimals(totals.subtotal)}</b>
+          </div>
+          <div style={sumRow}>
+            <span>GST Total</span>
+            <b>₹{formatINRnoDecimals(totals.gst_total)}</b>
+          </div>
+          <div style={{ ...sumRow, borderTop: "1px dashed #ddd", paddingTop: 8 }}>
+            <span>Grand Total</span>
+            <b>₹{formatINRnoDecimals(totals.grand_total)}</b>
+          </div>
+        </div>
       </div>
-      {!rows ? (
-        <p>Loading…</p>
-      ) : rows.length === 0 ? (
-        <p>No quotes saved yet.</p>
-      ) : (
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
-          <thead>
-            <tr style={{ background: "#f6f6f6" }}>
-              <th style={th}>No.</th>
-              <th style={th}>Date</th>
-              <th style={th}>Customer</th>
-              <th style={th}>Phone</th>
-              <th style={th}>Total (₹)</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.id}>
-                <td style={td}>{r.number}</td>
-                <td style={td}>{new Date(r.created_at).toLocaleString()}</td>
-                <td style={td}>{r.customer_name || "-"}</td>
-                <td style={td}>{r.phone || "-"}</td>
-                <td style={td}>&#8377;{formatINR(r.total)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+
+      {/* Actions */}
+      <div style={{ marginTop: 16, display: "flex", gap: 10 }}>
+        <button onClick={saveQuote}>Save</button>
+        <button onClick={printQuote}>Export / Print PDF</button>
+        <button onClick={() => setEditingQuote(null)}>Back to Catalog</button>
+      </div>
+
+      {/* Fixed Terms & Bank details (simplified) */}
+      <div style={{ marginTop: 18, color: "#444", fontSize: 13 }}>
+        <div style={{ fontWeight: 700, marginBottom: 6 }}>Terms & Conditions</div>
+        <ul>
+          <li>Price includes GST where applicable.</li>
+          <li>Quotation valid for 30 days.</li>
+          <li>Delivery Ex-stock / 2 weeks.</li>
+          <li>Goods once sold cannot be taken back.</li>
+          <li style={{ color: "crimson" }}>
+            All machines in this quotation are non-exchangeable and non-returnable.
+          </li>
+        </ul>
+        <div style={{ marginTop: 10 }}>
+          <div style={{ fontWeight: 700 }}>Bank Details</div>
+          <div>HVF AGENCY, ICICI Bank (Moran Branch)</div>
+          <div>AC No: 19965500412 · IFSC: ICIC0001995</div>
+        </div>
+      </div>
     </div>
   );
 }
+
+function SavedQuotesPanel({ quotes, onEdit, onPrint }) {
+  return (
+    <div
+      style={{
+        background: "#fff",
+        border: "1px solid #e8e8e8",
+        borderRadius: 10,
+        padding: 12,
+        marginBottom: 14,
+      }}
+    >
+      <div style={{ fontWeight: 700, marginBottom: 8 }}>Saved Quotations</div>
+      <div style={{ display: "grid", gap: 8 }}>
+        {quotes.map((q) => (
+          <div
+            key={q.id}
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              border: "1px solid #eee",
+              borderRadius: 8,
+              padding: "8px 10px",
+              background: "#fafafa",
+            }}
+          >
+            <div>
+              <div style={{ fontWeight: 700 }}>{q.ref}</div>
+              <div style={{ fontSize: 12, color: "#666" }}>
+                {q.customer_name || "—"} · ₹{formatINRnoDecimals(q.grand_total)} ·{" "}
+                {new Date(q.created_at).toLocaleDateString("en-IN")}
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => onEdit(q.id)}>Edit</button>
+              <button onClick={() => onPrint(q.id)}>Print</button>
+            </div>
+          </div>
+        ))}
+        {quotes.length === 0 && <div style={{ color: "#777" }}>No saved quotes yet.</div>}
+      </div>
+    </div>
+  );
+}
+
+/* table styles for editor */
+const th = {
+  textAlign: "left",
+  borderBottom: "1px solid #e5e5e5",
+  padding: "8px 6px",
+  background: "#fafafa",
+};
+const td = { borderBottom: "1px solid #f0f0f0", padding: "8px 6px" };
+const tdRight = { ...td, textAlign: "right" };
+const tdCenter = { ...td, textAlign: "center" };
+const sumRow = {
+  display: "flex",
+  justifyContent: "space-between",
+  padding: "4px 0",
+};

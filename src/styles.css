@@ -93,3 +93,9 @@ a { text-decoration: none; color: inherit; }
   background-size: cover;
   background-position: center;
 }
+
+/* Print-friendly inputs (they’ll vanish outlines on print) */
+@media print {
+  input, button { border: none !important; box-shadow: none !important; }
+  button { display: none !important; }
+}
