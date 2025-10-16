@@ -383,7 +383,7 @@ const exportPDF = async () => {
   doc.setFont("helvetica", "bold");
   doc.setFontSize(16);
   // place title a bit below the logo (centered)
-  doc.text("QUOTATION", pw / 2, logoBottom + 22, { align: "center" });
+  doc.text("QUOTATION", pw / 2, logoBottom + 28, { align: "center" });
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(10);
@@ -441,16 +441,16 @@ const exportPDF = async () => {
     theme: "grid",                         // grid adds borders to the table
   });
 
-  // ----- TOTALS (right-aligned to table edge) -----
-  const at = doc.lastAutoTable;                      // autoTable instance
-  const rightX = margin + at.table.width;            // exact right edge of the table
-  let y = at.finalY + 18;
+  // ----- TOTALS (right-aligned to page right margin; no crash if lastAutoTable missing) -----
+const last = doc.lastAutoTable || null;
+const totalsRightX = doc.internal.pageSize.getWidth() - margin;
+let totalsY = (last?.finalY ?? (introY + 38)) + 18;
 
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(11);
-  doc.text(`Subtotal: Rs ${inr(cartSubtotal)}`, rightX, y, { align: "right" });
-  y += 18;
-  doc.text(`Grand Total: Rs ${inr(cartSubtotal)}`, rightX, y, { align: "right" });
+doc.setFont("helvetica", "bold");
+doc.setFontSize(11);
+doc.text(`Subtotal: Rs ${inr(cartSubtotal)}`, totalsRightX, totalsY, { align: "right" });
+totalsY += 18;
+doc.text(`Grand Total: Rs ${inr(cartSubtotal)}`, totalsRightX, totalsY, { align: "right" });
 
   // ----- TERMS & BANK -----
   const ty = y + 36;
