@@ -484,23 +484,23 @@ doc.text(`Date: ${qHeader.date || todayStr()}`, tableRightX, logoBottom + 55, { 
   const colDesc = Math.max(120, contentW - (colSl + colQty + colUnit + colTotal)); // remainder
 
     autoTable(doc, {
-    startY: introY + 38,
-    head: [["Sl.", "Description", "Qty", "Unit Price", "Total (Incl. GST)"]],
-    body,                                 // <<< ADD THIS LINE
-    styles: { fontSize: 10, cellPadding: 6, overflow: "linebreak" },
-    headStyles: { fillColor: [230, 230, 230] },
-    columnStyles: {
-      0: { cellWidth: colSl, halign: "center" },
-      1: { cellWidth: colDesc },
-      2: { cellWidth: colQty, halign: "center" },
-      3: { cellWidth: colUnit, halign: "right" },
-      4: { cellWidth: colTotal, halign: "right" },
-    },
-    margin: { left: margin, right: margin },
-    tableLineColor: [200, 200, 200],
-    tableLineWidth: 0.5,
-    theme: "grid",
-  });
+  startY: introY + 38,
+  head: [["Sl.", "Description", "Qty", "Unit Price", "Total (Incl. GST)"]],
+  body,
+  styles: { fontSize: 10, cellPadding: 6, overflow: "linebreak" },
+  headStyles: { fillColor: [230, 230, 230], textColor: [0, 0, 0], fontStyle: "bold" },
+  columnStyles: {
+    0: { cellWidth: colSl, halign: "center" },
+    1: { cellWidth: colDesc },
+    2: { cellWidth: colQty, halign: "center" },
+    3: { cellWidth: colUnit, halign: "right" },
+    4: { cellWidth: colTotal, halign: "right" },
+  },
+  margin: { left: margin, right: margin },
+  tableLineColor: [200, 200, 200],
+  tableLineWidth: 0.5,
+  theme: "grid",
+});
 
     // ----- TOTAL (single line, aligned with table right edge) -----
   const last = doc.lastAutoTable || null;
