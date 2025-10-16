@@ -353,12 +353,15 @@ export default function App() {
   /* ---------- CLEAN PDF (NOT web print) ---------- */
   const exportPDF = async () => {
     if (cartList.length === 0) return alert("Nothing to print.");
-    // make sure it has a number and also persist if user wants
+
+    // ensure a number
     const num = qHeader.number || (await getNextQuoteNumber());
     setQHeader((h) => ({ ...h, number: num }));
 
     const doc = new jsPDF({ unit: "pt", format: "a4" });
     const pw = doc.internal.pageSize.getWidth();
+    const L = 40; // left margin
+    const R = pw - 220; // right meta block x
 
     // logo
     try {
@@ -371,66 +374,113 @@ export default function App() {
       doc.addImage(img, "PNG", (pw - w) / 2, 24, w, h);
     } catch {}
 
+    // QUOTATION tag (right)
     doc.setFont("helvetica", "bold");
     doc.setFontSize(16);
     doc.text("QUOTATION", pw - 60, 88, { align: "right" });
 
-    // left side
+    // header texts
     doc.setFontSize(10);
     doc.setFont("helvetica", "normal");
-    const L = 40;
-    const R = pw - 220;
     doc.text(`Customer Name: ${qHeader.customer_name || ""}`, L, 100);
     doc.text(`Address: ${qHeader.address || ""}`, L, 115);
     doc.text(`Phone: ${qHeader.phone || ""}`, L, 130);
-    doc.text(`Subject: ${qHeader.subject || ""}`, L, 145);
 
     doc.text(`Ref: ${num}`, R, 100);
     doc.text(`Date: ${qHeader.date || todayStr()}`, R, 115);
 
-    const body = cartList.map((r, i) => [
-      String(i + 1),
-      r.name || "",
-      r.specs || "",
-      String(r.qty || 0),
-      `₹${inr(r.unit || 0)}`,
-      `₹${inr((r.qty || 0) * (r.unit || 0))}`,
-    ]);
-
-    autoTable(doc, {
-  startY: 170,
-  head: [["Sl.", "Description", "Specs / Description", "Qty", "Unit Price", "Total (Incl. GST)"]],
-  styles: { fontSize: 10 },
-  headStyles: { fillColor: [240, 240, 240] },
-  columnStyles: {
-    0: { cellWidth: 28, halign: "center" },
-    1: { cellWidth: 170 },
-    2: { cellWidth: 170 },
-    3: { cellWidth: 40, halign: "center" },
-    4: { cellWidth: 90, halign: "right" },
-    5: { cellWidth: 100, halign: "right" },
-  },
-  body,
-});
-    const y = doc.lastAutoTable.finalY + 16;
-    doc.text(`Subtotal: ₹${inr(cartSubtotal)}`, pw - 180, y);
-    doc.text(`Grand Total: ₹${inr(cartSubtotal)}`, pw - 180, y + 18);
-
-    // simple terms
-    const ty = y + 50;
-    doc.setFont("helvetica", "bold");
-    doc.text("Terms & Conditions:", L, ty);
-    doc.setFont("helvetica", "normal");
+    // fixed line (replaces Subject)
+    doc.setFontSize(11);
     doc.text(
       [
-        "Price will be including GST where applicable.",
-        "This quotation is valid for one month only.",
-        "Delivery ex-stock/2 weeks. Goods once sold cannot be taken back.",
+        "Dear Sir/Madam,",
+        "With reference to your enquiry we are pleased to offer you as under:",
+      ],
+      L,
+      156
+    );
+
+    // build rows: specs will be drawn under name
+    const body = cartList.map((r, i) => {
+      const row = [
+        String(i + 1),
+        r.name || "",
+        String(r.qty || 0),
+        `₹${inr(r.unit || 0)}`,
+        `₹${inr((r.qty || 0) * (r.unit || 0))}`,
+      ];
+      row._specs = r.specs || ""; // custom attachment for didDrawCell
+      return row;
+    });
+
+    // table
+    autoTable(doc, {
+      startY: 176,
+      head: [["Sl.", "Description", "Qty", "Unit Price", "Total (Incl. GST)"]],
+      styles: { fontSize: 10, cellPadding: { top: 6, right: 6, bottom: 6, left: 6 } },
+      headStyles: { fillColor: [236, 239, 243] },
+      margin: { left: 40, right: 40 },
+      columnStyles: {
+        0: { cellWidth: 28, halign: "center" }, // Sl.
+        1: { cellWidth: 260 },                   // Description (name + specs)
+        2: { cellWidth: 40, halign: "center" }, // Qty
+        3: { cellWidth: 85, halign: "right" },  // Unit
+        4: { cellWidth: 85, halign: "right" },  // Total
+      },
+      body,
+      didDrawCell: (data) => {
+        if (data.section === "body" && data.column.index === 1) {
+          const specs = (data.row.raw && data.row.raw._specs) || data.cell.raw?._specs || data.row._specs || "";
+          if (specs) {
+            const x = data.cell.x + 6;
+            const y = data.cell.y + 18; // a bit under the main line
+            doc.setFont("helvetica", "normal");
+            doc.setFontSize(9);
+            doc.setTextColor(100);
+            const wrapped = doc.splitTextToSize(specs, data.cell.width - 12);
+            doc.text(wrapped, x, y + 10); // put specs on a second line
+            doc.setTextColor(17); // reset
+          }
+        }
+      },
+    });
+
+    // totals
+    const y = doc.lastAutoTable.finalY + 16;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(11);
+    doc.text(`Subtotal: ₹${inr(cartSubtotal)}`, pw - 180, y);
+    doc.setFont("helvetica", "bold");
+    doc.text(`Grand Total: ₹${inr(cartSubtotal)}`, pw - 180, y + 18);
+
+    // Terms & Bank details
+    const ty = y + 50;
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.text("Terms & Conditions:", L, ty);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    doc.text(
+      [
+        "This quotation is valid for one month from the date of issue.",
+        "Delivery is subject to stock availability and may take up to 2 weeks.",
+        "Goods once sold are non-returnable and non-exchangeable.",
+        "",
+        "Yours Faithfully",
+        "HVF Agency",
+        "9957239143 / 9954425780",
+        "",
+        "BANK DETAILS",
+        "HVF AGENCY",
+        "ICICI BANK (Moran Branch)",
+        "A/C No - 199505500412",
+        "IFSC Code - ICIC0001995",
       ],
       L,
       ty + 14
     );
 
+    // open in new tab (user can download)
     window.open(doc.output("bloburl"), "_blank");
   };
 
