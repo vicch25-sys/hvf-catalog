@@ -261,6 +261,15 @@ export default function App() {
       return obj;
     });
 
+// Create a new editable blank line item (not in catalog)
+const addBlankRow = () => {
+  const id = `custom-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  setCart((c) => ({
+    ...c,
+    [id]: { id, name: "", specs: "", unit: 0, qty: 1 },
+  }));
+};
+
   /* ---------- QUOTE EDITOR HEADER ---------- */
   const [qHeader, setQHeader] = useState({
     number: "",
