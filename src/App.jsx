@@ -354,7 +354,6 @@ export default function App() {
 const exportPDF = async () => {
   if (cartList.length === 0) return alert("Nothing to print.");
 
-  // ensure quote number
   const num = qHeader.number || (await getNextQuoteNumber());
   setQHeader((h) => ({ ...h, number: num }));
 
@@ -362,8 +361,8 @@ const exportPDF = async () => {
   const pw = doc.internal.pageSize.getWidth();
   const margin = 40;
 
-  // ----- LOGO -----
-  let logoBottom = 24; // y below the logo; fallback if logo fails
+  // 1) Logo (safe; won’t break PDF if it fails)
+  let logoBottom = 24;
   try {
     const img = new Image();
     img.crossOrigin = "anonymous";
@@ -374,24 +373,20 @@ const exportPDF = async () => {
     const x = (pw - w) / 2;
     const y = 24;
     doc.addImage(img, "PNG", x, y, w, h);
-    logoBottom = y + h; // where the logo ends
-  } catch {
-    // ignore if logo missing
-  }
+    logoBottom = y + h;
+  } catch {}
 
-  // ----- TITLE + HEADER LINES -----
+  // 2) Title + header
   doc.setFont("helvetica", "bold");
   doc.setFontSize(16);
-  // place title a bit below the logo (centered)
   doc.text("QUOTATION", pw / 2, logoBottom + 22, { align: "center" });
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(10);
 
-  // left block
   const L = margin;
-  const rightBlockX = pw - margin - 180; // right header column start
-  let y0 = logoBottom + 40;              // start of header texts
+  const rightBlockX = pw - margin - 180;
+  let y0 = logoBottom + 40;
 
   doc.text(`Customer Name: ${qHeader.customer_name || ""}`, L, y0);
   y0 += 15;
@@ -399,11 +394,9 @@ const exportPDF = async () => {
   y0 += 15;
   doc.text(`Phone: ${qHeader.phone || ""}`, L, y0);
 
-  // right block (reference & date)
   doc.text(`Ref: ${num}`, rightBlockX, logoBottom + 40);
   doc.text(`Date: ${qHeader.date || todayStr()}`, rightBlockX, logoBottom + 55);
 
-  // intro line (fixed)
   const introY = y0 + 28;
   doc.setFontSize(11);
   doc.text("Dear Sir/Madam,", L, introY);
@@ -413,46 +406,52 @@ const exportPDF = async () => {
     introY + 16
   );
 
-  // ----- TABLE -----
-  // Compose description with specs underneath in lighter line
+  // 3) Table body: specs on a second line
   const body = cartList.map((r, i) => [
     String(i + 1),
     `${r.name || ""}${r.specs ? `\n(${r.specs})` : ""}`,
     String(r.qty || 0),
-    `Rs ${inr(r.unit || 0)}`,                                 // use "Rs " to avoid missing ₹ glyph
+    `Rs ${inr(r.unit || 0)}`,
     `Rs ${inr((r.qty || 0) * (r.unit || 0))}`,
   ]);
 
-  autoTable(doc, {
+  const tableRes = autoTable(doc, {
     startY: introY + 38,
     head: [["Sl.", "Description", "Qty", "Unit Price", "Total (Incl. GST)"]],
-    styles: { fontSize: 10, cellPadding: 6 },
+    styles: { fontSize: 10, cellPadding: 6, lineColor: [200, 200, 200], lineWidth: 0.5 },
     headStyles: { fillColor: [230, 230, 230] },
     columnStyles: {
       0: { cellWidth: 28, halign: "center" },
-      1: { cellWidth: 320 },               // wide enough for name + specs
+      1: { cellWidth: 320 },              // room for name + specs
       2: { cellWidth: 40, halign: "center" },
       3: { cellWidth: 100, halign: "right" },
       4: { cellWidth: 120, halign: "right" },
     },
     margin: { left: margin, right: margin },
-    tableLineColor: [200, 200, 200],
-    tableLineWidth: 0.5,
-    theme: "grid",                         // grid adds borders to the table
+    theme: "grid",
+    didParseCell: (data) => {
+      // Make specs line lighter
+      if (data.section === 'body' && data.column.index === 1 && typeof data.cell.raw === 'string') {
+        const [name, specs] = data.cell.raw.split('\n');
+        if (specs) {
+          data.cell.text = [name, specs];          // keep two lines
+          data.cell.styles.textColor = [0, 0, 0];
+        }
+      }
+    },
   });
 
-  // ----- TOTALS (right-aligned to table edge) -----
-  const at = doc.lastAutoTable;                      // autoTable instance
-  const rightX = margin + at.table.width;            // exact right edge of the table
-  let y = at.finalY + 18;
+  // 4) Totals aligned to table right edge
+  const tableRightX = tableRes.settings.margin.left + tableRes.table.width;
+  let y = tableRes.finalY + 18;
 
   doc.setFont("helvetica", "bold");
   doc.setFontSize(11);
-  doc.text(`Subtotal: Rs ${inr(cartSubtotal)}`, rightX, y, { align: "right" });
+  doc.text(`Subtotal: Rs ${inr(cartSubtotal)}`, tableRightX, y, { align: "right" });
   y += 18;
-  doc.text(`Grand Total: Rs ${inr(cartSubtotal)}`, rightX, y, { align: "right" });
+  doc.text(`Grand Total: Rs ${inr(cartSubtotal)}`, tableRightX, y, { align: "right" });
 
-  // ----- TERMS & BANK -----
+  // 5) Terms & bank block
   const ty = y + 36;
   doc.setFontSize(11);
   doc.text("Terms & Conditions:", L, ty);
@@ -478,8 +477,13 @@ const exportPDF = async () => {
     ty + 16
   );
 
-  // open in new tab (download from there if needed)
-  window.open(doc.output("bloburl"), "_blank");
+  // 6) Open preview; if blocked, fall back to download
+  const blobUrl = doc.output("bloburl");
+  const w = window.open(blobUrl, "_blank");
+  if (!w) {
+    // Popup blocked — download directly
+    doc.save(`${num}.pdf`);
+  }
 };
 
   /*** UI ***/
