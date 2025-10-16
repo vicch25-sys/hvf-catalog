@@ -434,16 +434,14 @@ export default function App() {
     theme: "grid",
   });
 
-  // ----- TOTALS (right-aligned to the table's right margin) -----
+    // ----- TOTAL (single line, aligned with table right edge) -----
   const last = doc.lastAutoTable || null;
-  const totalsRightX = pw - margin; // align to page right margin (same as table)
-  let totalsY = (last?.finalY ?? (introY + 38)) + 18;
+  const totalsRightX = doc.internal.pageSize.getWidth() - margin;
+  let totalsY = (last?.finalY ?? (introY + 38)) + 22;
 
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(11);
-  doc.text(`Subtotal: Rs ${inr(cartSubtotal)}`, totalsRightX, totalsY, { align: "right" });
-  totalsY += 18;
-  doc.text(`Grand Total: Rs ${inr(cartSubtotal)}`, totalsRightX, totalsY, { align: "right" });
+  doc.setFontSize(12);
+  doc.text(`Total: Rs ${inr(cartSubtotal)}`, totalsRightX, totalsY, { align: "right" });
 
   // ----- TERMS & BANK -----
   const ty = totalsY + 36; // <- use totalsY (important)
