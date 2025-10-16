@@ -591,13 +591,35 @@ export default function App() {
             <div style={{ flex: 1 }}>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                 <label>
-                  <div style={{ fontSize: 12, color: "#666" }}>Customer Name</div>
-                  <input value={qHeader.customer_name} onChange={(e) => setQHeader({ ...qHeader, customer_name: e.target.value })} />
-                </label>
-                <label>
-                  <div style={{ fontSize: 12, color: "#666" }}>Phone</div>
-                  <input value={qHeader.phone} onChange={(e) => setQHeader({ ...qHeader, phone: e.target.value })} />
-                </label>
+                  <label>
+  <div style={{ fontSize: 12, color: "#666" }}>Customer Name</div>
+  <input
+    value={qHeader.customer_name}
+    onChange={(e) =>
+      setQHeader({ ...qHeader, customer_name: e.target.value })
+    }
+  />
+</label>
+
+<label>
+  <div style={{ fontSize: 12, color: "#666" }}>Address</div>
+  <input
+    value={qHeader.address}
+    onChange={(e) =>
+      setQHeader({ ...qHeader, address: e.target.value })
+    }
+  />
+</label>
+
+<label>
+  <div style={{ fontSize: 12, color: "#666" }}>Phone</div>
+  <input
+    value={qHeader.phone}
+    onChange={(e) =>
+      setQHeader({ ...qHeader, phone: e.target.value })
+    }
+  />
+</label>
                 <div style={{ gridColumn: "1 / span 2", marginTop: 8, fontSize: 14 }}>
   Dear Sir/Madam,<br />
   With reference to your enquiry we are pleased to offer you as under:
