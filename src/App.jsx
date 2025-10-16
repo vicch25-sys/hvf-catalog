@@ -470,20 +470,15 @@ doc.text(`Date: ${qHeader.date || todayStr()}`, tableRightX, logoBottom + 55, { 
   doc.text("With reference to your enquiry we are pleased to offer you as under:", L, introY + 16);
 
   // ----- TABLE (always fits) -----
-  // Build body: specs under name in lighter line
-  const body = cartList.map((r, i) => [
-    String(i + 1),
-    `${r.name || ""}${r.specs ? `\n(${r.specs})` : ""}`,
-    String(r.qty || 0),
-    `Rs ${inr(r.unit || 0)}`,
-    `Rs ${inr((r.qty || 0) * (r.unit || 0))}`,
-  ]);
+const body = cartList.map((r, i) => [
+  String(i + 1),
+  `${r.name || ""}${r.specs ? `\n(${r.specs})` : ""}`,
+  String(r.qty || 0),
+  inr(r.unit || 0),                          // 👈 Removed "Rs"
+  inr((r.qty || 0) * (r.unit || 0)),         // 👈 Removed "Rs"
+]);
 
-  // Calculate columns that sum exactly to contentW
-  const colSl = 28, colQty = 40, colUnit = 90, colTotal = 110;
-  const colDesc = Math.max(120, contentW - (colSl + colQty + colUnit + colTotal)); // remainder
-
-    autoTable(doc, {
+autoTable(doc, {
   startY: introY + 38,
   head: [["Sl.", "Description", "Qty", "Unit Price", "Total (Incl. GST)"]],
   body,
@@ -502,14 +497,15 @@ doc.text(`Date: ${qHeader.date || todayStr()}`, tableRightX, logoBottom + 55, { 
   theme: "grid",
 });
 
-    // ----- TOTAL (single line, aligned with table right edge) -----
-  const last = doc.lastAutoTable || null;
-  const totalsRightX = doc.internal.pageSize.getWidth() - margin;
-  let totalsY = (last?.finalY ?? (introY + 38)) + 22;
+// ----- TOTAL (single line, aligned with table right edge) -----
+const last = doc.lastAutoTable || null;
+const totalsRightX = doc.internal.pageSize.getWidth() - margin;
+let totalsY = (last?.finalY ?? (introY + 38)) + 22;
 
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(12);
-  doc.text(`Total: Rs ${inr(cartSubtotal)}`, totalsRightX, totalsY, { align: "right" });
+doc.setFont("helvetica", "bold");
+doc.setFontSize(12);
+// 👇 Use ₹ symbol here instead of Rs
+doc.text(`Total: ₹${inr(cartSubtotal)}`, totalsRightX, totalsY, { align: "right" });
 
   // ----- TERMS & BANK -----
 const ty = totalsY + 36; // <-- use totalsY so it stays below totals
