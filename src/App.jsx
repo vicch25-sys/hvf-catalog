@@ -348,109 +348,106 @@ export default function App() {
 
   /* ---------- CLEAN PDF (NOT web print) ---------- */
   const exportPDF = async () => {
-    if (cartList.length === 0) return alert("Nothing to print.");
+  if (cartList.length === 0) return alert("Nothing to print.");
 
-    // ensure quote number
-    const num = qHeader.number || (await getNextQuoteNumber());
-    setQHeader((h) => ({ ...h, number: num }));
+  // ensure quote number
+  const num = qHeader.number || (await getNextQuoteNumber());
+  setQHeader((h) => ({ ...h, number: num }));
 
-    const doc = new jsPDF({ unit: "pt", format: "a4" });
-    const pw = doc.internal.pageSize.getWidth();
-    const margin = 40;
+  const doc = new jsPDF({ unit: "pt", format: "a4" });
+  const pw = doc.internal.pageSize.getWidth();
+  const margin = 40;
+  const contentW = pw - margin * 2; // width inside margins
 
-    // ----- LOGO -----
-    let logoBottom = 24;
-    try {
-      const img = new Image();
-      img.crossOrigin = "anonymous";
-      img.src = "/hvf-logo.png";
-      await new Promise((r) => (img.onload = r));
-      const w = 110;
-      const h = (img.height * w) / img.width;
-      const x = (pw - w) / 2;
-      const y = 24;
-      doc.addImage(img, "PNG", x, y, w, h);
-      logoBottom = y + h;
-    } catch {}
+  // ----- LOGO -----
+  let logoBottom = 24;
+  try {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.src = "/hvf-logo.png";
+    await new Promise((r) => (img.onload = r));
+    const w = 110;
+    const h = (img.height * w) / img.width;
+    const x = (pw - w) / 2;
+    const y = 24;
+    doc.addImage(img, "PNG", x, y, w, h);
+    logoBottom = y + h;
+  } catch {}
 
-    // ----- TITLE + HEADER LINES -----
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(16);
-    doc.text("QUOTATION", pw / 2, logoBottom + 28, { align: "center" });
+  // ----- TITLE + HEADER LINES -----
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(16);
+  doc.text("QUOTATION", pw / 2, logoBottom + 28, { align: "center" });
 
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(10);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
 
-    // left block
-    const L = margin;
-    const rightBlockX = pw - margin - 180;
-    let y0 = logoBottom + 40;
+  // left block
+  const L = margin;
+  const rightBlockX = pw - margin - 180;
+  let y0 = logoBottom + 40;
 
-    doc.text(`Customer Name: ${qHeader.customer_name || ""}`, L, y0);
-    y0 += 15;
-    doc.text(`Address: ${qHeader.address || ""}`, L, y0);
-    y0 += 15;
-    doc.text(`Phone: ${qHeader.phone || ""}`, L, y0);
+  doc.text(`Customer Name: ${qHeader.customer_name || ""}`, L, y0); y0 += 15;
+  doc.text(`Address: ${qHeader.address || ""}`, L, y0);             y0 += 15;
+  doc.text(`Phone: ${qHeader.phone || ""}`, L, y0);
 
-    // right block
-    doc.text(`Ref: ${num}`, rightBlockX, logoBottom + 40);
-    doc.text(`Date: ${qHeader.date || todayStr()}`, rightBlockX, logoBottom + 55);
+  // right block
+  doc.text(`Ref: ${num}`, rightBlockX, logoBottom + 40);
+  doc.text(`Date: ${qHeader.date || todayStr()}`, rightBlockX, logoBottom + 55);
 
-    // intro line
-    const introY = y0 + 28;
-    doc.setFontSize(11);
-    doc.text("Dear Sir/Madam,", L, introY);
-    doc.text(
-      "With reference to your enquiry we are pleased to offer you as under:",
-      L,
-      introY + 16
-    );
+  // intro line (fixed)
+  const introY = y0 + 28;
+  doc.setFontSize(11);
+  doc.text("Dear Sir/Madam,", L, introY);
+  doc.text("With reference to your enquiry we are pleased to offer you as under:", L, introY + 16);
 
-      // ----- TABLE -----
-  // Description with specs underneath in lighter line
+  // ----- TABLE (always fits) -----
+  // Build body: specs under name in lighter line
   const body = cartList.map((r, i) => [
     String(i + 1),
     `${r.name || ""}${r.specs ? `\n(${r.specs})` : ""}`,
     String(r.qty || 0),
-    `Rs ${inr(r.unit || 0)}`,                       // use "Rs " to avoid missing ₹ glyph
+    `Rs ${inr(r.unit || 0)}`,
     `Rs ${inr((r.qty || 0) * (r.unit || 0))}`,
   ]);
+
+  // Calculate columns that sum exactly to contentW
+  const colSl = 28, colQty = 40, colUnit = 90, colTotal = 110;
+  const colDesc = Math.max(120, contentW - (colSl + colQty + colUnit + colTotal)); // remainder
 
   autoTable(doc, {
     startY: introY + 38,
     head: [["Sl.", "Description", "Qty", "Unit Price", "Total (Incl. GST)"]],
-    body: body,                                      // <-- render rows
     styles: { fontSize: 10, cellPadding: 6, overflow: "linebreak" },
     headStyles: { fillColor: [230, 230, 230] },
     columnStyles: {
-      0: { cellWidth: 28, halign: "center" },        // Sl.
-      1: { cellWidth: 320 },                         // Description (+specs on next line)
-      2: { cellWidth: 40, halign: "center" },        // Qty
-      3: { cellWidth: 100, halign: "right" },        // Unit Price
-      4: { cellWidth: 120, halign: "right" },        // Total
+      0: { cellWidth: colSl, halign: "center" },
+      1: { cellWidth: colDesc },                 // wide column for name + specs
+      2: { cellWidth: colQty, halign: "center" },
+      3: { cellWidth: colUnit, halign: "right" },
+      4: { cellWidth: colTotal, halign: "right" },
     },
     margin: { left: margin, right: margin },
     tableLineColor: [200, 200, 200],
     tableLineWidth: 0.5,
-    theme: "grid",                                   // full borders
+    theme: "grid",
   });
 
-  // ----- TOTALS (right aligned with table's right edge) -----
+  // ----- TOTALS (right-aligned to the table's right margin) -----
   const last = doc.lastAutoTable || null;
-  // If for any reason the table isn't there, fall back to page width minus margins
-  const tableRightX = last ? (margin + last.table.width) : (doc.internal.pageSize.getWidth() - margin);
-  let totalsY = (last ? last.finalY : (introY + 38)) + 18;
+  const totalsRightX = pw - margin; // align to page right margin (same as table)
+  let totalsY = (last?.finalY ?? (introY + 38)) + 18;
 
   doc.setFont("helvetica", "bold");
   doc.setFontSize(11);
-  doc.text(`Subtotal: Rs ${inr(cartSubtotal)}`, tableRightX, totalsY, { align: "right" });
+  doc.text(`Subtotal: Rs ${inr(cartSubtotal)}`, totalsRightX, totalsY, { align: "right" });
   totalsY += 18;
-  doc.text(`Grand Total: Rs ${inr(cartSubtotal)}`, tableRightX, totalsY, { align: "right" });
+  doc.text(`Grand Total: Rs ${inr(cartSubtotal)}`, totalsRightX, totalsY, { align: "right" });
 
   // ----- TERMS & BANK -----
-  const ty = totalsY + 36;                           // position terms below totals
+  const ty = totalsY + 36; // <- use totalsY (important)
   doc.setFontSize(11);
-  doc.text("Terms & Conditions:", margin, ty);
+  doc.text("Terms & Conditions:", L, ty);
   doc.setFont("helvetica", "normal");
   doc.setFontSize(10);
   doc.text(
@@ -469,13 +466,13 @@ export default function App() {
       "A/C No - 199505500412",
       "IFSC Code - ICIC0001995",
     ],
-    margin,
+    L,
     ty + 16
   );
 
-  // open in new tab (download from there if needed)
+  // open in new tab
   window.open(doc.output("bloburl"), "_blank");
-}; // <-- end of exportPDF
+};
 
   /*** UI ***/
   return (
