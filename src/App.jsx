@@ -64,7 +64,6 @@ export default function App() {
   const [page, setPage] = useState("catalog");          // "catalog" | "quoteEditor"
   const enableQuoteMode = () => {
     if (quoteMode) {
-      // toggle off -> clear cart UI but keep items
       setQuoteMode(false);
       setPage("catalog");
       return;
@@ -229,7 +228,6 @@ export default function App() {
   };
 
   /* ---------- QUOTE CART (works only in quoteMode on catalog) ---------- */
-  // cart: id -> {id,name,specs,unit,qty}
   const [cart, setCart] = useState({});
   const cartList = Object.values(cart);
   const cartCount = cartList.reduce((a, r) => a + (r.qty || 0), 0);
@@ -252,7 +250,7 @@ export default function App() {
       return obj;
     });
 
-  /* ---------- QUOTE EDITOR HEADER (appears only after clicking View Quote) ---------- */
+  /* ---------- QUOTE EDITOR HEADER ---------- */
   const [qHeader, setQHeader] = useState({
     number: "",
     date: todayStr(),
@@ -281,7 +279,6 @@ export default function App() {
   const saveQuote = async () => {
     try {
       const number = qHeader.number || (await getNextQuoteNumber());
-      // 1) insert master
       const { data: qins, error: qerr } = await supabase
         .from("quotes")
         .insert({
@@ -332,7 +329,6 @@ export default function App() {
       .select("name,specs,qty,mrp")
       .eq("quote_id", q.id);
 
-    // reconstruct cart
     const newCart = {};
     (lines || []).forEach((ln, idx) => {
       const id = `saved-${idx}`;
@@ -351,136 +347,131 @@ export default function App() {
   };
 
   /* ---------- CLEAN PDF (NOT web print) ---------- */
-const exportPDF = async () => {
-  if (cartList.length === 0) return alert("Nothing to print.");
+  const exportPDF = async () => {
+    if (cartList.length === 0) return alert("Nothing to print.");
 
-  // ensure quote number
-  const num = qHeader.number || (await getNextQuoteNumber());
-  setQHeader((h) => ({ ...h, number: num }));
+    // ensure quote number
+    const num = qHeader.number || (await getNextQuoteNumber());
+    setQHeader((h) => ({ ...h, number: num }));
 
-  const doc = new jsPDF({ unit: "pt", format: "a4" });
-  const pw = doc.internal.pageSize.getWidth();
-  const margin = 40;
+    const doc = new jsPDF({ unit: "pt", format: "a4" });
+    const pw = doc.internal.pageSize.getWidth();
+    const margin = 40;
 
-  // ----- LOGO -----
-  let logoBottom = 24; // y below the logo; fallback if logo fails
-  try {
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.src = "/hvf-logo.png";
-    await new Promise((r) => (img.onload = r));
-    const w = 110;
-    const h = (img.height * w) / img.width;
-    const x = (pw - w) / 2;
-    const y = 24;
-    doc.addImage(img, "PNG", x, y, w, h);
-    logoBottom = y + h; // where the logo ends
-  } catch {
-    // ignore if logo missing
-  }
+    // ----- LOGO -----
+    let logoBottom = 24;
+    try {
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.src = "/hvf-logo.png";
+      await new Promise((r) => (img.onload = r));
+      const w = 110;
+      const h = (img.height * w) / img.width;
+      const x = (pw - w) / 2;
+      const y = 24;
+      doc.addImage(img, "PNG", x, y, w, h);
+      logoBottom = y + h;
+    } catch {}
 
-  // ----- TITLE + HEADER LINES -----
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(16);
-  // place title a bit below the logo (centered)
-  doc.text("QUOTATION", pw / 2, logoBottom + 28, { align: "center" });
+    // ----- TITLE + HEADER LINES -----
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(16);
+    doc.text("QUOTATION", pw / 2, logoBottom + 28, { align: "center" });
 
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(10);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
 
-  // left block
-  const L = margin;
-  const rightBlockX = pw - margin - 180; // right header column start
-  let y0 = logoBottom + 40;              // start of header texts
+    // left block
+    const L = margin;
+    const rightBlockX = pw - margin - 180;
+    let y0 = logoBottom + 40;
 
-  doc.text(`Customer Name: ${qHeader.customer_name || ""}`, L, y0);
-  y0 += 15;
-  doc.text(`Address: ${qHeader.address || ""}`, L, y0);
-  y0 += 15;
-  doc.text(`Phone: ${qHeader.phone || ""}`, L, y0);
+    doc.text(`Customer Name: ${qHeader.customer_name || ""}`, L, y0);
+    y0 += 15;
+    doc.text(`Address: ${qHeader.address || ""}`, L, y0);
+    y0 += 15;
+    doc.text(`Phone: ${qHeader.phone || ""}`, L, y0);
 
-  // right block (reference & date)
-  doc.text(`Ref: ${num}`, rightBlockX, logoBottom + 40);
-  doc.text(`Date: ${qHeader.date || todayStr()}`, rightBlockX, logoBottom + 55);
+    // right block
+    doc.text(`Ref: ${num}`, rightBlockX, logoBottom + 40);
+    doc.text(`Date: ${qHeader.date || todayStr()}`, rightBlockX, logoBottom + 55);
 
-  // intro line (fixed)
-  const introY = y0 + 28;
-  doc.setFontSize(11);
-  doc.text("Dear Sir/Madam,", L, introY);
-  doc.text(
-    "With reference to your enquiry we are pleased to offer you as under:",
-    L,
-    introY + 16
-  );
+    // intro line
+    const introY = y0 + 28;
+    doc.setFontSize(11);
+    doc.text("Dear Sir/Madam,", L, introY);
+    doc.text(
+      "With reference to your enquiry we are pleased to offer you as under:",
+      L,
+      introY + 16
+    );
 
-  // ----- TABLE -----
-  // Compose description with specs underneath in lighter line
-  const body = cartList.map((r, i) => [
-    String(i + 1),
-    `${r.name || ""}${r.specs ? `\n(${r.specs})` : ""}`,
-    String(r.qty || 0),
-    `Rs ${inr(r.unit || 0)}`,                                 // use "Rs " to avoid missing ₹ glyph
-    `Rs ${inr((r.qty || 0) * (r.unit || 0))}`,
-  ]);
+    // ----- TABLE -----
+    const body = cartList.map((r, i) => [
+      String(i + 1),
+      `${r.name || ""}${r.specs ? `\n(${r.specs})` : ""}`,
+      String(r.qty || 0),
+      `Rs ${inr(r.unit || 0)}`,
+      `Rs ${inr((r.qty || 0) * (r.unit || 0))}`,
+    ]);
 
-  autoTable(doc, {
-    startY: introY + 38,
-    head: [["Sl.", "Description", "Qty", "Unit Price", "Total (Incl. GST)"]],
-    styles: { fontSize: 10, cellPadding: 6 },
-    headStyles: { fillColor: [230, 230, 230] },
-    columnStyles: {
-      0: { cellWidth: 28, halign: "center" },
-      1: { cellWidth: 320 },               // wide enough for name + specs
-      2: { cellWidth: 40, halign: "center" },
-      3: { cellWidth: 100, halign: "right" },
-      4: { cellWidth: 120, halign: "right" },
-    },
-    margin: { left: margin, right: margin },
-    tableLineColor: [200, 200, 200],
-    tableLineWidth: 0.5,
-    theme: "grid",                         // grid adds borders to the table
-  });
+    autoTable(doc, {
+      startY: introY + 38,
+      head: [["Sl.", "Description", "Qty", "Unit Price", "Total (Incl. GST)"]],
+      styles: { fontSize: 10, cellPadding: 6, overflow: "linebreak" },
+      headStyles: { fillColor: [230, 230, 230] },
+      columnStyles: {
+        0: { cellWidth: 28, halign: "center" },
+        1: { cellWidth: 250 },         // fits within printable width
+        2: { cellWidth: 40, halign: "center" },
+        3: { cellWidth: 90, halign: "right" },
+        4: { cellWidth: 107, halign: "right" },
+      },
+      margin: { left: margin, right: margin },
+      tableLineColor: [200, 200, 200],
+      tableLineWidth: 0.5,
+      theme: "grid",
+    });
 
-  // ----- TOTALS (right-aligned to page right margin; no crash if lastAutoTable missing) -----
-const last = doc.lastAutoTable || null;
-const totalsRightX = doc.internal.pageSize.getWidth() - margin;
-let totalsY = (last?.finalY ?? (introY + 38)) + 18;
+    // ----- TOTALS (right-aligned to page right margin; safe if lastAutoTable missing) -----
+    const last = doc.lastAutoTable || null;
+    const totalsRightX = doc.internal.pageSize.getWidth() - margin;
+    let totalsY = (last?.finalY ?? (introY + 38)) + 18;
 
-doc.setFont("helvetica", "bold");
-doc.setFontSize(11);
-doc.text(`Subtotal: Rs ${inr(cartSubtotal)}`, totalsRightX, totalsY, { align: "right" });
-totalsY += 18;
-doc.text(`Grand Total: Rs ${inr(cartSubtotal)}`, totalsRightX, totalsY, { align: "right" });
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.text(`Subtotal: Rs ${inr(cartSubtotal)}`, totalsRightX, totalsY, { align: "right" });
+    totalsY += 18;
+    doc.text(`Grand Total: Rs ${inr(cartSubtotal)}`, totalsRightX, totalsY, { align: "right" });
 
-  // ----- TERMS & BANK -----
-  const ty = y + 36;
-  doc.setFontSize(11);
-  doc.text("Terms & Conditions:", L, ty);
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(10);
-  doc.text(
-    [
-      "This quotation is valid for one month from the date of issue.",
-      "Delivery is subject to stock availability and may take up to 2 weeks.",
-      "Goods once sold are non-returnable and non-exchangeable.",
-      "",
-      "Yours Faithfully",
-      "HVF Agency",
-      "9957239143 / 9954425780",
-      "",
-      "BANK DETAILS",
-      "HVF AGENCY",
-      "ICICI BANK (Moran Branch)",
-      "A/C No - 199505500412",
-      "IFSC Code - ICIC0001995",
-    ],
-    L,
-    ty + 16
-  );
+    // ----- TERMS & BANK -----
+    const ty = totalsY + 36; // <-- use totalsY (not y) to avoid ReferenceError
+    doc.setFontSize(11);
+    doc.text("Terms & Conditions:", L, ty);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    doc.text(
+      [
+        "This quotation is valid for one month from the date of issue.",
+        "Delivery is subject to stock availability and may take up to 2 weeks.",
+        "Goods once sold are non-returnable and non-exchangeable.",
+        "",
+        "Yours Faithfully",
+        "HVF Agency",
+        "9957239143 / 9954425780",
+        "",
+        "BANK DETAILS",
+        "HVF AGENCY",
+        "ICICI BANK (Moran Branch)",
+        "A/C No - 199505500412",
+        "IFSC Code - ICIC0001995",
+      ],
+      L,
+      ty + 16
+    );
 
-  // open in new tab (download from there if needed)
-  window.open(doc.output("bloburl"), "_blank");
-};
+    window.open(doc.output("bloburl"), "_blank");
+  };
 
   /*** UI ***/
   return (
@@ -553,7 +544,7 @@ doc.text(`Grand Total: Rs ${inr(cartSubtotal)}`, totalsRightX, totalsY, { align:
         ))}
       </div>
 
-      {/* PAGE: CATALOG or QUOTE EDITOR */}
+      {/* PAGE: CATALOG */}
       {page === "catalog" && (
         <div style={{ maxWidth: 1100, margin: "0 auto 40px" }}>
           {loading ? (
@@ -562,7 +553,6 @@ doc.text(`Grand Total: Rs ${inr(cartSubtotal)}`, totalsRightX, totalsY, { align:
             <div className="catalog-grid">
               {filtered.map((m) => (
                 <div key={m.id} className="card">
-                  {/* white thumbnail container */}
                   <div
                     className="thumb"
                     style={{
@@ -613,7 +603,6 @@ doc.text(`Grand Total: Rs ${inr(cartSubtotal)}`, totalsRightX, totalsY, { align:
                     )}
                     {m.category && <p style={{ color: "#777", fontSize: 12 }}>{m.category}</p>}
 
-                    {/* qty steppers appear ONLY in quotation mode */}
                     {quoteMode && (
                       <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
                         <button onClick={() => dec(m)}>-</button>
@@ -632,73 +621,67 @@ doc.text(`Grand Total: Rs ${inr(cartSubtotal)}`, totalsRightX, totalsY, { align:
         </div>
       )}
 
+      {/* PAGE: QUOTE EDITOR */}
       {page === "quoteEditor" && (
-  <div
-    style={{
-      maxWidth: 1100,
-      margin: "0 auto 40px",
-      background: "#fff",
-      border: "1px solid #e5e7eb",
-      borderRadius: 12,
-      padding: 14,
-    }}
-  >
-    {/* header block */}
-    <div style={{ display: "flex", justifyContent: "space-between", gap: 16 }}>
-      {/* left: customer fields */}
-      <div style={{ flex: 1 }}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-          {/* Customer Name */}
-          <label>
-            <div style={{ fontSize: 12, color: "#666" }}>Customer Name</div>
-            <input
-              value={qHeader.customer_name}
-              onChange={(e) =>
-                setQHeader({ ...qHeader, customer_name: e.target.value })
-              }
-            />
-          </label>
+        <div
+          style={{
+            maxWidth: 1100,
+            margin: "0 auto 40px",
+            background: "#fff",
+            border: "1px solid #e5e7eb",
+            borderRadius: 12,
+            padding: 14,
+          }}
+        >
+          {/* header block */}
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 16 }}>
+            {/* left: customer fields */}
+            <div style={{ flex: 1 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                <label>
+                  <div style={{ fontSize: 12, color: "#666" }}>Customer Name</div>
+                  <input
+                    value={qHeader.customer_name}
+                    onChange={(e) =>
+                      setQHeader({ ...qHeader, customer_name: e.target.value })
+                    }
+                  />
+                </label>
 
-          {/* Address */}
-          <label>
-            <div style={{ fontSize: 12, color: "#666" }}>Address</div>
-            <input
-              value={qHeader.address}
-              onChange={(e) =>
-                setQHeader({ ...qHeader, address: e.target.value })
-              }
-            />
-          </label>
+                <label>
+                  <div style={{ fontSize: 12, color: "#666" }}>Address</div>
+                  <input
+                    value={qHeader.address}
+                    onChange={(e) =>
+                      setQHeader({ ...qHeader, address: e.target.value })
+                    }
+                  />
+                </label>
 
-          {/* Phone */}
-          <label>
-            <div style={{ fontSize: 12, color: "#666" }}>Phone</div>
-            <input
-              value={qHeader.phone}
-              onChange={(e) =>
-                setQHeader({ ...qHeader, phone: e.target.value })
-              }
-            />
-          </label>
+                <label>
+                  <div style={{ fontSize: 12, color: "#666" }}>Phone</div>
+                  <input
+                    value={qHeader.phone}
+                    onChange={(e) =>
+                      setQHeader({ ...qHeader, phone: e.target.value })
+                    }
+                  />
+                </label>
 
-          {/* fixed intro line */}
-          <div style={{ gridColumn: "1 / span 2", marginTop: 8, fontSize: 14 }}>
-            Dear Sir/Madam,<br />
-            With reference to your enquiry we are pleased to offer you as under:
+                <div style={{ gridColumn: "1 / span 2", marginTop: 8, fontSize: 14 }}>
+                  Dear Sir/Madam,<br />
+                  With reference to your enquiry we are pleased to offer you as under:
+                </div>
+              </div>
+            </div>
+
+            {/* right: quotation meta */}
+            <div style={{ width: 240, textAlign: "right" }}>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>QUOTATION</div>
+              <div>Ref: {qHeader.number || "APP/H###"}</div>
+              <div>Date: {qHeader.date}</div>
+            </div>
           </div>
-        </div>
-      </div>
-
-      {/* right: quotation meta */}
-      <div style={{ width: 240, textAlign: "right" }}>
-        <div style={{ fontWeight: 700, marginBottom: 6 }}>QUOTATION</div>
-        <div>Ref: {qHeader.number || "APP/H###"}</div>
-        <div>Date: {qHeader.date}</div>
-      </div>
-    </div>
-
-    {/* rows */}  {/* <-- Keep this exact formatting for JSX comments */}
-    {/* Your table starts immediately after this line */}
 
           {/* rows */}
           <div style={{ marginTop: 12 }}>
