@@ -382,17 +382,21 @@ export default function App() {
   doc.setFont("helvetica", "normal");
   doc.setFontSize(10);
 
-  // left block
-  const L = margin;
-  const rightBlockX = pw - margin - 180;
-  let y0 = logoBottom + 40;
+  // left block (customer info)
+const L = margin;
+let y0 = logoBottom + 40; // start position
 
-  doc.text(`${qHeader.customer_name || ""}`, L, y0);
-y0 += 15;
+doc.setFont("helvetica", "normal");
+doc.setFontSize(11);
+doc.text("To,", L, y0);   // "To," line
+y0 += 18;
+
+doc.setFont("helvetica", "bold");  // make details bold
+doc.text(`${qHeader.customer_name || ""}`, L, y0);
+y0 += 16;
 doc.text(`${qHeader.address || ""}`, L, y0);
-y0 += 15;
+y0 += 16;
 doc.text(`${qHeader.phone || ""}`, L, y0);
-
   // right block (aligned with table right edge)
 const tableRightX = doc.internal.pageSize.getWidth() - margin;
 
