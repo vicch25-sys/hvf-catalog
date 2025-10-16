@@ -391,9 +391,14 @@ export default function App() {
   doc.text(`Address: ${qHeader.address || ""}`, L, y0);             y0 += 15;
   doc.text(`Phone: ${qHeader.phone || ""}`, L, y0);
 
-  // right block
-  doc.text(`Ref: ${num}`, rightBlockX, logoBottom + 40);
-  doc.text(`Date: ${qHeader.date || todayStr()}`, rightBlockX, logoBottom + 55);
+  // right block (aligned with table right edge)
+const tableRightX = doc.internal.pageSize.getWidth() - margin;
+
+doc.setFont("helvetica", "normal");
+doc.setFontSize(10);
+
+doc.text(`Ref: ${num}`, tableRightX, logoBottom + 40, { align: "right" });
+doc.text(`Date: ${qHeader.date || todayStr()}`, tableRightX, logoBottom + 55, { align: "right" });
 
   // intro line (fixed)
   const introY = y0 + 28;
