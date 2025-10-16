@@ -351,84 +351,113 @@ export default function App() {
   };
 
   /* ---------- CLEAN PDF (NOT web print) ---------- */
-  const exportPDF = async () => {
+const exportPDF = async () => {
   if (cartList.length === 0) return alert("Nothing to print.");
+
+  // ensure quote number
   const num = qHeader.number || (await getNextQuoteNumber());
   setQHeader((h) => ({ ...h, number: num }));
 
   const doc = new jsPDF({ unit: "pt", format: "a4" });
   const pw = doc.internal.pageSize.getWidth();
+  const margin = 40;
 
-  // Logo at top center
+  // ----- LOGO -----
+  let logoBottom = 24; // y below the logo; fallback if logo fails
   try {
     const img = new Image();
     img.crossOrigin = "anonymous";
     img.src = "/hvf-logo.png";
     await new Promise((r) => (img.onload = r));
-    const w = 120;
+    const w = 110;
     const h = (img.height * w) / img.width;
-    doc.addImage(img, "PNG", (pw - w) / 2, 20, w, h);
-  } catch {}
+    const x = (pw - w) / 2;
+    const y = 24;
+    doc.addImage(img, "PNG", x, y, w, h);
+    logoBottom = y + h; // where the logo ends
+  } catch {
+    // ignore if logo missing
+  }
 
-  // Title centered
+  // ----- TITLE + HEADER LINES -----
   doc.setFont("helvetica", "bold");
   doc.setFontSize(16);
-  doc.text("QUOTATION", pw / 2, 90, { align: "center" });
+  // place title a bit below the logo (centered)
+  doc.text("QUOTATION", pw / 2, logoBottom + 22, { align: "center" });
 
-  // Ref and Date (right side)
-  doc.setFontSize(10);
   doc.setFont("helvetica", "normal");
-  const R = pw - 60;
-  doc.text(`Ref: ${num}`, R, 110, { align: "right" });
-  doc.text(`Date: ${qHeader.date || todayStr()}`, R, 125, { align: "right" });
+  doc.setFontSize(10);
 
-  // Customer details (left side)
-  const L = 40;
-  doc.text(`Customer Name: ${qHeader.customer_name || ""}`, L, 110);
-  doc.text(`Address: ${qHeader.address || ""}`, L, 125);
-  doc.text(`Phone: ${qHeader.phone || ""}`, L, 140);
+  // left block
+  const L = margin;
+  const rightBlockX = pw - margin - 180; // right header column start
+  let y0 = logoBottom + 40;              // start of header texts
 
-  // Intro line
-  doc.text("Dear Sir/Madam,", L, 170);
-  doc.text("With reference to your enquiry we are pleased to offer you as under:", L, 185);
+  doc.text(`Customer Name: ${qHeader.customer_name || ""}`, L, y0);
+  y0 += 15;
+  doc.text(`Address: ${qHeader.address || ""}`, L, y0);
+  y0 += 15;
+  doc.text(`Phone: ${qHeader.phone || ""}`, L, y0);
 
-  // Table body: merge description + specs
+  // right block (reference & date)
+  doc.text(`Ref: ${num}`, rightBlockX, logoBottom + 40);
+  doc.text(`Date: ${qHeader.date || todayStr()}`, rightBlockX, logoBottom + 55);
+
+  // intro line (fixed)
+  const introY = y0 + 28;
+  doc.setFontSize(11);
+  doc.text("Dear Sir/Madam,", L, introY);
+  doc.text(
+    "With reference to your enquiry we are pleased to offer you as under:",
+    L,
+    introY + 16
+  );
+
+  // ----- TABLE -----
+  // Compose description with specs underneath in lighter line
   const body = cartList.map((r, i) => [
     String(i + 1),
-    r.specs ? `${r.name}\n(${r.specs})` : r.name,
+    `${r.name || ""}${r.specs ? `\n(${r.specs})` : ""}`,
     String(r.qty || 0),
-    `₹${inr(r.unit || 0)}`,
-    `₹${inr((r.qty || 0) * (r.unit || 0))}`,
+    `Rs ${inr(r.unit || 0)}`,                                 // use "Rs " to avoid missing ₹ glyph
+    `Rs ${inr((r.qty || 0) * (r.unit || 0))}`,
   ]);
 
   autoTable(doc, {
-    startY: 200,
+    startY: introY + 38,
     head: [["Sl.", "Description", "Qty", "Unit Price", "Total (Incl. GST)"]],
-    styles: { fontSize: 10, cellPadding: 5 },
-    headStyles: { fillColor: [220, 220, 220], textColor: 20, halign: "center" },
-    bodyStyles: { valign: "middle" },
-    theme: "grid",   // <- Adds full border
+    styles: { fontSize: 10, cellPadding: 6 },
+    headStyles: { fillColor: [230, 230, 230] },
     columnStyles: {
-      0: { cellWidth: 30, halign: "center" },
-      1: { cellWidth: 250 },  // wider for description + specs
-      2: { cellWidth: 50, halign: "center" },
-      3: { cellWidth: 90, halign: "right" },
-      4: { cellWidth: 100, halign: "right" },
+      0: { cellWidth: 28, halign: "center" },
+      1: { cellWidth: 320 },               // wide enough for name + specs
+      2: { cellWidth: 40, halign: "center" },
+      3: { cellWidth: 100, halign: "right" },
+      4: { cellWidth: 120, halign: "right" },
     },
-    body,
+    margin: { left: margin, right: margin },
+    tableLineColor: [200, 200, 200],
+    tableLineWidth: 0.5,
+    theme: "grid",                         // grid adds borders to the table
   });
 
-  const y = doc.lastAutoTable.finalY + 20;
-  doc.setFont("helvetica", "bold");
-  doc.text(`Subtotal: ₹${inr(cartSubtotal)}`, R, y, { align: "right" });
-  doc.text(`Grand Total: ₹${inr(cartSubtotal)}`, R, y + 16, { align: "right" });
+  // ----- TOTALS (right-aligned to table edge) -----
+  const at = doc.lastAutoTable;                      // autoTable instance
+  const rightX = margin + at.table.width;            // exact right edge of the table
+  let y = at.finalY + 18;
 
-  // Terms & Conditions + Bank Details
-  const ty = y + 50;
-  doc.setFontSize(10);
   doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.text(`Subtotal: Rs ${inr(cartSubtotal)}`, rightX, y, { align: "right" });
+  y += 18;
+  doc.text(`Grand Total: Rs ${inr(cartSubtotal)}`, rightX, y, { align: "right" });
+
+  // ----- TERMS & BANK -----
+  const ty = y + 36;
+  doc.setFontSize(11);
   doc.text("Terms & Conditions:", L, ty);
   doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
   doc.text(
     [
       "This quotation is valid for one month from the date of issue.",
@@ -446,9 +475,10 @@ export default function App() {
       "IFSC Code - ICIC0001995",
     ],
     L,
-    ty + 15
+    ty + 16
   );
 
+  // open in new tab (download from there if needed)
   window.open(doc.output("bloburl"), "_blank");
 };
 
