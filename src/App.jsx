@@ -697,6 +697,24 @@ doc.text(
             padding: 14,
           }}
         >
+
+    {/* top bar: Back button */}
+    <div style={{ display: "flex", alignItems: "center", marginBottom: 8 }}>
+      <button
+        onClick={backToCatalog}
+        style={{
+          padding: "6px 10px",
+          borderRadius: 6,
+          border: "1px solid #e5e7eb",
+          background: "#f8f9fa",
+          cursor: "pointer"
+        }}
+        aria-label="Back to product selection"
+      >
+        ← Back
+      </button>
+    </div>
+
           {/* header block */}
           <div style={{ display: "flex", justifyContent: "space-between", gap: 16 }}>
             {/* left: customer fields */}
