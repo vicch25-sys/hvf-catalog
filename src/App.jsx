@@ -387,9 +387,11 @@ export default function App() {
   const rightBlockX = pw - margin - 180;
   let y0 = logoBottom + 40;
 
-  doc.text(`Customer Name: ${qHeader.customer_name || ""}`, L, y0); y0 += 15;
-  doc.text(`Address: ${qHeader.address || ""}`, L, y0);             y0 += 15;
-  doc.text(`Phone: ${qHeader.phone || ""}`, L, y0);
+  doc.text(`${qHeader.customer_name || ""}`, L, y0);
+y0 += 15;
+doc.text(`${qHeader.address || ""}`, L, y0);
+y0 += 15;
+doc.text(`${qHeader.phone || ""}`, L, y0);
 
   // right block (aligned with table right edge)
 const tableRightX = doc.internal.pageSize.getWidth() - margin;
