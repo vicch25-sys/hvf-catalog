@@ -449,30 +449,43 @@ doc.text(`Date: ${qHeader.date || todayStr()}`, tableRightX, logoBottom + 55, { 
   doc.text(`Total: Rs ${inr(cartSubtotal)}`, totalsRightX, totalsY, { align: "right" });
 
   // ----- TERMS & BANK -----
-  const ty = totalsY + 36; // <- use totalsY (important)
-  doc.setFontSize(11);
-  doc.text("Terms & Conditions:", L, ty);
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(10);
-  doc.text(
-    [
-      "This quotation is valid for one month from the date of issue.",
-      "Delivery is subject to stock availability and may take up to 2 weeks.",
-      "Goods once sold are non-returnable and non-exchangeable.",
-      "",
-      "Yours Faithfully",
-      "HVF Agency",
-      "9957239143 / 9954425780",
-      "",
-      "BANK DETAILS",
-      "HVF AGENCY",
-      "ICICI BANK (Moran Branch)",
-      "A/C No - 199505500412",
-      "IFSC Code - ICIC0001995",
-    ],
-    L,
-    ty + 16
-  );
+const ty = totalsY + 36; // <-- use totalsY so it stays below totals
+doc.setFontSize(11);
+doc.text("Terms & Conditions:", L, ty);
+
+doc.setFont("helvetica", "normal");
+doc.setFontSize(10);
+doc.text(
+  [
+    "This quotation is valid for one month from the date of issue.",
+    "Delivery is subject to stock availability and may take up to 2 weeks.",
+    "Goods once sold are non-returnable and non-exchangeable.",
+    "",
+    "Yours Faithfully",
+    "HVF Agency",
+    "9957239143 / 9954425780",
+    "",
+  ],
+  L,
+  ty + 16
+);
+
+// BANK DETAILS in bold
+doc.setFont("helvetica", "bold");
+doc.text("BANK DETAILS", L, ty + 120);
+
+// back to normal font for bank info
+doc.setFont("helvetica", "normal");
+doc.text(
+  [
+    "HVF AGENCY",
+    "ICICI BANK (Moran Branch)",
+    "A/C No - 199505500412",
+    "IFSC Code - ICIC0001995",
+  ],
+  L,
+  ty + 136
+);
 
   // open in new tab
   window.open(doc.output("bloburl"), "_blank");
