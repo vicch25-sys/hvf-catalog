@@ -270,6 +270,14 @@ const addBlankRow = () => {
   }));
 };
 
+// remove one line item by id
+const removeRow = (id) =>
+  setCart((c) => {
+    const nx = { ...c };
+    delete nx[id];
+    return nx;
+  });
+
   /* ---------- QUOTE EDITOR HEADER ---------- */
   const [qHeader, setQHeader] = useState({
     number: "",
@@ -778,15 +786,16 @@ doc.text(
           <div style={{ marginTop: 12 }}>
             <table className="qtable">
               <thead>
-                <tr>
-                  <th style={{ width: 40 }}>Sl.</th>
-                  <th style={{ width: 220 }}>Description</th>
-                  <th>Specs / description</th>
-                  <th style={{ width: 80 }}>Qty</th>
-                  <th style={{ width: 120 }}>Unit Price</th>
-                  <th style={{ width: 130 }}>Total (Incl. GST)</th>
-                </tr>
-              </thead>
+  <tr>
+    <th style={{ width: 40 }}>Sl.</th>
+    <th style={{ width: 220 }}>Description</th>
+    <th>Specs / description</th>
+    <th style={{ width: 80 }}>Qty</th>
+    <th style={{ width: 120 }}>Unit Price</th>
+    <th style={{ width: 130 }}>Total (Incl. GST)</th>
+    <th style={{ width: 40 }}></th> {/* Action */}
+  </tr>
+</thead>
               <tbody>
                 {cartList.map((r, i) => (
                   <tr key={r.id}>
@@ -820,6 +829,29 @@ doc.text(
                     <td style={{ textAlign: "right", fontWeight: 700 }}>
                       ₹{inr((r.qty || 0) * (r.unit || 0))}
                     </td>
+<td style={{ textAlign: "right", fontWeight: 700 }}>
+  ₹{inr((r.qty || 0) * (r.unit || 0))}
+</td>
+
+{/* Action cell: small circular remove button */}
+<td style={{ textAlign: "center" }}>
+  <button
+    onClick={() => removeRow(r.id)}
+    title="Remove row"
+    style={{
+      width: 26,
+      height: 26,
+      borderRadius: "50%",
+      border: "1px solid #ddd",
+      background: "#fff",
+      lineHeight: "24px",
+      fontSize: 16,
+      cursor: "pointer",
+    }}
+  >
+    ×
+  </button>
+</td>
                   </tr>
                 ))}
               </tbody>
