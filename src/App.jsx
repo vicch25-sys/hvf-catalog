@@ -585,57 +585,72 @@ export default function App() {
       )}
 
       {page === "quoteEditor" && (
-        <div style={{ maxWidth: 1100, margin: "0 auto 40px", background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, padding: 14 }}>
-          {/* header block */}
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 16 }}>
-            <div style={{ flex: 1 }}>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                <label>
-                  <label>
-  <div style={{ fontSize: 12, color: "#666" }}>Customer Name</div>
-  <input
-    value={qHeader.customer_name}
-    onChange={(e) =>
-      setQHeader({ ...qHeader, customer_name: e.target.value })
-    }
-  />
-</label>
+  <div
+    style={{
+      maxWidth: 1100,
+      margin: "0 auto 40px",
+      background: "#fff",
+      border: "1px solid #e5e7eb",
+      borderRadius: 12,
+      padding: 14
+    }}
+  >
+    {/* header block */}
+    <div style={{ display: "flex", justifyContent: "space-between", gap: 16 }}>
+      <div style={{ flex: 1 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          {/* Customer Name */}
+          <label>
+            <div style={{ fontSize: 12, color: "#666" }}>Customer Name</div>
+            <input
+              value={qHeader.customer_name}
+              onChange={(e) =>
+                setQHeader({ ...qHeader, customer_name: e.target.value })
+              }
+            />
+          </label>
 
-<label>
-  <div style={{ fontSize: 12, color: "#666" }}>Address</div>
-  <input
-    value={qHeader.address}
-    onChange={(e) =>
-      setQHeader({ ...qHeader, address: e.target.value })
-    }
-  />
-</label>
+          {/* Address */}
+          <label>
+            <div style={{ fontSize: 12, color: "#666" }}>Address</div>
+            <input
+              value={qHeader.address}
+              onChange={(e) =>
+                setQHeader({ ...qHeader, address: e.target.value })
+              }
+            />
+          </label>
 
-<label>
-  <div style={{ fontSize: 12, color: "#666" }}>Phone</div>
-  <input
-    value={qHeader.phone}
-    onChange={(e) =>
-      setQHeader({ ...qHeader, phone: e.target.value })
-    }
-  />
-</label>
-                <div style={{ gridColumn: "1 / span 2", marginTop: 8, fontSize: 14 }}>
-  Dear Sir/Madam,<br />
-  With reference to your enquiry we are pleased to offer you as under:
-</div>
-                <label style={{ gridColumn: "1 / span 2" }}>
-                  <div style={{ fontSize: 12, color: "#666" }}>Subject</div>
-                  <input value={qHeader.subject} onChange={(e) => setQHeader({ ...qHeader, subject: e.target.value })} />
-                </label>
-              </div>
-            </div>
-            <div style={{ width: 240, textAlign: "right" }}>
-              <div style={{ fontWeight: 700, marginBottom: 6 }}>QUOTATION</div>
-              <div>Ref: {qHeader.number || "APP/H###"}</div>
-              <div>Date: {qHeader.date}</div>
-            </div>
+          {/* Phone */}
+          <label>
+            <div style={{ fontSize: 12, color: "#666" }}>Phone</div>
+            <input
+              value={qHeader.phone}
+              onChange={(e) =>
+                setQHeader({ ...qHeader, phone: e.target.value })
+              }
+            />
+          </label>
+
+          {/* Fixed line */}
+          <div style={{ gridColumn: "1 / span 2", marginTop: 8, fontSize: 14 }}>
+            Dear Sir/Madam,<br />
+            With reference to your enquiry we are pleased to offer you as under:
           </div>
+        </div>
+      </div>
+
+      {/* Right header */}
+      <div style={{ width: 240, textAlign: "right" }}>
+        <div style={{ fontWeight: 700, marginBottom: 6 }}>QUOTATION</div>
+        <div>Ref: {qHeader.number || "APP/H###"}</div>
+        <div>Date: {qHeader.date}</div>
+      </div>
+    </div>
+
+    {/* ...keep your existing table/rows/buttons that come after this header... */}
+  </div>
+)}
 
           {/* rows */}
           <div style={{ marginTop: 12 }}>
