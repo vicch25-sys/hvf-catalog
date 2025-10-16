@@ -823,20 +823,25 @@ doc.text(
                   </tr>
                 ))}
               </tbody>
-            </table>
+</table>
 
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 24, marginTop: 16 }}>
-              <div>Subtotal <b>₹{inr(cartSubtotal)}</b></div>
-              <div>Grand Total <b>₹{inr(cartSubtotal)}</b></div>
-            </div>
+{/* Action bar under table: Add Row on the left, totals on the right */}
+<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 12 }}>
+  <button onClick={addBlankRow}>+ Add Row</button>
 
-            <div style={{ marginTop: 14, display: "flex", gap: 8 }}>
-              <button onClick={async () => { const n = await saveQuote(); if (n && !qHeader.number) setQHeader((h) => ({ ...h, number: n })); }}>
-                Save
-              </button>
-              <button onClick={exportPDF}>Export / Print PDF</button>
-              <button onClick={backToCatalog}>Back to Catalog</button>
-            </div>
+  <div style={{ display: "flex", gap: 24 }}>
+    <div>Subtotal <b>₹{inr(cartSubtotal)}</b></div>
+    <div>Grand Total <b>₹{inr(cartSubtotal)}</b></div>
+  </div>
+</div>
+
+<div style={{ marginTop: 14, display: "flex", gap: 8 }}>
+  <button onClick={async () => { const n = await saveQuote(); if (n && !qHeader.number) setQHeader((h) => ({ ...h, number: n })); }}>
+    Save
+  </button>
+  <button onClick={exportPDF}>Export / Print PDF</button>
+  <button onClick={backToCatalog}>Back to Catalog</button>
+</div>
           </div>
         </div>
       )}
