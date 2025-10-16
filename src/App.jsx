@@ -475,6 +475,7 @@ export default function App() {
 
   // open in new tab (download from there if needed)
   window.open(doc.output("bloburl"), "_blank");
+}; // <-- end of exportPDF
 
   /*** UI ***/
   return (
