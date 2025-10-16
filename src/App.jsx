@@ -883,14 +883,16 @@ doc.text(
         {quoteMode && (
           <button onClick={goToEditor}>View Quote ({cartCount})</button>
         )}
-        <button
-          onClick={() => {
-            loadSaved();
-            document.getElementById("saved-pop").style.display = "block";
-          }}
-        >
-          Saved Quotes
-        </button>
+        {quoteMode && (
+  <button
+    onClick={() => {
+      loadSaved();
+      document.getElementById("saved-pop").style.display = "block";
+    }}
+  >
+    Saved Quotes
+  </button>
+)}
       </div>
 
       {/* Saved quotes popup */}
