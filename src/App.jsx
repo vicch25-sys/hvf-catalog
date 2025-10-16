@@ -406,72 +406,75 @@ export default function App() {
       introY + 16
     );
 
-    // ----- TABLE -----
-    const body = cartList.map((r, i) => [
-      String(i + 1),
-      `${r.name || ""}${r.specs ? `\n(${r.specs})` : ""}`,
-      String(r.qty || 0),
-      `Rs ${inr(r.unit || 0)}`,
-      `Rs ${inr((r.qty || 0) * (r.unit || 0))}`,
-    ]);
+      // ----- TABLE -----
+  // Description with specs underneath in lighter line
+  const body = cartList.map((r, i) => [
+    String(i + 1),
+    `${r.name || ""}${r.specs ? `\n(${r.specs})` : ""}`,
+    String(r.qty || 0),
+    `Rs ${inr(r.unit || 0)}`,                       // use "Rs " to avoid missing ₹ glyph
+    `Rs ${inr((r.qty || 0) * (r.unit || 0))}`,
+  ]);
 
-    autoTable(doc, {
-      startY: introY + 38,
-      head: [["Sl.", "Description", "Qty", "Unit Price", "Total (Incl. GST)"]],
-      styles: { fontSize: 10, cellPadding: 6, overflow: "linebreak" },
-      headStyles: { fillColor: [230, 230, 230] },
-      columnStyles: {
-        0: { cellWidth: 28, halign: "center" },
-        1: { cellWidth: 250 },         // fits within printable width
-        2: { cellWidth: 40, halign: "center" },
-        3: { cellWidth: 90, halign: "right" },
-        4: { cellWidth: 107, halign: "right" },
-      },
-      margin: { left: margin, right: margin },
-      tableLineColor: [200, 200, 200],
-      tableLineWidth: 0.5,
-      theme: "grid",
-    });
+  autoTable(doc, {
+    startY: introY + 38,
+    head: [["Sl.", "Description", "Qty", "Unit Price", "Total (Incl. GST)"]],
+    body: body,                                      // <-- render rows
+    styles: { fontSize: 10, cellPadding: 6, overflow: "linebreak" },
+    headStyles: { fillColor: [230, 230, 230] },
+    columnStyles: {
+      0: { cellWidth: 28, halign: "center" },        // Sl.
+      1: { cellWidth: 320 },                         // Description (+specs on next line)
+      2: { cellWidth: 40, halign: "center" },        // Qty
+      3: { cellWidth: 100, halign: "right" },        // Unit Price
+      4: { cellWidth: 120, halign: "right" },        // Total
+    },
+    margin: { left: margin, right: margin },
+    tableLineColor: [200, 200, 200],
+    tableLineWidth: 0.5,
+    theme: "grid",                                   // full borders
+  });
 
-    // ----- TOTALS (right-aligned to page right margin; safe if lastAutoTable missing) -----
-    const last = doc.lastAutoTable || null;
-    const totalsRightX = doc.internal.pageSize.getWidth() - margin;
-    let totalsY = (last?.finalY ?? (introY + 38)) + 18;
+  // ----- TOTALS (right aligned with table's right edge) -----
+  const last = doc.lastAutoTable || null;
+  // If for any reason the table isn't there, fall back to page width minus margins
+  const tableRightX = last ? (margin + last.table.width) : (doc.internal.pageSize.getWidth() - margin);
+  let totalsY = (last ? last.finalY : (introY + 38)) + 18;
 
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(11);
-    doc.text(`Subtotal: Rs ${inr(cartSubtotal)}`, totalsRightX, totalsY, { align: "right" });
-    totalsY += 18;
-    doc.text(`Grand Total: Rs ${inr(cartSubtotal)}`, totalsRightX, totalsY, { align: "right" });
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.text(`Subtotal: Rs ${inr(cartSubtotal)}`, tableRightX, totalsY, { align: "right" });
+  totalsY += 18;
+  doc.text(`Grand Total: Rs ${inr(cartSubtotal)}`, tableRightX, totalsY, { align: "right" });
 
-    // ----- TERMS & BANK -----
-    const ty = totalsY + 36; // <-- use totalsY (not y) to avoid ReferenceError
-    doc.setFontSize(11);
-    doc.text("Terms & Conditions:", L, ty);
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(10);
-    doc.text(
-      [
-        "This quotation is valid for one month from the date of issue.",
-        "Delivery is subject to stock availability and may take up to 2 weeks.",
-        "Goods once sold are non-returnable and non-exchangeable.",
-        "",
-        "Yours Faithfully",
-        "HVF Agency",
-        "9957239143 / 9954425780",
-        "",
-        "BANK DETAILS",
-        "HVF AGENCY",
-        "ICICI BANK (Moran Branch)",
-        "A/C No - 199505500412",
-        "IFSC Code - ICIC0001995",
-      ],
-      L,
-      ty + 16
-    );
+  // ----- TERMS & BANK -----
+  const ty = totalsY + 36;                           // position terms below totals
+  doc.setFontSize(11);
+  doc.text("Terms & Conditions:", margin, ty);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+  doc.text(
+    [
+      "This quotation is valid for one month from the date of issue.",
+      "Delivery is subject to stock availability and may take up to 2 weeks.",
+      "Goods once sold are non-returnable and non-exchangeable.",
+      "",
+      "Yours Faithfully",
+      "HVF Agency",
+      "9957239143 / 9954425780",
+      "",
+      "BANK DETAILS",
+      "HVF AGENCY",
+      "ICICI BANK (Moran Branch)",
+      "A/C No - 199505500412",
+      "IFSC Code - ICIC0001995",
+    ],
+    margin,
+    ty + 16
+  );
 
-    window.open(doc.output("bloburl"), "_blank");
-  };
+  // open in new tab (download from there if needed)
+  window.open(doc.output("bloburl"), "_blank");
 
   /*** UI ***/
   return (
