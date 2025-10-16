@@ -35,8 +35,19 @@ async function getNextQuoteNumber() {
   return `APP/H${String(next).padStart(3, "0")}`;
 }
 
+/* ===== Step 1: persist quote UI state (ADD THIS BLOCK) ===== */
+const LS_KEY = "hvfQuoteState";
+const loadQuoteState = () => {
+  try { return JSON.parse(localStorage.getItem(LS_KEY) || "{}"); }
+  catch { return {}; }
+};
+const saveQuoteState = (s) =>
+  localStorage.setItem(LS_KEY, JSON.stringify(s));
+/* ========================================================== */
+
 /* --- App --- */
 export default function App() {
+
   /*** DATA ***/
   const [items, setItems] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -259,6 +270,30 @@ export default function App() {
     phone: "",
     subject: "",
   });
+
+// --- Persist quote state in localStorage so refresh won't log out ---
+useEffect(() => {
+  const saved = localStorage.getItem("quoteState");
+  if (saved) {
+    try {
+      const parsed = JSON.parse(saved);
+      if (parsed.cart) setCart(parsed.cart);
+      if (parsed.qHeader) setQHeader(parsed.qHeader);
+      if (parsed.page) setPage(parsed.page);
+      if (parsed.quoteMode) setQuoteMode(parsed.quoteMode);
+    } catch (e) {
+      console.error("Failed to restore quote state", e);
+    }
+  }
+}, []);
+
+// whenever cart, qHeader, page, or quoteMode changes, save them
+useEffect(() => {
+  localStorage.setItem(
+    "quoteState",
+    JSON.stringify({ cart, qHeader, page, quoteMode })
+  );
+}, [cart, qHeader, page, quoteMode]);
 
   const goToEditor = async () => {
     if (cartList.length === 0) return alert("Add at least 1 item to the quote.");
