@@ -470,26 +470,34 @@ doc.text(`Date: ${qHeader.date || todayStr()}`, tableRightX, logoBottom + 55, { 
   doc.text("With reference to your enquiry we are pleased to offer you as under:", L, introY + 16);
 
   // ----- TABLE (always fits) -----
+// Build body: specs under name in lighter line
 const body = cartList.map((r, i) => [
   String(i + 1),
   `${r.name || ""}${r.specs ? `\n(${r.specs})` : ""}`,
   String(r.qty || 0),
-  inr(r.unit || 0),                          // 👈 Removed "Rs"
-  inr((r.qty || 0) * (r.unit || 0)),         // 👈 Removed "Rs"
+  inr(r.unit || 0),                          // plain number (no "Rs")
+  inr((r.qty || 0) * (r.unit || 0)),         // plain number (no "Rs")
 ]);
+
+// Column widths that sum to content width
+const colSl = 28;
+const colQty = 40;
+const colUnit = 90;
+const colTotal = 110;
+const colDesc = Math.max(120, contentW - (colSl + colQty + colUnit + colTotal)); // remainder
 
 autoTable(doc, {
   startY: introY + 38,
   head: [["Sl.", "Description", "Qty", "Unit Price", "Total (Incl. GST)"]],
   body,
   styles: { fontSize: 10, cellPadding: 6, overflow: "linebreak" },
-  headStyles: { fillColor: [230, 230, 230], textColor: [0, 0, 0], fontStyle: "bold" },
+  headStyles: { fillColor: [230, 230, 230], textColor: [0, 0, 0], fontStyle: "bold" }, // black & bold
   columnStyles: {
-    0: { cellWidth: colSl, halign: "center" },
+    0: { cellWidth: colSl,   halign: "center" },
     1: { cellWidth: colDesc },
-    2: { cellWidth: colQty, halign: "center" },
+    2: { cellWidth: colQty,  halign: "center" },
     3: { cellWidth: colUnit, halign: "right" },
-    4: { cellWidth: colTotal, halign: "right" },
+    4: { cellWidth: colTotal,halign: "right" },
   },
   margin: { left: margin, right: margin },
   tableLineColor: [200, 200, 200],
@@ -498,15 +506,13 @@ autoTable(doc, {
 });
 
 // ----- TOTAL (single line, aligned with table right edge) -----
-const last = doc.lastAutoTable || null;
+const at = doc.lastAutoTable || null;
 const totalsRightX = doc.internal.pageSize.getWidth() - margin;
-let totalsY = (last?.finalY ?? (introY + 38)) + 22;
+let totalsY = (at?.finalY ?? (introY + 38)) + 22;
 
 doc.setFont("helvetica", "bold");
 doc.setFontSize(12);
-// 👇 Use ₹ symbol here instead of Rs
 doc.text(`Total: ₹${inr(cartSubtotal)}`, totalsRightX, totalsY, { align: "right" });
-
   // ----- TERMS & BANK -----
 const ty = totalsY + 36; // <-- use totalsY so it stays below totals
 doc.setFontSize(11);
