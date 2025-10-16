@@ -3,6 +3,48 @@ import { createClient } from "@supabase/supabase-js";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 
+// ---- PDF font loader (for ₹) ----
+let rupeeFontLoaded = false;
+
+function ab2b64(buf) {
+  // robust ArrayBuffer -> base64 for large files
+  let binary = "";
+  const bytes = new Uint8Array(buf);
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
+async function loadRupeeFont(doc) {
+  if (rupeeFontLoaded) return;
+
+  // Fetch both Regular and Bold (make sure these files exist in public/fonts/)
+  const [regRes, boldRes] = await Promise.all([
+    fetch("/fonts/NotoSans-Regular.ttf"),
+    fetch("/fonts/NotoSans-Bold.ttf"),      // if you didn't add bold, remove this + below two bold lines
+  ]);
+
+  const [regBuf, boldBuf] = await Promise.all([
+    regRes.arrayBuffer(),
+    boldRes.arrayBuffer(),
+  ]);
+
+  const regB64  = ab2b64(regBuf);
+  const boldB64 = ab2b64(boldBuf);
+
+  // Register Regular
+  doc.addFileToVFS("NotoSans-Regular.ttf", regB64);
+  doc.addFont("NotoSans-Regular.ttf", "NotoSans", "normal");
+
+  // Register Bold
+  doc.addFileToVFS("NotoSans-Bold.ttf", boldB64);
+  doc.addFont("NotoSans-Bold.ttf", "NotoSans", "bold");
+
+  rupeeFontLoaded = true;
+}
+
 /* --- Supabase client --- */
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -510,9 +552,24 @@ const at = doc.lastAutoTable || null;
 const totalsRightX = doc.internal.pageSize.getWidth() - margin;
 let totalsY = (at?.finalY ?? (introY + 38)) + 22;
 
-doc.setFont("helvetica", "bold");
-doc.setFontSize(12);
-doc.text(`Total: ₹${inr(cartSubtotal)}`, totalsRightX, totalsY, { align: "right" });
+try {
+  // Use the font that includes the ₹ glyph (loaded earlier by loadRupeeFont)
+  await loadRupeeFont(doc);
+  doc.setFont("NotoSans", "bold");       // switch to Noto Sans (bold) for the total line
+  doc.setFontSize(12);
+  doc.setTextColor(0, 0, 0);
+  doc.text(`Total: ₹ ${inr(cartSubtotal)}`, totalsRightX, totalsY, { align: "right" }); // note the space after ₹
+} catch (_e) {
+  // Fallback if font couldn't be loaded
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(12);
+  doc.setTextColor(0, 0, 0);
+  doc.text(`Total: Rs ${inr(cartSubtotal)}`, totalsRightX, totalsY, { align: "right" });
+} finally {
+  // Restore your default font for anything that follows
+  doc.setFont("helvetica", "normal");
+}
+
   // ----- TERMS & BANK -----
 const ty = totalsY + 36; // <-- use totalsY so it stays below totals
 doc.setFontSize(11);
