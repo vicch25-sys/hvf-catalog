@@ -544,68 +544,87 @@ if (firm === "HVF Agency") {
 }
 else if (firm === "Victor Engineering") {
   // ============================
-  // VICTOR ENGINEERING: PERFORMA INVOICE (clean boxes, no double lines)
+  // VICTOR ENGINEERING: PERFORMA INVOICE (boxed layout, single lines)
   // ============================
-  const BOX_GAP = 8;        // space between boxes so borders never overlap
-  const LINE_W  = 0.8;      // stroke width for all boxes
 
-  // Title
+  // Drawing helpers with a single consistent stroke
+  const LINE_W = 0.9;               // slightly heavier like printed forms
+  const BOX_GAP = 6;                 // gap between stacked boxes to avoid double lines
+  const strokeBox = (x, y, w, h) => { doc.setLineWidth(LINE_W); doc.rect(x, y, w, h); };
+  const vLine = (x, y1, y2) => { doc.setLineWidth(LINE_W); doc.line(x, y1, x, y2); };
+  const hLine = (x1, x2, y) => { doc.setLineWidth(LINE_W); doc.line(x1, y, x2, y); };
+
+  // Title band (top)
   doc.setFont("times", "bold");
   doc.setFontSize(22);
-  doc.text("Victor Engineering", pw / 2, 60, { align: "center" });
+  doc.text("Victor Engineering", pw / 2, 50, { align: "center" });
   doc.setFontSize(14);
-  doc.text("PERFORMA INVOICE", pw / 2, 80, { align: "center" });
+  doc.text("PERFORMA INVOICE", pw / 2, 70, { align: "center" });
 
-  // Helpers
-  const strokeBox = (x, y, w, h) => { doc.setLineWidth(LINE_W); doc.rect(x, y, w, h); };
-  const vLine     = (x, y1, y2)    => { doc.setLineWidth(LINE_W); doc.line(x, y1, x, y2); };
+  // Outer content frame (kept inside margins)
+  const contentTop = 84;                 // just under the title
+  const contentBottom = ph - 40;         // keep bottom margin clear
+  strokeBox(L, contentTop, contentW, contentBottom - contentTop);
 
-  // Content top starts just below titles
-  const contentTop = 92;
+  // ───────────────────────────────────────────────────────────────────
+  // HEADER GRID: single framed area, internally divided (no doubles)
+  // left: "To"   | right: meta (Ref/Date/GSTIN)
+  // ───────────────────────────────────────────────────────────────────
+  const headTop = contentTop + 10;
+  const headH   = 90;
+  const headLeft = L + 10;
+  const headRight = R - 10;
 
-  // 1) Header row: single outer box, split vertically (no overlapping boxes)
-  const headH  = 90;
-  strokeBox(L, contentTop, contentW, headH);
-  const splitX = L + contentW * 0.60;
-  vLine(splitX, contentTop, contentTop + headH);
+  // Frame once
+  strokeBox(L + 10, headTop, contentW - 20, headH);
 
-  // Left (To:)
+  // Vertical split inside the header frame
+  const splitX = L + 10 + Math.floor((contentW - 20) * 0.58);
+  vLine(splitX, headTop, headTop + headH);
+
+  // Left sub-box content ("To, ...")
   doc.setFont("times", "normal");
   doc.setFontSize(11);
-  doc.text("To,", L + 10, contentTop + 18);
+  let y = headTop + 18;
+  doc.text("To,", headLeft, y); y += 18;
 
   doc.setFont("times", "bold");
-  doc.text(String(qHeader.customer_name || ""), L + 10, contentTop + 36);
-  doc.text(String(qHeader.address || ""),      L + 10, contentTop + 52);
-  doc.text(String(qHeader.phone || ""),        L + 10, contentTop + 68);
+  doc.text(String(qHeader.customer_name || ""), headLeft, y); y += 16;
+  doc.text(String(qHeader.address || ""), headLeft, y);       y += 16;
+  doc.text(String(qHeader.phone || ""), headLeft, y);
 
-  // Right (meta)
+  // Right sub-box (meta)
   doc.setFont("times", "normal");
   const rx = splitX + 10;
-  doc.text(`Ref No : ${num}`,     rx, contentTop + 20);
-  doc.text(`Date   : ${dateStr}`, rx, contentTop + 36);
-  doc.text(`GSTIN  : 18BCYCP9744A1ZA`, rx, contentTop + 52); // change to real GSTIN if needed
+  let ry = headTop + 18;
+  doc.text(`Ref No : ${num}`, rx, ry);   ry += 16;
+  doc.text(`Date   : ${dateStr}`, rx, ry); ry += 16;
+  doc.text(`GSTIN  : 18BCYCP9744A1ZA`, rx, ry); // adjust if you have a real value
 
-  // 2) Subject box (single box, no overlap)
-  const subTop = contentTop + headH + BOX_GAP;
-  const subH   = 28;
-  strokeBox(L, subTop, contentW, subH);
+  // ───────────────────────────────────────────────────────────────────
+  // SUBJECT ROW (single frame)
+  // ───────────────────────────────────────────────────────────────────
+  const subTop = headTop + headH + BOX_GAP;
+  const subH   = 26;
+  strokeBox(L + 10, subTop, contentW - 20, subH);
   doc.setFont("times", "normal");
-  doc.text("Sub :  Performa Invoice for Machinery", L + 10, subTop + 18);
+  doc.text("Sub :  Performa Invoice for Machinery", L + 20, subTop + 17);
 
-  // 3) Intro box (single box, no overlap)
+  // ───────────────────────────────────────────────────────────────────
+  // INTRO ROW (single frame)
+  // ───────────────────────────────────────────────────────────────────
   const introTop = subTop + subH + BOX_GAP;
-  const introH   = 40;
-  strokeBox(L, introTop, contentW, introH);
-  doc.text("Dear Sir/Madam,", L + 10, introTop + 16);
+  const introH   = 38;
+  strokeBox(L + 10, introTop, contentW - 20, introH);
+  doc.text("Dear Sir/Madam,", L + 20, introTop + 16);
   doc.text(
     "With reference to your enquiry we are pleased to offer you as under:",
-    L + 10, introTop + 30
+    L + 20,
+    introTop + 30
   );
 
-  // IMPORTANT: start the table just after the intro box with a small extra gap
-  // to guarantee no adjacent borders (prevents any “double line” look)
-  afterHeaderY = introTop + introH + BOX_GAP + 4;
+  // Table must begin AFTER intro frame with a tiny gap (prevents double lines)
+  afterHeaderY = introTop + introH + 4;
 }
 else {
   // Mahabir Hardware Stores (unchanged)
@@ -686,8 +705,9 @@ else {
       4: { cellWidth: colTotal,halign: "right" },
     },
     margin: { left: margin, right: margin },
-    tableLineColor: [200, 200, 200],
-    tableLineWidth: firm === "Mahabir Hardware Stores" ? 0.7 : 0.5,
+
+    tableLineWidth: firm === "Victor Engineering" ? 0.9 : (firm === "Mahabir Hardware Stores" ? 0.7 : 0.5),
+tableLineColor: firm === "Victor Engineering" ? [90, 90, 90] : [200, 200, 200],
     theme: "grid",
 
     // preserve your two-line Description + custom 2nd line
@@ -738,76 +758,111 @@ else {
   });
 
   // -------------------------------
-  // TOTAL LINE
-  // -------------------------------
-  const at = doc.lastAutoTable || null;
-  const totalsRightX = R;
-  let totalsY = (at?.finalY ?? afterHeaderY) + 22;
+// TOTAL LINE (invoice-style)
+// -------------------------------
+const at = doc.lastAutoTable || null;
+// small right padding so text sits inside the boxes nicely
+const totalsRightX = R - 10;
+// slightly tighter vertical spacing
+let totalsY = (at?.finalY ?? afterHeaderY) + 18;
 
-  if (firm === "Victor Engineering") {
-    // Vector: distinct "Rs" in Helvetica
+if (firm === "Victor Engineering") {
+  // draw a single separator rule above the total (no double borders)
+  doc.setDrawColor(90);       // dark grey (same as table lines)
+  doc.setLineWidth(0.9);
+  doc.line(L, totalsY - 14, R, totalsY - 14);
+
+  // bold "Rs" total, right-aligned
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(12);
+  doc.text(`Total = Rs ${inr(cartSubtotal)}`, totalsRightX, totalsY, { align: "right" });
+} else {
+  // HVF & Mahabir keep your existing style
+  try {
+    await loadRupeeFont(doc);
+    doc.setFont("NotoSans", "bold");
+    doc.setFontSize(12);
+    const RUPEE = String.fromCharCode(0x20B9);
+    doc.text(`Total: ${RUPEE} ${inr(cartSubtotal)}`, totalsRightX, totalsY, { align: "right" });
+  } catch {
     doc.setFont("helvetica", "bold");
     doc.setFontSize(12);
-    doc.text(`Total = Rs ${inr(cartSubtotal)}`, totalsRightX, totalsY, { align: "right" });
-  } else {
-    // HVF & Mahabir: NotoSans ₹
-    try {
-      await loadRupeeFont(doc);
-      doc.setFont("NotoSans", "bold");
-      doc.setFontSize(12);
-      const RUPEE = String.fromCharCode(0x20B9);
-      doc.text(`Total: ${RUPEE} ${inr(cartSubtotal)}`, totalsRightX, totalsY, { align: "right" });
-    } catch {
-      // Safe fallback
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(12);
-      doc.text(`Total: Rs ${inr(cartSubtotal)}`, totalsRightX, totalsY, { align: "right" });
-    }
+    doc.text(`Total: Rs ${inr(cartSubtotal)}`, totalsRightX, totalsY, { align: "right" });
   }
+}
 
   // -------------------------------
-  // TERMS & BANK
-  // -------------------------------
-  const ty = totalsY + 32;
+// TERMS & BANK
+// -------------------------------
+const ty = totalsY + 28; // start a bit below the total line
 
-  if (firm === "Victor Engineering") {
-    // Bordered Terms box
-    const termsH = 110;
-    doc.rect(L, ty, contentW, termsH);
-    doc.setFont("times", "bold");
-    doc.setFontSize(11);
-    doc.text("Terms & Conditions", L + 10, ty + 16);
-    doc.setFont("times", "normal");
-    doc.setFontSize(10);
-    doc.text([
+if (firm === "Victor Engineering") {
+  // Single-stroke, clean boxes like your reference
+  const boxGap  = 10;
+  const termsH  = 110;
+  const bankH   = 90;
+
+  // TERMS box
+  doc.setDrawColor(90);     // same tone we used for grid
+  doc.setLineWidth(0.9);
+  doc.rect(L, ty, contentW, termsH);
+
+  doc.setFont("times", "bold");
+  doc.setFontSize(11);
+  doc.text("Terms & Conditions", L + 10, ty + 16);
+
+  doc.setFont("times", "normal");
+  doc.setFontSize(10);
+  doc.text(
+    [
       "Price will be including GST % as applicable.",
       "This Performa Invoice is valid for 15 days only.",
       "Delivery ex-stock/2 weeks.",
       "Goods once sold cannot be taken back."
-    ], L + 10, ty + 34);
+    ],
+    L + 10,
+    ty + 34
+  );
 
-    // Bordered Bank box
-    const bankTop = ty + termsH + 8;
-    const bankH = 92;
-    doc.rect(L, bankTop, contentW, bankH);
-    doc.setFont("times", "bold");
-    doc.text("BANK DETAILS", L + 10, bankTop + 16);
-    doc.setFont("times", "normal");
-    doc.text([
-      "VICTOR ENGINEERING",
-      "HDFC BANK (Dibrugarh)",
-      "A/C No - 50100234567890",
-      "IFSC Code - HDFC0001234",
-    ], L + 10, bankTop + 34);
-  } else {
-    // Your previous (non-bordered) section
-    doc.setFont(tableFont, "bold");
-    doc.setFontSize(11);
-    doc.text("Terms & Conditions:", L, ty, { underline: true });
+  // BANK box (below, separated by a gap)
+const bankTop = ty + termsH + boxGap;
+doc.rect(L, bankTop, contentW, bankH);
 
-    doc.setFont(tableFont, "normal");
-    doc.setFontSize(10);
-    doc.text([
+doc.setFont("times", "bold");
+doc.setFontSize(11);
+doc.text("BANK DETAILS", L + 10, bankTop + 16);
+
+doc.setFont("times", "normal");
+doc.setFontSize(10);
+doc.text(
+  [
+    "VICTOR ENGINEERING",
+    "HDFC BANK (Dibrugarh)",
+    "A/C No - 50100234567890",
+    "IFSC Code - HDFC0001234",
+  ],
+  L + 10,
+  bankTop + 34
+);
+
+// Reset stroke defaults so later drawings don’t inherit Victor’s thicker/gray lines
+doc.setDrawColor(0);     // back to black
+doc.setLineWidth(0.5);   // normal table/default width
+
+// (Optional) You can add a small empty signature area if you want:
+// const signTop = bankTop + bankH + boxGap;
+// doc.rect(L, signTop, contentW, 60);
+
+} else {
+  // HVF & Mahabir: keep your previous unboxed layout
+  doc.setFont(tableFont, "bold");
+  doc.setFontSize(11);
+  doc.text("Terms & Conditions:", L, ty, { underline: true });
+
+  doc.setFont(tableFont, "normal");
+  doc.setFontSize(10);
+  doc.text(
+    [
       "This quotation is valid for one month from the date of issue.",
       "Delivery is subject to stock availability and may take up to 2 weeks.",
       "Goods once sold are non-returnable and non-exchangeable.",
@@ -817,31 +872,33 @@ else {
       "9957239143 / 9954425780",
       "GST: 18AFCPC4260P1ZB",
       "",
-    ], L, ty + 16);
+    ],
+    L,
+    ty + 16
+  );
 
-    doc.setFont(tableFont, "bold");
-    doc.text("BANK DETAILS", L, ty + 120);
+  doc.setFont(tableFont, "bold");
+  doc.text("BANK DETAILS", L, ty + 120);
 
-    doc.setFont(tableFont, "normal");
-    let bankLines = [];
-    if (firm === "HVF Agency") {
-      bankLines = [
-        "HVF AGENCY",
-        "ICICI BANK (Moran Branch)",
-        "A/C No - 199505500412",
-        "IFSC Code - ICIC0001995",
-      ];
-    } else {
-      bankLines = [
-        "MAHABIR HARDWARE STORES",
-        "SBI (Moranhat Branch)",
-        "A/C No - 302187654321",
-        "IFSC Code - SBIN0001995",
-      ];
-    }
-    doc.text(bankLines, L, ty + 136);
+  doc.setFont(tableFont, "normal");
+  let bankLines = [];
+  if (firm === "HVF Agency") {
+    bankLines = [
+      "HVF AGENCY",
+      "ICICI BANK (Moran Branch)",
+      "A/C No - 199505500412",
+      "IFSC Code - ICIC0001995",
+    ];
+  } else {
+    bankLines = [
+      "MAHABIR HARDWARE STORES",
+      "SBI (Moranhat Branch)",
+      "A/C No - 302187654321",
+      "IFSC Code - SBIN0001995",
+    ];
   }
-
+  doc.text(bankLines, L, ty + 136);
+}
   // Done — open in new tab
   window.open(doc.output("bloburl"), "_blank");
 };
