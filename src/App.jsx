@@ -634,8 +634,12 @@ try {
 
   // ----- TERMS & BANK -----
 const ty = totalsY + 36; // <-- use totalsY so it stays below totals
+
+// underline + bold "Terms & Conditions:"
+doc.setFont("helvetica", "bold");
 doc.setFontSize(11);
-doc.text("Terms & Conditions:", L, ty);
+doc.setTextColor(0, 0, 0);
+doc.text("Terms & Conditions:", L, ty, { underline: true });
 
 doc.setFont("helvetica", "normal");
 doc.setFontSize(10);
@@ -648,7 +652,7 @@ doc.text(
     "Yours Faithfully",
     "HVF Agency",
     "9957239143 / 9954425780",
-    "GST: 18AFCPC4260P1ZB",   // ✅ Added GST line
+    "GST: 18AFCPC4260P1ZB",   // ✅ Added GST number
     "",
   ],
   L,
