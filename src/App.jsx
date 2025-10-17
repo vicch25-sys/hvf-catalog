@@ -441,317 +441,271 @@ export default function App() {
   };
 
   /* ---------- CLEAN PDF (NOT web print) ---------- */
-  const exportPDF = async () => {
-    if (cartList.length === 0) return alert("Nothing to print.");
+const exportPDF = async () => {
+  if (cartList.length === 0) return alert("Nothing to print.");
 
-    // ensure quote number
-    const num = qHeader.number || (await getNextQuoteNumber());
-    setQHeader((h) => ({ ...h, number: num }));
+  // ensure quote number
+  const num = qHeader.number || (await getNextQuoteNumber());
+  setQHeader((h) => ({ ...h, number: num }));
 
-    const doc = new jsPDF({ unit: "pt", format: "a4" });
-    const pw = doc.internal.pageSize.getWidth();
-    const margin = 40;
-    const contentW = pw - margin * 2; // width inside margins
+  const doc = new jsPDF({ unit: "pt", format: "a4" });
+  const pw = doc.internal.pageSize.getWidth();
+  const margin = 40;
+  const contentW = pw - margin * 2; // width inside margins
 
-    // ------------------------------------------------------------------
-    // BRANDING (logo for HVF; bold firm name for others)
-    // ------------------------------------------------------------------
-    let logoBottom = 24;
-    if (firm === "HVF Agency") {
-      try {
-        const img = new Image();
-        img.crossOrigin = "anonymous";
-        img.src = "/hvf-logo.png";
-        await new Promise((r) => (img.onload = r));
-        const w = 110;
-        const h = (img.height * w) / img.width;
-        const x = (pw - w) / 2;
-        const y = 24;
-        doc.addImage(img, "PNG", x, y, w, h);
-        logoBottom = y + h;
-      } catch {}
-    } else {
-      // Victor/Mahabir: show the firm name in bold at top
-      const firmFont = firm === "Victor Engineering" ? "times" : "courier";
-      doc.setFont(firmFont, "bold");
-      doc.setFontSize(20);
-      doc.text(firm, pw / 2, 48, { align: "center" });
-      logoBottom = 48;
-    }
-
-    // ------------------------------------------------------------------
-    // Title + global font choice per firm
-    // ------------------------------------------------------------------
-    const titleFont =
-      firm === "Victor Engineering" ? "times"
-      : firm === "Mahabir Hardware Stores" ? "courier"
-      : "helvetica";
-    const bodyFont = titleFont;
-
-    doc.setFont(titleFont, "bold");
-    doc.setFontSize(16);
-    doc.text("QUOTATION", pw / 2, logoBottom + 28, { align: "center" });
-
-    doc.setFont(bodyFont, "normal");
-    doc.setFontSize(10);
-
-    // left block (customer info) — To, + bold details (name, address, phone)
-    const L = margin;
-    let y0 = logoBottom + 40; // start position below the branding
-
-    // "To," line
-    doc.setFont(bodyFont, "normal");
-    doc.setFontSize(11);
-    doc.text("To,", L, y0);
-    y0 += 18;
-
-    // bold customer details (no labels)
-    doc.setFont(bodyFont, "bold");
-    doc.text(String(qHeader.customer_name || ""), L, y0);
-    y0 += 16;
-    doc.text(String(qHeader.address || ""), L, y0);
-    y0 += 16;
-    doc.text(String(qHeader.phone || ""), L, y0);
-
-    // right block (aligned with table right edge)
-    const tableRightX = doc.internal.pageSize.getWidth() - margin;
-
-    doc.setFont(bodyFont, "normal");
-    doc.setFontSize(10);
-    doc.text(`Ref: ${num}`, tableRightX, logoBottom + 40, { align: "right" });
-    doc.text(`Date: ${qHeader.date || todayStr()}`, tableRightX, logoBottom + 55, { align: "right" });
-
-    // intro line (fixed)
-    const introY = y0 + 28;
-    doc.setFontSize(11);
-    doc.text("Dear Sir/Madam,", L, introY);
-    doc.text("With reference to your enquiry we are pleased to offer you as under:", L, introY + 16);
-
-    // ------------------------------------------------------------------
-    // TABLE (keeps your custom specs handling)
-    // ------------------------------------------------------------------
-    // Build body: keep specs as a newline in the raw text
-    const body = cartList.map((r, i) => [
-      String(i + 1),
-      `${r.name || ""}${r.specs ? `\n(${r.specs})` : ""}`, // name on line 1, specs on line 2
-      String(r.qty || 0),
-      inr(r.unit || 0),                          // plain number (no "Rs")
-      inr((r.qty || 0) * (r.unit || 0)),         // plain number (no "Rs")
-    ]);
-
-    // Column widths that sum to content width
-    const colSl = 28;
-    const colQty = 40;
-    const colUnit = 90;
-    const colTotal = 110;
-    const colDesc = Math.max(120, contentW - (colSl + colQty + colUnit + colTotal)); // remainder
-
-    // choose a header background per firm
-    const headFill =
-      firm === "Victor Engineering" ? [220, 235, 255] :        // light blue
-      firm === "Mahabir Hardware Stores" ? [225, 248, 225] :   // light green
-      [230, 230, 230];                                         // HVF grey
-
-    autoTable(doc, {
-      startY: introY + 38,
-      head: [["Sl.", "Description", "Qty", "Unit Price", "Total (Incl. GST)"]],
-      body,
-
-      styles: { font: bodyFont, fontSize: 10, cellPadding: 6, overflow: "linebreak", textColor: [0, 0, 0] },
-      headStyles: { fillColor: headFill, textColor: [0, 0, 0], fontStyle: "bold" },
-      columnStyles: {
-        0: { cellWidth: colSl,   halign: "center" },
-        1: { cellWidth: colDesc },                   // description
-        2: { cellWidth: colQty,  halign: "center" },
-        3: { cellWidth: colUnit, halign: "right" },
-        4: { cellWidth: colTotal,halign: "right" },
-      },
-      margin: { left: margin, right: margin },
-      tableLineColor: [200, 200, 200],
-      tableLineWidth: firm === "Mahabir Hardware Stores" ? 0.7 : 0.5, // a bit heavier for Mahabir
-      theme: "grid",
-
-      // Keep two-line height; we'll draw specs ourselves as a second line.
-      didParseCell: (data) => {
-        if (data.section !== "body") return;
-        if (data.column.index !== 1) return; // Description only
-        const raw = (data.cell.raw ?? "").toString();
-        const nl = raw.indexOf("\n(");
-        if (nl === -1) return;
-
-        const name  = raw.slice(0, nl);
-        const specs = raw.slice(nl); // includes "("
-
-        // Reserve two lines of height; leave 2nd line blank so plugin won't draw it.
-        data.cell.text = [name, " "];
-        // Stash specs so we can render them precisely in didDrawCell.
-        data.cell._specs = specs;
-      },
-
-      didDrawCell: (data) => {
-        if (data.section !== "body") return;
-        if (data.column.index !== 1) return; // Description only
-        const specs = data.cell && data.cell._specs;
-        if (!specs) return;
-
-        // Resolve paddings safely (jspdf-autotable v3+)
-        const cellPad = (side) => {
-          if (typeof data.cell.padding === "function") return data.cell.padding(side);
-          const cp = data.cell.styles?.cellPadding;
-          if (typeof cp === "number") return cp;
-          if (cp && typeof cp === "object") return cp[side] ?? 6;
-          return 6;
-        };
-        const padLeft  = cellPad("left");
-        const padRight = cellPad("right");
-        const padTop   = cellPad("top");
-
-        const x = data.cell.x + padLeft;
-
-        // Baselines based on table body font
-        const fsMain = (data.row.styles && data.row.styles.fontSize) || 10;
-        const lineH  = fsMain * 1.15;            // approx line height
-        const specsY = data.cell.y + padTop + lineH; // exactly one line under the name
-
-        // Wrap specs to stay within the cell
-        const maxW    = data.cell.width - padLeft - padRight;
-        const wrapped = doc.splitTextToSize(specs, maxW);
-
-        // Draw specs 15% smaller & lighter
-        const prevSize = doc.getFontSize();
-        doc.setFontSize(prevSize * 0.85); // ~15% smaller
-        doc.setTextColor(120);            // lighter grey
-        doc.text(wrapped, x, specsY);
-
-        // Restore
-        doc.setTextColor(0, 0, 0);
-        doc.setFontSize(prevSize);
-      }
-    }); // end autoTable
-
-    // ------------------------------------------------------------------
-    // TOTAL (single line, aligned with table right edge) — with ₹ font
-    // ------------------------------------------------------------------
-    const at = doc.lastAutoTable || null;
-    const totalsRightX = doc.internal.pageSize.getWidth() - margin;
-    let totalsY = (at?.finalY ?? (introY + 38)) + 22;
-
+  // ------------------------------------------------------------------
+  // BRANDING (logo for HVF; bold firm name for others)
+  // ------------------------------------------------------------------
+  let logoBottom = 24;
+  if (firm === "HVF Agency") {
     try {
-      // Load and switch to a font that DEFINITELY contains the ₹ glyph
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.src = "/hvf-logo.png";
+      await new Promise((r) => (img.onload = r));
+      const w = 110;
+      const h = (img.height * w) / img.width;
+      const x = (pw - w) / 2;
+      const y = 24;
+      doc.addImage(img, "PNG", x, y, w, h);
+      logoBottom = y + h;
+    } catch {}
+  } else {
+    // Victor/Mahabir: show the firm name in bold at top
+    const firmFont = firm === "Victor Engineering" ? "times" : "courier";
+    doc.setFont(firmFont, "bold");
+    doc.setFontSize(20);
+    doc.text(firm, pw / 2, 48, { align: "center" });
+    logoBottom = 48;
+  }
+
+  // ------------------------------------------------------------------
+  // Title + global font choice per firm
+  // ------------------------------------------------------------------
+  const titleFont =
+    firm === "Victor Engineering" ? "times"
+    : firm === "Mahabir Hardware Stores" ? "courier"
+    : "helvetica";
+  const bodyFont = titleFont;
+
+  doc.setFont(titleFont, "bold");
+  doc.setFontSize(16);
+  doc.text("QUOTATION", pw / 2, logoBottom + 28, { align: "center" });
+
+  doc.setFont(bodyFont, "normal");
+  doc.setFontSize(10);
+
+  // left block (customer info) — To, + bold details (name, address, phone)
+  const L = margin;
+  let y0 = logoBottom + 40; // start position below the branding
+
+  doc.setFont(bodyFont, "normal");
+  doc.setFontSize(11);
+  doc.text("To,", L, y0);
+  y0 += 18;
+
+  doc.setFont(bodyFont, "bold");
+  doc.text(String(qHeader.customer_name || ""), L, y0);
+  y0 += 16;
+  doc.text(String(qHeader.address || ""), L, y0);
+  y0 += 16;
+  doc.text(String(qHeader.phone || ""), L, y0);
+
+  // right block (aligned with table right edge)
+  const tableRightX = doc.internal.pageSize.getWidth() - margin;
+
+  doc.setFont(bodyFont, "normal");
+  doc.setFontSize(10);
+  doc.text(`Ref: ${num}`, tableRightX, logoBottom + 40, { align: "right" });
+  doc.text(`Date: ${qHeader.date || todayStr()}`, tableRightX, logoBottom + 55, { align: "right" });
+
+  // intro line (fixed)
+  const introY = y0 + 28;
+  doc.setFontSize(11);
+  doc.text("Dear Sir/Madam,", L, introY);
+  doc.text("With reference to your enquiry we are pleased to offer you as under:", L, introY + 16);
+
+  // ------------------------------------------------------------------
+  // TABLE (keeps your custom specs handling)
+  // ------------------------------------------------------------------
+  const body = cartList.map((r, i) => [
+    String(i + 1),
+    `${r.name || ""}${r.specs ? `\n(${r.specs})` : ""}`,
+    String(r.qty || 0),
+    inr(r.unit || 0),
+    inr((r.qty || 0) * (r.unit || 0)),
+  ]);
+
+  const colSl = 28;
+  const colQty = 40;
+  const colUnit = 90;
+  const colTotal = 110;
+  const colDesc = Math.max(120, contentW - (colSl + colQty + colUnit + colTotal));
+
+  const headFill =
+    firm === "Victor Engineering" ? [220, 235, 255] :
+    firm === "Mahabir Hardware Stores" ? [225, 248, 225] :
+    [230, 230, 230];
+
+  autoTable(doc, {
+    startY: introY + 38,
+    head: [["Sl.", "Description", "Qty", "Unit Price", "Total (Incl. GST)"]],
+    body,
+    styles: { font: bodyFont, fontSize: 10, cellPadding: 6, overflow: "linebreak", textColor: [0, 0, 0] },
+    headStyles: { fillColor: headFill, textColor: [0, 0, 0], fontStyle: "bold" },
+    columnStyles: {
+      0: { cellWidth: colSl,   halign: "center" },
+      1: { cellWidth: colDesc },
+      2: { cellWidth: colQty,  halign: "center" },
+      3: { cellWidth: colUnit, halign: "right" },
+      4: { cellWidth: colTotal,halign: "right" },
+    },
+    margin: { left: margin, right: margin },
+    tableLineColor: [200, 200, 200],
+    tableLineWidth: firm === "Mahabir Hardware Stores" ? 0.7 : 0.5,
+    theme: "grid",
+
+    didParseCell: (data) => {
+      if (data.section !== "body") return;
+      if (data.column.index !== 1) return;
+      const raw = (data.cell.raw ?? "").toString();
+      const nl = raw.indexOf("\n(");
+      if (nl === -1) return;
+      const name  = raw.slice(0, nl);
+      const specs = raw.slice(nl);
+      data.cell.text = [name, " "];
+      data.cell._specs = specs;
+    },
+
+    didDrawCell: (data) => {
+      if (data.section !== "body") return;
+      if (data.column.index !== 1) return;
+      const specs = data.cell && data.cell._specs;
+      if (!specs) return;
+
+      const cellPad = (side) => {
+        if (typeof data.cell.padding === "function") return data.cell.padding(side);
+        const cp = data.cell.styles?.cellPadding;
+        if (typeof cp === "number") return cp;
+        if (cp && typeof cp === "object") return cp[side] ?? 6;
+        return 6;
+      };
+      const padLeft  = cellPad("left");
+      const padRight = cellPad("right");
+      const padTop   = cellPad("top");
+
+      const x = data.cell.x + padLeft;
+      const fsMain = (data.row.styles && data.row.styles.fontSize) || 10;
+      const lineH  = fsMain * 1.15;
+      const specsY = data.cell.y + padTop + lineH;
+
+      const maxW    = data.cell.width - padLeft - padRight;
+      const wrapped = doc.splitTextToSize(specs, maxW);
+
+      const prevSize = doc.getFontSize();
+      doc.setFontSize(prevSize * 0.85);
+      doc.setTextColor(120);
+      doc.text(wrapped, x, specsY);
+      doc.setTextColor(0, 0, 0);
+      doc.setFontSize(prevSize);
+    }
+  });
+
+  // ------------------------------------------------------------------
+  // TOTAL (Victor uses "Rs" in Helvetica; others use ₹ with Noto Sans)
+  // ------------------------------------------------------------------
+  const at = doc.lastAutoTable || null;
+  const totalsRightX = doc.internal.pageSize.getWidth() - margin;
+  let totalsY = (at?.finalY ?? (introY + 38)) + 22;
+
+  if (firm === "Victor Engineering") {
+    // Force a simple ASCII total so the glyph never breaks and it looks distinct
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12);
+    doc.setTextColor(0, 0, 0);
+    doc.text(`Total = Rs ${inr(cartSubtotal)}`, totalsRightX, totalsY, { align: "right" });
+    // restore body font
+    doc.setFont(bodyFont, "normal");
+  } else {
+    try {
       await loadRupeeFont(doc);
-      doc.setFont("NotoSans", "bold");   // use Noto Sans Bold just for this line
+      doc.setFont("NotoSans", "bold");
       doc.setFontSize(12);
       doc.setTextColor(0, 0, 0);
-
-      // Use the explicit Unicode rupee sign to avoid any accidental substitution
       const RUPEE = String.fromCharCode(0x20B9); // "₹"
       doc.text(`Total: ${RUPEE} ${inr(cartSubtotal)}`, totalsRightX, totalsY, { align: "right" });
     } catch (_e) {
-      // Fallback if the custom font couldn't be fetched (offline etc.)
       doc.setFont(bodyFont, "bold");
       doc.setFontSize(12);
       doc.setTextColor(0, 0, 0);
       doc.text(`Total: Rs ${inr(cartSubtotal)}`, totalsRightX, totalsY, { align: "right" });
     } finally {
-      // Restore body font for the rest
       doc.setFont(bodyFont, "normal");
       doc.setTextColor(0, 0, 0);
     }
+  }
 
-    // ------------------------------------------------------------------
-    // TERMS & BANK (firm-specific)
-    // ------------------------------------------------------------------
-    const ty = totalsY + 36; // keep below totals
+  // ------------------------------------------------------------------
+  // TERMS & BANK
+  // ------------------------------------------------------------------
+  const ty = totalsY + 36;
 
-    // underline + bold "Terms & Conditions:"
-    doc.setFont(bodyFont, "bold");
-    doc.setFontSize(11);
-    doc.setTextColor(0, 0, 0);
-    doc.text("Terms & Conditions:", L, ty, { underline: true });
+  doc.setFont(bodyFont, "bold");
+  doc.setFontSize(11);
+  doc.setTextColor(0, 0, 0);
+  doc.text("Terms & Conditions:", L, ty, { underline: true });
 
-    // Terms body (you can refine per firm later if you want)
-    doc.setFont(bodyFont, "normal");
-    doc.setFontSize(10);
-
-    const termsCommon = [
+  doc.setFont(bodyFont, "normal");
+  doc.setFontSize(10);
+  doc.text(
+    [
       "This quotation is valid for one month from the date of issue.",
       "Delivery is subject to stock availability and may take up to 2 weeks.",
       "Goods once sold are non-returnable and non-exchangeable.",
       "",
       "Yours Faithfully",
+      "HVF Agency",
+      "9957239143 / 9954425780",
+      "GST: 18AFCPC4260P1ZB",
+      "",
+    ],
+    L,
+    ty + 16
+  );
+
+  // BANK DETAILS
+  doc.setFont(bodyFont, "bold");
+  doc.text("BANK DETAILS", L, ty + 120);
+
+  doc.setFont(bodyFont, "normal");
+  let bankLines = [];
+  if (firm === "HVF Agency") {
+    bankLines = [
+      "HVF AGENCY",
+      "ICICI BANK (Moran Branch)",
+      "A/C No - 199505500412",
+      "IFSC Code - ICIC0001995",
     ];
+  } else if (firm === "Victor Engineering") {
+    bankLines = [
+      "VICTOR ENGINEERING",
+      "HDFC BANK (Dibrugarh)",
+      "A/C No - 50100234567890",
+      "IFSC Code - HDFC0001234",
+    ];
+  } else {
+    bankLines = [
+      "MAHABIR HARDWARE STORES",
+      "SBI (Moranhat Branch)",
+      "A/C No - 302187654321",
+      "IFSC Code - SBIN0001995",
+    ];
+  }
+  doc.text(bankLines, L, ty + 136);
 
-    if (firm === "HVF Agency") {
-      doc.text(
-        [...termsCommon, "HVF Agency", "9957239143 / 9954425780", "GST: 18AFCPC4260P1ZB", ""],
-        L,
-        ty + 16
-      );
-
-      // BANK DETAILS in bold
-      doc.setFont(bodyFont, "bold");
-      doc.text("BANK DETAILS", L, ty + 120);
-
-      // back to normal font for bank info
-      doc.setFont(bodyFont, "normal");
-      doc.text(
-        [
-          "HVF AGENCY",
-          "ICICI BANK (Moran Branch)",
-          "A/C No - 199505500412",
-          "IFSC Code - ICIC0001995",
-        ],
-        L,
-        ty + 136
-      );
-    } else if (firm === "Victor Engineering") {
-      doc.text(
-        [...termsCommon, "Victor Engineering", "0361-0000000", "GST: 18ABCDE1234F1Z1", ""],
-        L,
-        ty + 16
-      );
-
-      // BANK DETAILS (Victor)
-      doc.setFont(bodyFont, "bold");
-      doc.text("BANK DETAILS", L, ty + 120);
-      doc.setFont(bodyFont, "normal");
-      doc.text(
-        [
-          "VICTOR ENGINEERING",
-          "HDFC BANK (Dibrugarh)",
-          "A/C No - 50100234567890",
-          "IFSC Code - HDFC0001234",
-        ],
-        L,
-        ty + 136
-      );
-    } else {
-      // Mahabir
-      doc.text(
-        [...termsCommon, "Mahabir Hardware Stores", "0374-0000000", "GST: 18ABCDE9999Z5Q", ""],
-        L,
-        ty + 16
-      );
-
-      // BANK DETAILS (Mahabir)
-      doc.setFont(bodyFont, "bold");
-      doc.text("BANK DETAILS", L, ty + 120);
-      doc.setFont(bodyFont, "normal");
-      doc.text(
-        [
-          "MAHABIR HARDWARE STORES",
-          "SBI (Moranhat Branch)",
-          "A/C No - 302187654321",
-          "IFSC Code - SBIN0001995",
-        ],
-        L,
-        ty + 136
-      );
-    }
-
-    // open in new tab
-    window.open(doc.output("bloburl"), "_blank");
-  };
+  // open in new tab
+  window.open(doc.output("bloburl"), "_blank");
+};
 
   /*** UI ***/
   return (
