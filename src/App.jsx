@@ -4,10 +4,10 @@ import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 
 // ---- PDF font loader (for ₹) ----
-let rupeeFontLoaded = false;
+// We cache font data (base64) once, but ALWAYS register it on every new jsPDF doc.
+let __rupeeFontCache = { regB64: null, boldB64: null };
 
 function ab2b64(buf) {
-  // robust ArrayBuffer -> base64 for large files
   let binary = "";
   const bytes = new Uint8Array(buf);
   const chunk = 0x8000;
@@ -18,31 +18,24 @@ function ab2b64(buf) {
 }
 
 async function loadRupeeFont(doc) {
-  if (rupeeFontLoaded) return;
+  if (!__rupeeFontCache.regB64 || !__rupeeFontCache.boldB64) {
+    const [regRes, boldRes] = await Promise.all([
+      fetch("/fonts/NotoSans-Regular.ttf"),
+      fetch("/fonts/NotoSans-Bold.ttf"),
+    ]);
+    const [regBuf, boldBuf] = await Promise.all([
+      regRes.arrayBuffer(),
+      boldRes.arrayBuffer(),
+    ]);
+    __rupeeFontCache.regB64 = ab2b64(regBuf);
+    __rupeeFontCache.boldB64 = ab2b64(boldBuf);
+  }
 
-  // Fetch both Regular and Bold (make sure these files exist in public/fonts/)
-  const [regRes, boldRes] = await Promise.all([
-    fetch("/fonts/NotoSans-Regular.ttf"),
-    fetch("/fonts/NotoSans-Bold.ttf"),      // if you didn't add bold, remove this + below two bold lines
-  ]);
-
-  const [regBuf, boldBuf] = await Promise.all([
-    regRes.arrayBuffer(),
-    boldRes.arrayBuffer(),
-  ]);
-
-  const regB64  = ab2b64(regBuf);
-  const boldB64 = ab2b64(boldBuf);
-
-  // Register Regular
-  doc.addFileToVFS("NotoSans-Regular.ttf", regB64);
+  // IMPORTANT: Register fonts on this jsPDF instance every time.
+  doc.addFileToVFS("NotoSans-Regular.ttf", __rupeeFontCache.regB64);
   doc.addFont("NotoSans-Regular.ttf", "NotoSans", "normal");
-
-  // Register Bold
-  doc.addFileToVFS("NotoSans-Bold.ttf", boldB64);
+  doc.addFileToVFS("NotoSans-Bold.ttf", __rupeeFontCache.boldB64);
   doc.addFont("NotoSans-Bold.ttf", "NotoSans", "bold");
-
-  rupeeFontLoaded = true;
 }
 
 /* --- Supabase client --- */
@@ -614,36 +607,39 @@ const exportPDF = async () => {
   // ------------------------------------------------------------------
   // TOTAL (Victor uses "Rs" in Helvetica; others use ₹ with Noto Sans)
   // ------------------------------------------------------------------
-  const at = doc.lastAutoTable || null;
-  const totalsRightX = doc.internal.pageSize.getWidth() - margin;
-  let totalsY = (at?.finalY ?? (introY + 38)) + 22;
+  // After the table...
+const at = doc.lastAutoTable || null;
+const totalsRightX = doc.internal.pageSize.getWidth() - margin;
+let totalsY = (at?.finalY ?? (introY + 38)) + 22;
 
-  if (firm === "Victor Engineering") {
-    // Force a simple ASCII total so the glyph never breaks and it looks distinct
+if (firm === "Victor Engineering") {
+  // Distinct style: Rs + Helvetica
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(12);
+  doc.setTextColor(0, 0, 0);
+  doc.text(`Total = Rs ${inr(cartSubtotal)}`, totalsRightX, totalsY, { align: "right" });
+  // (Optionally switch back to body font after)
+  doc.setFont(bodyFont, "normal");
+} else {
+  // HVF Agency & Mahabir → ₹ with NotoSans (ensure it's registered for THIS doc)
+  try {
+    await loadRupeeFont(doc);
+    doc.setFont("NotoSans", "bold");
+    doc.setFontSize(12);
+    doc.setTextColor(0, 0, 0);
+    const RUPEE = String.fromCharCode(0x20B9);
+    doc.text(`Total: ${RUPEE} ${inr(cartSubtotal)}`, totalsRightX, totalsY, { align: "right" });
+  } catch {
+    // Safe fallback if font fetch fails
     doc.setFont("helvetica", "bold");
     doc.setFontSize(12);
     doc.setTextColor(0, 0, 0);
-    doc.text(`Total = Rs ${inr(cartSubtotal)}`, totalsRightX, totalsY, { align: "right" });
-    // restore body font
+    doc.text(`Total: Rs ${inr(cartSubtotal)}`, totalsRightX, totalsY, { align: "right" });
+  } finally {
     doc.setFont(bodyFont, "normal");
-  } else {
-    try {
-      await loadRupeeFont(doc);
-      doc.setFont("NotoSans", "bold");
-      doc.setFontSize(12);
-      doc.setTextColor(0, 0, 0);
-      const RUPEE = String.fromCharCode(0x20B9); // "₹"
-      doc.text(`Total: ${RUPEE} ${inr(cartSubtotal)}`, totalsRightX, totalsY, { align: "right" });
-    } catch (_e) {
-      doc.setFont(bodyFont, "bold");
-      doc.setFontSize(12);
-      doc.setTextColor(0, 0, 0);
-      doc.text(`Total: Rs ${inr(cartSubtotal)}`, totalsRightX, totalsY, { align: "right" });
-    } finally {
-      doc.setFont(bodyFont, "normal");
-      doc.setTextColor(0, 0, 0);
-    }
+    doc.setTextColor(0, 0, 0);
   }
+}
 
   // ------------------------------------------------------------------
   // TERMS & BANK
