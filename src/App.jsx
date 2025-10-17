@@ -480,157 +480,170 @@ const exportPDF = async () => {
   setQHeader((h) => ({ ...h, number: num }));
 
   const doc = new jsPDF({ unit: "pt", format: "a4" });
-  const pw = doc.internal.pageSize.getWidth();
-  const ph = doc.internal.pageSize.getHeight();
-  const margin = 40;
-  const L = margin;
-  const R = pw - margin;
-  const contentW = pw - margin * 2;
+const pw = doc.internal.pageSize.getWidth();   // <-- already present
+const ph = doc.internal.pageSize.getHeight();  // <-- ADD THIS
+const margin = 40;
+const L = margin;
+const R = pw - margin;
+const contentW = R - L;
 
   // -------------------------------
   // BRANDING / HEADER AREA
   // -------------------------------
   let afterHeaderY;
 
-  if (firm === "HVF Agency") {
-    // HVF: logo + QUOTATION (unchanged from your style)
-    let logoBottom = 24;
-    try {
-      const img = new Image();
-      img.crossOrigin = "anonymous";
-      img.src = "/hvf-logo.png";
-      await new Promise((r) => (img.onload = r));
-      const w = 110;
-      const h = (img.height * w) / img.width;
-      const x = (pw - w) / 2;
-      const y = 24;
-      doc.addImage(img, "PNG", x, y, w, h);
-      logoBottom = y + h;
-    } catch {}
+if (firm === "HVF Agency") {
+  // HVF: logo + QUOTATION (unchanged)
+  let logoBottom = 24;
+  try {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.src = "/hvf-logo.png";
+    await new Promise((r) => (img.onload = r));
+    const w = 110;
+    const h = (img.height * w) / img.width;
+    const x = (pw - w) / 2;
+    const y = 24;
+    doc.addImage(img, "PNG", x, y, w, h);
+    logoBottom = y + h;
+  } catch {}
 
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(16);
-    doc.text("QUOTATION", pw / 2, logoBottom + 28, { align: "center" });
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(16);
+  doc.text("QUOTATION", pw / 2, logoBottom + 28, { align: "center" });
 
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(10);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
 
-    // Left block (To)
-    let y0 = logoBottom + 40;
-    doc.setFontSize(11);
-    doc.text("To,", L, y0); y0 += 18;
+  // Left block (To)
+  let y0 = logoBottom + 40;
+  doc.setFontSize(11);
+  doc.text("To,", L, y0); y0 += 18;
 
-    doc.setFont("helvetica", "bold");
-    doc.text(String(qHeader.customer_name || ""), L, y0); y0 += 16;
-    doc.text(String(qHeader.address || ""), L, y0);       y0 += 16;
-    doc.text(String(qHeader.phone || ""), L, y0);
+  doc.setFont("helvetica", "bold");
+  doc.text(String(qHeader.customer_name || ""), L, y0); y0 += 16;
+  doc.text(String(qHeader.address || ""), L, y0);       y0 += 16;
+  doc.text(String(qHeader.phone || ""), L, y0);
 
-    // Right meta
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(10);
-    doc.text(`Ref: ${num}`, R, logoBottom + 40, { align: "right" });
-    doc.text(`Date: ${dateStr}`, R, logoBottom + 55, { align: "right" });
+  // Right meta
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+  doc.text(`Ref: ${num}`, R, logoBottom + 40, { align: "right" });
+  doc.text(`Date: ${dateStr}`, R, logoBottom + 55, { align: "right" });
 
-    // Intro
-    const introY = y0 + 28;
-    doc.setFontSize(11);
-    doc.text("Dear Sir/Madam,", L, introY);
-    doc.text("With reference to your enquiry we are pleased to offer you as under:", L, introY + 16);
+  // Intro
+  const introY = y0 + 28;
+  doc.setFontSize(11);
+  doc.text("Dear Sir/Madam,", L, introY);
+  doc.text(
+    "With reference to your enquiry we are pleased to offer you as under:",
+    L, introY + 16
+  );
 
-    afterHeaderY = introY + 38; // table start
-  }
-  else if (firm === "Victor Engineering") {
-    // ============================
-    // VECTOR ENGINEERING: PERFORMA INVOICE + BORDERS
-    // ============================
-    // Title
-    doc.setFont("times", "bold");
-    doc.setFontSize(22);
-    doc.text("Victor Engineering", pw / 2, 40, { align: "center" });
-    doc.setFont("times", "bold");
-    doc.setFontSize(16);
-    doc.text("PERFORMA INVOICE", pw / 2, 65, { align: "center" });
+  afterHeaderY = introY + 38; // table start
+}
+else if (firm === "Victor Engineering") {
+  // ============================
+  // VECTOR ENGINEERING: PERFORMA INVOICE + single-stroke boxes (no double lines)
+  // ============================
+  const BOX_GAP = 6;        // gap between boxes so borders never overlap
+  const LINE_W  = 0.8;
 
-    // Outer border for content area
-    const outerTop = 80;
-    const outerBottom = ph - 40;
-    doc.setLineWidth(0.8);
-    doc.rect(L, outerTop, contentW, outerBottom - outerTop);
+  // Title
+  doc.setFont("times", "bold");
+  doc.setFontSize(22);
+  doc.text("Victor Engineering", pw / 2, 60, { align: "center" });
+  doc.setFontSize(14);
+  doc.text("PERFORMA INVOICE", pw / 2, 80, { align: "center" });
 
-    // Header grid: left "To" box + right meta box
-    const headH = 86; // height of header row boxes
-    const midX = L + contentW * 0.55;
+  // Simple helpers
+  const strokeBox = (x, y, w, h) => { doc.setLineWidth(LINE_W); doc.rect(x, y, w, h); };
+  const vLine     = (x, y1, y2)    => { doc.setLineWidth(LINE_W); doc.line(x, y1, x, y2); };
 
-    // Left "To" box
-    doc.rect(L, outerTop, midX - L, headH);
-    doc.setFont("times", "normal");
-    doc.setFontSize(11);
-    doc.text("To,", L + 10, outerTop + 18);
+  // Optional outer content border (does NOT touch the table)
+  const contentTop = 92;                 // below titles
+  const contentBottom = ph - 40;         // stay inside page
+  strokeBox(L, contentTop, contentW, contentBottom - contentTop);
 
-    doc.setFont("times", "bold");
-    doc.text(String(qHeader.customer_name || ""), L + 10, outerTop + 36);
-    doc.text(String(qHeader.address || ""),      L + 10, outerTop + 52);
-    doc.text(String(qHeader.phone || ""),        L + 10, outerTop + 68);
+  // 1) Header row: left "To" + right meta in one box with a vertical divider
+  const headH = 90;
+  strokeBox(L, contentTop, contentW, headH);
+  const splitX = L + contentW * 0.60;
+  vLine(splitX, contentTop, contentTop + headH);
 
-    // Right meta box
-    doc.setFont("times", "normal");
-    doc.rect(midX, outerTop, R - midX, headH);
+  // left (To:)
+  doc.setFont("times", "normal");
+  doc.setFontSize(11);
+  doc.text("To,", L + 10, contentTop + 18);
 
-    let rx = midX + 10;
-    let ry = outerTop + 18;
-    doc.text(`Ref No : ${num}`,   rx, ry); ry += 15;
-    doc.text(`Date   : ${dateStr}`, rx, ry); ry += 15;
-    doc.text(`GSTIN  : 18BCYCP9744A1ZA`, rx, ry); // sample; edit if you like
+  doc.setFont("times", "bold");
+  doc.text(String(qHeader.customer_name || ""), L + 10, contentTop + 36);
+  doc.text(String(qHeader.address || ""),      L + 10, contentTop + 52);
+  doc.text(String(qHeader.phone || ""),        L + 10, contentTop + 68);
 
-    // Subject row (single bordered row)
-    const subTop = outerTop + headH + 6;
-    doc.rect(L, subTop, contentW, 28);
-    doc.setFont("times", "normal");
-    doc.text("Sub :  Performa Invoice for Machinery", L + 10, subTop + 18);
+  // right (Ref/Date/GST)
+  doc.setFont("times", "normal");
+  const rx = splitX + 10;
+  doc.text(`Ref No : ${num}`,   rx, contentTop + 20);
+  doc.text(`Date   : ${dateStr}`, rx, contentTop + 36);
+  doc.text(`GSTIN  : 18BCYCP9744A1ZA`, rx, contentTop + 52); // change if you have a real value
 
-    // Intro row (single bordered row)
-    const introTop = subTop + 28 + 6;
-    doc.rect(L, introTop, contentW, 36);
-    doc.text("Dear Sir/Madam,", L + 10, introTop + 16);
-    doc.text("With reference to your enquiry we are pleased to offer you as under:", L + 10, introTop + 30);
+  // 2) Subject box (single line)
+  const subTop = contentTop + headH + BOX_GAP;
+  const subH   = 28;
+  strokeBox(L, subTop, contentW, subH);
+  doc.text("Sub :  Performa Invoice for Machinery", L + 10, subTop + 18);
 
-    // Table should begin after intro block
-    afterHeaderY = introTop + 36 + 10;
-  }
-  else {
-    // Mahabir Hardware Stores (your previous style)
-    doc.setFont("courier", "bold");
-    doc.setFontSize(20);
-    doc.text("Mahabir Hardware Stores", pw / 2, 48, { align: "center" });
+  // 3) Intro box (single line)
+  const introTop = subTop + subH + BOX_GAP;
+  const introH   = 40;
+  strokeBox(L, introTop, contentW, introH);
+  doc.text("Dear Sir/Madam,", L + 10, introTop + 16);
+  doc.text(
+    "With reference to your enquiry we are pleased to offer you as under:",
+    L + 10, introTop + 30
+  );
 
-    doc.setFont("courier", "bold");
-    doc.setFontSize(16);
-    doc.text("QUOTATION", pw / 2, 74, { align: "center" });
+  // Table must start AFTER the intro box with a small gap
+  afterHeaderY = introTop + introH + BOX_GAP + 2;
+}
+else {
+  // Mahabir Hardware Stores (unchanged)
+  doc.setFont("courier", "bold");
+  doc.setFontSize(20);
+  doc.text("Mahabir Hardware Stores", pw / 2, 48, { align: "center" });
 
-    doc.setFont("courier", "normal");
-    doc.setFontSize(10);
+  doc.setFont("courier", "bold");
+  doc.setFontSize(16);
+  doc.text("QUOTATION", pw / 2, 74, { align: "center" });
 
-    let y0 = 92;
-    doc.setFontSize(11);
-    doc.text("To,", L, y0); y0 += 18;
+  doc.setFont("courier", "normal");
+  doc.setFontSize(10);
 
-    doc.setFont("courier", "bold");
-    doc.text(String(qHeader.customer_name || ""), L, y0); y0 += 16;
-    doc.text(String(qHeader.address || ""), L, y0);       y0 += 16;
-    doc.text(String(qHeader.phone || ""), L, y0);
+  let y0 = 92;
+  doc.setFontSize(11);
+  doc.text("To,", L, y0); y0 += 18;
 
-    doc.setFont("courier", "normal");
-    doc.setFontSize(10);
-    doc.text(`Ref: ${num}`, R, 92, { align: "right" });
-    doc.text(`Date: ${dateStr}`, R, 107, { align: "right" });
+  doc.setFont("courier", "bold");
+  doc.text(String(qHeader.customer_name || ""), L, y0); y0 += 16;
+  doc.text(String(qHeader.address || ""), L, y0);       y0 += 16;
+  doc.text(String(qHeader.phone || ""), L, y0);
 
-    const introY = y0 + 28;
-    doc.setFontSize(11);
-    doc.text("Dear Sir/Madam,", L, introY);
-    doc.text("With reference to your enquiry we are pleased to offer you as under:", L, introY + 16);
+  doc.setFont("courier", "normal");
+  doc.setFontSize(10);
+  doc.text(`Ref: ${num}`, R, 92, { align: "right" });
+  doc.text(`Date: ${dateStr}`, R, 107, { align: "right" });
 
-    afterHeaderY = introY + 38;
-  }
+  const introY = y0 + 28;
+  doc.setFontSize(11);
+  doc.text("Dear Sir/Madam,", L, introY);
+  doc.text(
+    "With reference to your enquiry we are pleased to offer you as under:",
+    L, introY + 16
+  );
+
+  afterHeaderY = introY + 38;
+}
 
   // -------------------------------
   // ITEMS TABLE (all firms)
