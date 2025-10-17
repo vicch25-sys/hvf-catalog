@@ -603,6 +603,11 @@ const at = doc.lastAutoTable || null;
 const totalsRightX = doc.internal.pageSize.getWidth() - margin;
 let totalsY = (at?.finalY ?? (introY + 38)) + 22;
 
+// ----- TOTAL (single line, aligned with table right edge) -----
+const at = doc.lastAutoTable || null;
+const totalsRightX = doc.internal.pageSize.getWidth() - margin;
+let totalsY = (at?.finalY ?? (introY + 38)) + 22;
+
 try {
   // Use the font that includes the ₹ glyph (loaded earlier by loadRupeeFont)
   await loadRupeeFont(doc);
