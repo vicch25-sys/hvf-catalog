@@ -611,22 +611,25 @@ const totalsRightX = doc.internal.pageSize.getWidth() - margin;
 let totalsY = (at?.finalY ?? (introY + 38)) + 22;
 
 try {
-  // Make sure a ₹-capable font is available (files must be in /public/fonts/)
+  // Load and switch to a font that DEFINITELY contains the ₹ glyph
   await loadRupeeFont(doc);
-  doc.setFont("NotoSans", "bold");           // use the font that includes ₹
+  doc.setFont("NotoSans", "bold");   // use Noto Sans Bold just for this line
   doc.setFontSize(12);
   doc.setTextColor(0, 0, 0);
-  // NOTE: a space after the ₹ avoids any accidental kerning issues
-  doc.text(`Total: ₹ ${inr(cartSubtotal)}`, totalsRightX, totalsY, { align: "right" });
+
+  // Use the explicit Unicode rupee sign to avoid any accidental substitution
+  const RUPEE = String.fromCharCode(0x20B9); // "₹"
+  doc.text(`Total: ${RUPEE} ${inr(cartSubtotal)}`, totalsRightX, totalsY, { align: "right" });
 } catch (_e) {
-  // Fallback if font couldn’t be fetched (offline etc.)
+  // Fallback if the custom font couldn't be fetched (offline etc.)
   doc.setFont("helvetica", "bold");
   doc.setFontSize(12);
   doc.setTextColor(0, 0, 0);
   doc.text(`Total: Rs ${inr(cartSubtotal)}`, totalsRightX, totalsY, { align: "right" });
 } finally {
-  // Restore default font for anything that follows
+  // Restore your default font for anything after this
   doc.setFont("helvetica", "normal");
+  doc.setTextColor(0, 0, 0);
 }
 
   // ----- TERMS & BANK -----
