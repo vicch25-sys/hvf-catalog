@@ -544,10 +544,10 @@ if (firm === "HVF Agency") {
 }
 else if (firm === "Victor Engineering") {
   // ============================
-  // VECTOR ENGINEERING: PERFORMA INVOICE + single-stroke boxes (no double lines)
+  // VICTOR ENGINEERING: PERFORMA INVOICE (clean boxes, no double lines)
   // ============================
-  const BOX_GAP = 6;        // gap between boxes so borders never overlap
-  const LINE_W  = 0.8;
+  const BOX_GAP = 8;        // space between boxes so borders never overlap
+  const LINE_W  = 0.8;      // stroke width for all boxes
 
   // Title
   doc.setFont("times", "bold");
@@ -556,22 +556,20 @@ else if (firm === "Victor Engineering") {
   doc.setFontSize(14);
   doc.text("PERFORMA INVOICE", pw / 2, 80, { align: "center" });
 
-  // Simple helpers
+  // Helpers
   const strokeBox = (x, y, w, h) => { doc.setLineWidth(LINE_W); doc.rect(x, y, w, h); };
   const vLine     = (x, y1, y2)    => { doc.setLineWidth(LINE_W); doc.line(x, y1, x, y2); };
 
-  // Optional outer content border (does NOT touch the table)
-  const contentTop = 92;                 // below titles
-  const contentBottom = ph - 40;         // stay inside page
-  strokeBox(L, contentTop, contentW, contentBottom - contentTop);
+  // Content top starts just below titles
+  const contentTop = 92;
 
-  // 1) Header row: left "To" + right meta in one box with a vertical divider
-  const headH = 90;
+  // 1) Header row: single outer box, split vertically (no overlapping boxes)
+  const headH  = 90;
   strokeBox(L, contentTop, contentW, headH);
   const splitX = L + contentW * 0.60;
   vLine(splitX, contentTop, contentTop + headH);
 
-  // left (To:)
+  // Left (To:)
   doc.setFont("times", "normal");
   doc.setFontSize(11);
   doc.text("To,", L + 10, contentTop + 18);
@@ -581,20 +579,21 @@ else if (firm === "Victor Engineering") {
   doc.text(String(qHeader.address || ""),      L + 10, contentTop + 52);
   doc.text(String(qHeader.phone || ""),        L + 10, contentTop + 68);
 
-  // right (Ref/Date/GST)
+  // Right (meta)
   doc.setFont("times", "normal");
   const rx = splitX + 10;
-  doc.text(`Ref No : ${num}`,   rx, contentTop + 20);
+  doc.text(`Ref No : ${num}`,     rx, contentTop + 20);
   doc.text(`Date   : ${dateStr}`, rx, contentTop + 36);
-  doc.text(`GSTIN  : 18BCYCP9744A1ZA`, rx, contentTop + 52); // change if you have a real value
+  doc.text(`GSTIN  : 18BCYCP9744A1ZA`, rx, contentTop + 52); // change to real GSTIN if needed
 
-  // 2) Subject box (single line)
+  // 2) Subject box (single box, no overlap)
   const subTop = contentTop + headH + BOX_GAP;
   const subH   = 28;
   strokeBox(L, subTop, contentW, subH);
+  doc.setFont("times", "normal");
   doc.text("Sub :  Performa Invoice for Machinery", L + 10, subTop + 18);
 
-  // 3) Intro box (single line)
+  // 3) Intro box (single box, no overlap)
   const introTop = subTop + subH + BOX_GAP;
   const introH   = 40;
   strokeBox(L, introTop, contentW, introH);
@@ -604,8 +603,9 @@ else if (firm === "Victor Engineering") {
     L + 10, introTop + 30
   );
 
-  // Table must start AFTER the intro box with a small gap
-  afterHeaderY = introTop + introH + BOX_GAP + 2;
+  // IMPORTANT: start the table just after the intro box with a small extra gap
+  // to guarantee no adjacent borders (prevents any “double line” look)
+  afterHeaderY = introTop + introH + BOX_GAP + 4;
 }
 else {
   // Mahabir Hardware Stores (unchanged)
