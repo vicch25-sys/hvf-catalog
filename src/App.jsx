@@ -512,11 +512,10 @@ doc.text(`Date: ${qHeader.date || todayStr()}`, tableRightX, logoBottom + 55, { 
   doc.text("With reference to your enquiry we are pleased to offer you as under:", L, introY + 16);
 
   // ----- TABLE (always fits) -----
-// Build body: keep specs on a reserved second line (we paint that line ourselves)
-// so row heights/positions stay identical.
+// Build body: keep specs on a new line in the raw text
 const body = cartList.map((r, i) => [
   String(i + 1),
-  { content: `${r.name || ""}\n `, _specs: (r.specs || "").trim() }, // "\n " reserves the second line
+  `${r.name || ""}${r.specs ? `\n(${r.specs})` : ""}`, // specs on 2nd line
   String(r.qty || 0),
   inr(r.unit || 0),                          // plain number (no "Rs")
   inr((r.qty || 0) * (r.unit || 0)),         // plain number (no "Rs")
@@ -533,43 +532,53 @@ autoTable(doc, {
   startY: introY + 38,
   head: [["Sl.", "Description", "Qty", "Unit Price", "Total (Incl. GST)"]],
   body,
-  styles: { fontSize: 10, cellPadding: 6, overflow: "linebreak" },
-  headStyles: { fillColor: [230, 230, 230], textColor: [0, 0, 0], fontStyle: "bold" }, // black & bold
+
+  // base styles
+  styles: { fontSize: 10, cellPadding: 6, overflow: "linebreak", textColor: [0, 0, 0] },
+  headStyles: { fillColor: [230, 230, 230], textColor: [0, 0, 0], fontStyle: "bold" },
   columnStyles: {
     0: { cellWidth: colSl,   halign: "center" },
-    1: { cellWidth: colDesc },
-    2: { cellWidth: colQty,  halign: "center" },
-    3: { cellWidth: colUnit, halign: "right" },
-    4: { cellWidth: colTotal,halign: "right" },
+    1: { cellWidth: colDesc },                   // description
+    2: { cellWidth: colQty,  halign: "center" }, // qty
+    3: { cellWidth: colUnit, halign: "right" },  // unit
+    4: { cellWidth: colTotal,halign: "right" },  // total
   },
   margin: { left: margin, right: margin },
   tableLineColor: [200, 200, 200],
   tableLineWidth: 0.5,
   theme: "grid",
 
-  // Draw the specs on the reserved 2nd line: ~15% smaller & lighter.
-  didDrawCell(data) {
-    if (data.section !== "body") return;
-    if (data.column.index !== 1) return; // only Description column
+  // 1) During parse: split name/specs and keep only the name as the cell text.
+  //    Stash specs on the cell so we can draw it ourselves later.
+  didParseCell: (data) => {
+    if (data.section !== 'body') return;
+    if (data.column.index !== 1) return; // only "Description" column
+    const raw = (data.cell.raw ?? '').toString();
+    const nl = raw.indexOf('\n(');
+    if (nl === -1) return;                   // no specs line
+    data.cell.text = [raw.slice(0, nl)];     // keep only the product name as cell text
+    // store specs (including the opening parenthesis) for later drawing
+    data.cell._specs = raw.slice(nl + 1);    // "(...)" on its own line
+  },
 
-    const specs = data.cell?.raw?._specs;
+  // 2) After draw: render the specs line ourselves, smaller & lighter.
+  didDrawCell: (data) => {
+    if (data.section !== 'body') return;
+    if (data.column.index !== 1) return;        // only "Description" column
+    const specs = data.cell && data.cell._specs;
     if (!specs) return;
 
-    const d = data.doc;
-    const baseSize = data.cell.styles.fontSize || 10;
+    // textPos can be undefined for some versions/contexts — guard it.
+    const tp = data.cell && data.cell.textPos;
+    if (!tp) return;
 
-    // textPos gives baseline for first line; offset down for second line
-    const x = data.cell.textPos.x;
-    const ySecond = data.cell.textPos.y + baseSize * 1.25; // approx one line below
-
-    d.setFontSize(Math.round(baseSize * 0.85)); // ~15% smaller
-    d.setTextColor(110, 110, 110);              // subtle grey (lighter look)
-    d.text(`(${specs})`, x, ySecond);
-
-    // reset to defaults for subsequent cells
-    d.setTextColor(0, 0, 0);
-    d.setFontSize(baseSize);
-  },
+    // draw specs slightly below the main line, lighter & smaller
+    const doc2 = data.doc;
+    doc2.setFontSize(8.5);          // ~15% smaller than 10
+    doc2.setTextColor(120);         // lighter grey (0..255)
+    doc2.text(specs, tp.x, tp.y + 12); // 12pt below the first line looks good at current row height
+    doc2.setTextColor(0);           // reset to black for subsequent cells
+  }
 });
 
 // ----- TOTAL (single line, aligned with table right edge) -----
