@@ -648,6 +648,7 @@ doc.text(
     "Yours Faithfully",
     "HVF Agency",
     "9957239143 / 9954425780",
+    "GST: 18AFCPC4260P1ZB",   // ✅ Added GST line
     "",
   ],
   L,
