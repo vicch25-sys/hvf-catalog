@@ -512,10 +512,10 @@ doc.text(`Date: ${qHeader.date || todayStr()}`, tableRightX, logoBottom + 55, { 
   doc.text("With reference to your enquiry we are pleased to offer you as under:", L, introY + 16);
 
   // ----- TABLE (always fits) -----
-// Build body: keep specs on a new line in the raw text
+// Build body: keep specs as a newline in the raw text
 const body = cartList.map((r, i) => [
   String(i + 1),
-  `${r.name || ""}${r.specs ? `\n(${r.specs})` : ""}`, // specs on 2nd line
+  `${r.name || ""}${r.specs ? `\n(${r.specs})` : ""}`, // name on line 1, specs on line 2
   String(r.qty || 0),
   inr(r.unit || 0),                          // plain number (no "Rs")
   inr((r.qty || 0) * (r.unit || 0)),         // plain number (no "Rs")
@@ -533,51 +533,63 @@ autoTable(doc, {
   head: [["Sl.", "Description", "Qty", "Unit Price", "Total (Incl. GST)"]],
   body,
 
-  // base styles
   styles: { fontSize: 10, cellPadding: 6, overflow: "linebreak", textColor: [0, 0, 0] },
   headStyles: { fillColor: [230, 230, 230], textColor: [0, 0, 0], fontStyle: "bold" },
   columnStyles: {
     0: { cellWidth: colSl,   halign: "center" },
     1: { cellWidth: colDesc },                   // description
-    2: { cellWidth: colQty,  halign: "center" }, // qty
-    3: { cellWidth: colUnit, halign: "right" },  // unit
-    4: { cellWidth: colTotal,halign: "right" },  // total
+    2: { cellWidth: colQty,  halign: "center" },
+    3: { cellWidth: colUnit, halign: "right" },
+    4: { cellWidth: colTotal,halign: "right" },
   },
   margin: { left: margin, right: margin },
   tableLineColor: [200, 200, 200],
   tableLineWidth: 0.5,
   theme: "grid",
 
-  // 1) During parse: split name/specs and keep only the name as the cell text.
-  //    Stash specs on the cell so we can draw it ourselves later.
+  // Keep row height for two lines but we will redraw the specs ourselves.
   didParseCell: (data) => {
     if (data.section !== 'body') return;
-    if (data.column.index !== 1) return; // only "Description" column
+    if (data.column.index !== 1) return; // only Description col
     const raw = (data.cell.raw ?? '').toString();
     const nl = raw.indexOf('\n(');
-    if (nl === -1) return;                   // no specs line
-    data.cell.text = [raw.slice(0, nl)];     // keep only the product name as cell text
-    // store specs (including the opening parenthesis) for later drawing
-    data.cell._specs = raw.slice(nl + 1);    // "(...)" on its own line
+    if (nl === -1) return;
+
+    const name = raw.slice(0, nl);
+    const specs = raw.slice(nl); // includes the "("
+
+    // Make the table think there are two lines (height preserved)
+    data.cell.text = [name, ' '];     // 2nd line blank so the lib won't draw it
+    data.cell._specs = specs;         // stash specs for custom draw
   },
 
-  // 2) After draw: render the specs line ourselves, smaller & lighter.
   didDrawCell: (data) => {
     if (data.section !== 'body') return;
-    if (data.column.index !== 1) return;        // only "Description" column
+    if (data.column.index !== 1) return;           // only Description col
     const specs = data.cell && data.cell._specs;
     if (!specs) return;
 
-    // textPos can be undefined for some versions/contexts — guard it.
-    const tp = data.cell && data.cell.textPos;
-    if (!tp) return;
+    // Robust coordinates (don’t depend on textPos)
+    const padLeft  = (data.cell.padding && data.cell.padding('left'))  || 6;
+    const padTop   = (data.cell.padding && data.cell.padding('top'))   || 6;
 
-    // draw specs slightly below the main line, lighter & smaller
-    const doc2 = data.doc;
-    doc2.setFontSize(8.5);          // ~15% smaller than 10
-    doc2.setTextColor(120);         // lighter grey (0..255)
-    doc2.text(specs, tp.x, tp.y + 12); // 12pt below the first line looks good at current row height
-    doc2.setTextColor(0);           // reset to black for subsequent cells
+    // First line baseline (approx for fontSize 10)
+    const firstY = data.cell.y + padTop + 10;
+    // Specs baseline a bit below first line
+    const secondY = firstY + 12;
+
+    const x = data.cell.x + padLeft;
+
+    // Draw specs 15% smaller & lighter
+    const prevSize = doc.getFontSize();
+    doc.setFontSize(prevSize * 0.85);   // ~15% smaller (10 -> 8.5)
+    doc.setTextColor(120);               // lighter grey
+
+    doc.text(specs, x, secondY);
+
+    // Restore defaults
+    doc.setTextColor(0);
+    doc.setFontSize(prevSize);
   }
 });
 
