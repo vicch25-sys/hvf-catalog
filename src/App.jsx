@@ -564,34 +564,39 @@ autoTable(doc, {
   },
 
   didDrawCell: (data) => {
-    if (data.section !== 'body') return;
-    if (data.column.index !== 1) return;           // only Description col
-    const specs = data.cell && data.cell._specs;
-    if (!specs) return;
+  if (data.section !== 'body') return;
+  if (data.column.index !== 1) return;               // only Description col
+  const specs = data.cell && data.cell._specs;
+  if (!specs) return;
 
-    // Robust coordinates (don’t depend on textPos)
-    const padLeft  = (data.cell.padding && data.cell.padding('left'))  || 6;
-    const padTop   = (data.cell.padding && data.cell.padding('top'))   || 6;
+  // paddings & usable width
+  const padLeft  = (data.cell.padding && data.cell.padding('left'))  || 6;
+  const padRight = (data.cell.padding && data.cell.padding('right')) || 6;
+  const padTop   = (data.cell.padding && data.cell.padding('top'))   || 6;
+  const x = data.cell.x + padLeft;
 
-    // First line baseline (approx for fontSize 10)
-    const firstY = data.cell.y + padTop + 10;
-    // Specs baseline a bit below first line
-    const secondY = firstY + 12;
+  // Baselines based on main font size used by the table
+  const fsMain  = (data.row.styles && data.row.styles.fontSize) || 10; // table body font
+  const lineH   = fsMain * 1.15;                                     // approx line height
+  // Name baseline (1st line) ≈ top + main font size
+  // Specs baseline sits exactly one line below the name:
+  const specsY  = data.cell.y + padTop + lineH;
 
-    const x = data.cell.x + padLeft;
+  // Wrap specs so they never clip the cell width
+  const maxW   = data.cell.width - padLeft - padRight;
+  const wrapped = doc.splitTextToSize(specs, maxW);
 
-    // Draw specs 15% smaller & lighter
-    const prevSize = doc.getFontSize();
-    doc.setFontSize(prevSize * 0.85);   // ~15% smaller (10 -> 8.5)
-    doc.setTextColor(120);               // lighter grey
+  // Draw specs 15% smaller & lighter
+  const prevSize = doc.getFontSize();
+  const prevClr  = [0, 0, 0];
+  doc.setFontSize(prevSize * 0.85);   // ~15% smaller
+  doc.setTextColor(120);              // lighter grey
+  doc.text(wrapped, x, specsY);
 
-    doc.text(specs, x, secondY);
-
-    // Restore defaults
-    doc.setTextColor(0);
-    doc.setFontSize(prevSize);
-  }
-});
+  // Restore
+  doc.setTextColor(prevClr[0], prevClr[1], prevClr[2]);
+  doc.setFontSize(prevSize);
+}
 
 // ----- TOTAL (single line, aligned with table right edge) -----
 const at = doc.lastAutoTable || null;
