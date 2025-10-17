@@ -547,61 +547,63 @@ autoTable(doc, {
   tableLineWidth: 0.5,
   theme: "grid",
 
-  // Keep row height for two lines but we will redraw the specs ourselves.
+  // Keep two-line height; we'll draw specs ourselves as a second line.
   didParseCell: (data) => {
-    if (data.section !== 'body') return;
-    if (data.column.index !== 1) return; // only Description col
-    const raw = (data.cell.raw ?? '').toString();
-    const nl = raw.indexOf('\n(');
+    if (data.section !== "body") return;
+    if (data.column.index !== 1) return; // Description only
+    const raw = (data.cell.raw ?? "").toString();
+    const nl = raw.indexOf("\n(");
     if (nl === -1) return;
 
-    const name = raw.slice(0, nl);
-    const specs = raw.slice(nl); // includes the "("
+    const name  = raw.slice(0, nl);
+    const specs = raw.slice(nl); // includes "("
 
-    // Make the table think there are two lines (height preserved)
-    data.cell.text = [name, ' '];     // 2nd line blank so the lib won't draw it
-    data.cell._specs = specs;         // stash specs for custom draw
+    // Reserve two lines of height; leave 2nd line blank so plugin won't draw it.
+    data.cell.text = [name, " "];
+    // Stash specs so we can render them precisely in didDrawCell.
+    data.cell._specs = specs;
   },
 
   didDrawCell: (data) => {
-  if (data.section !== 'body') return;
-  if (data.column.index !== 1) return;               // only Description col
-  const specs = data.cell && data.cell._specs;
-  if (!specs) return;
+    if (data.section !== "body") return;
+    if (data.column.index !== 1) return; // Description only
+    const specs = data.cell && data.cell._specs;
+    if (!specs) return;
 
-  // paddings & usable width
-  const padLeft  = (data.cell.padding && data.cell.padding('left'))  || 6;
-  const padRight = (data.cell.padding && data.cell.padding('right')) || 6;
-  const padTop   = (data.cell.padding && data.cell.padding('top'))   || 6;
-  const x = data.cell.x + padLeft;
+    // Resolve paddings safely (jspdf-autotable v3+)
+    const cellPad = (side) => {
+      if (typeof data.cell.padding === "function") return data.cell.padding(side);
+      const cp = data.cell.styles?.cellPadding;
+      if (typeof cp === "number") return cp;
+      if (cp && typeof cp === "object") return cp[side] ?? 6;
+      return 6;
+    };
+    const padLeft  = cellPad("left");
+    const padRight = cellPad("right");
+    const padTop   = cellPad("top");
 
-  // Baselines based on main font size used by the table
-  const fsMain  = (data.row.styles && data.row.styles.fontSize) || 10; // table body font
-  const lineH   = fsMain * 1.15;                                     // approx line height
-  // Name baseline (1st line) ≈ top + main font size
-  // Specs baseline sits exactly one line below the name:
-  const specsY  = data.cell.y + padTop + lineH;
+    const x = data.cell.x + padLeft;
 
-  // Wrap specs so they never clip the cell width
-  const maxW   = data.cell.width - padLeft - padRight;
-  const wrapped = doc.splitTextToSize(specs, maxW);
+    // Baselines based on table body font
+    const fsMain = (data.row.styles && data.row.styles.fontSize) || 10;
+    const lineH  = fsMain * 1.15;            // approx line height
+    const specsY = data.cell.y + padTop + lineH; // exactly one line under the name
 
-  // Draw specs 15% smaller & lighter
-  const prevSize = doc.getFontSize();
-  const prevClr  = [0, 0, 0];
-  doc.setFontSize(prevSize * 0.85);   // ~15% smaller
-  doc.setTextColor(120);              // lighter grey
-  doc.text(wrapped, x, specsY);
+    // Wrap specs to stay within the cell
+    const maxW    = data.cell.width - padLeft - padRight;
+    const wrapped = doc.splitTextToSize(specs, maxW);
 
-  // Restore
-  doc.setTextColor(prevClr[0], prevClr[1], prevClr[2]);
-  doc.setFontSize(prevSize);
-}
+    // Draw specs 15% smaller & lighter
+    const prevSize = doc.getFontSize();
+    doc.setFontSize(prevSize * 0.85); // ~15% smaller
+    doc.setTextColor(120);            // lighter grey
+    doc.text(wrapped, x, specsY);
 
-// ----- TOTAL (single line, aligned with table right edge) -----
-const at = doc.lastAutoTable || null;
-const totalsRightX = doc.internal.pageSize.getWidth() - margin;
-let totalsY = (at?.finalY ?? (introY + 38)) + 22;
+    // Restore
+    doc.setTextColor(0, 0, 0);
+    doc.setFontSize(prevSize);
+  }
+}); // <-- closes autoTable correctly
 
 // ----- TOTAL (single line, aligned with table right edge) -----
 const at = doc.lastAutoTable || null;
@@ -609,20 +611,20 @@ const totalsRightX = doc.internal.pageSize.getWidth() - margin;
 let totalsY = (at?.finalY ?? (introY + 38)) + 22;
 
 try {
-  // Use the font that includes the ₹ glyph (loaded earlier by loadRupeeFont)
-  await loadRupeeFont(doc);
-  doc.setFont("NotoSans", "bold");       // switch to Noto Sans (bold) for the total line
+  // Use the font that includes the ₹ glyph if available
+  if (typeof loadRupeeFont === "function") await loadRupeeFont(doc);
+  doc.setFont("NotoSans", "bold");   // or your rupee-capable font
   doc.setFontSize(12);
   doc.setTextColor(0, 0, 0);
-  doc.text(`Total: ₹ ${inr(cartSubtotal)}`, totalsRightX, totalsY, { align: "right" }); // note the space after ₹
+  doc.text(`Total: ₹ ${inr(cartSubtotal)}`, totalsRightX, totalsY, { align: "right" });
 } catch (_e) {
-  // Fallback if font couldn't be loaded
+  // Fallback if that font isn't loaded
   doc.setFont("helvetica", "bold");
   doc.setFontSize(12);
   doc.setTextColor(0, 0, 0);
   doc.text(`Total: Rs ${inr(cartSubtotal)}`, totalsRightX, totalsY, { align: "right" });
 } finally {
-  // Restore your default font for anything that follows
+  // Restore default for anything after this
   doc.setFont("helvetica", "normal");
 }
 
