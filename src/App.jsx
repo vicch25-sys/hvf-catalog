@@ -23,7 +23,7 @@ async function loadRupeeFont(doc) {
   // Fetch both Regular and Bold (make sure these files exist in public/fonts/)
   const [regRes, boldRes] = await Promise.all([
     fetch("/fonts/NotoSans-Regular.ttf"),
-    fetch("/fonts/NotoSans-Bold.ttf"), // if you didn't add bold, remove this + below two bold lines
+    fetch("/fonts/NotoSans-Bold.ttf"),      // if you didn't add bold, remove this + below two bold lines
   ]);
 
   const [regBuf, boldBuf] = await Promise.all([
@@ -31,7 +31,7 @@ async function loadRupeeFont(doc) {
     boldRes.arrayBuffer(),
   ]);
 
-  const regB64 = ab2b64(regBuf);
+  const regB64  = ab2b64(regBuf);
   const boldB64 = ab2b64(boldBuf);
 
   // Register Regular
@@ -77,20 +77,19 @@ async function getNextQuoteNumber() {
   return `APP/H${String(next).padStart(3, "0")}`;
 }
 
-/* ===== Step 1: persist quote UI state (ADD THIS BLOCK) ===== */
-const LS_KEY = "hvfQuoteState";
+/* ===== Persist quote UI state ===== */
+const LS_KEY = "quoteState";
 const loadQuoteState = () => {
-  try {
-    return JSON.parse(localStorage.getItem(LS_KEY) || "{}");
-  } catch {
-    return {};
-  }
+  try { return JSON.parse(localStorage.getItem(LS_KEY) || "{}"); }
+  catch { return {}; }
 };
-const saveQuoteState = (s) => localStorage.setItem(LS_KEY, JSON.stringify(s));
-/* ========================================================== */
+const saveQuoteState = (s) =>
+  localStorage.setItem(LS_KEY, JSON.stringify(s));
+/* ================================= */
 
 /* --- App --- */
 export default function App() {
+
   /*** DATA ***/
   const [items, setItems] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -114,8 +113,8 @@ export default function App() {
   };
 
   // quotation “cart” mode (PIN 9990)
-  const [quoteMode, setQuoteMode] = useState(false); // true = show qty steppers on catalog
-  const [page, setPage] = useState("catalog"); // "catalog" | "quoteEditor"
+  const [quoteMode, setQuoteMode] = useState(false);    // true = show qty steppers on catalog
+  const [page, setPage] = useState("catalog");          // "catalog" | "quoteEditor"
   const enableQuoteMode = () => {
     if (quoteMode) {
       setQuoteMode(false);
@@ -198,10 +197,7 @@ export default function App() {
     setLoading(false);
   };
   const loadCategories = async () => {
-    const { data } = await supabase
-      .from("categories")
-      .select("name")
-      .order("name");
+    const { data } = await supabase.from("categories").select("name").order("name");
     setCategories((data || []).map((r) => r.name));
   };
   useEffect(() => {
@@ -244,11 +240,7 @@ export default function App() {
     setSaving(true);
     try {
       const ext = form.imageFile.name.split(".").pop().toLowerCase();
-      const safeBase = form.name
-        .trim()
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, "-")
-        .slice(0, 40);
+      const safeBase = form.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 40);
       const filePath = `products/${Date.now()}-${safeBase}.${ext}`;
       const { error: upErr } = await supabase.storage
         .from("images")
@@ -276,13 +268,7 @@ export default function App() {
       const { error: insErr } = await supabase.from("machines").insert(payload);
       if (insErr) throw new Error("INSERT: " + insErr.message);
       setForm({
-        name: "",
-        category: "",
-        mrp: "",
-        sell_price: "",
-        cost_price: "",
-        specs: "",
-        imageFile: null,
+        name: "", category: "", mrp: "", sell_price: "", cost_price: "", specs: "", imageFile: null,
       });
       await loadMachines();
       alert("Product added ✅");
@@ -298,21 +284,11 @@ export default function App() {
   const [cart, setCart] = useState({});
   const cartList = Object.values(cart);
   const cartCount = cartList.reduce((a, r) => a + (r.qty || 0), 0);
-  const cartSubtotal = cartList.reduce(
-    (a, r) => a + (r.qty || 0) * (r.unit || 0),
-    0
-  );
+  const cartSubtotal = cartList.reduce((a, r) => a + (r.qty || 0) * (r.unit || 0), 0);
 
   const inc = (m) =>
     setCart((c) => {
-      const prev =
-        c[m.id] || {
-          id: m.id,
-          name: m.name,
-          specs: m.specs || "",
-          unit: Number(m.mrp || 0),
-          qty: 0,
-        };
+      const prev = c[m.id] || { id: m.id, name: m.name, specs: m.specs || "", unit: Number(m.mrp || 0), qty: 0 };
       return { ...c, [m.id]: { ...prev, qty: prev.qty + 1 } };
     });
   const dec = (m) =>
@@ -329,9 +305,7 @@ export default function App() {
 
   // Create a new editable blank line item (not in catalog)
   const addBlankRow = () => {
-    const id = `custom-${Date.now()}-${Math.random()
-      .toString(36)
-      .slice(2, 6)}`;
+    const id = `custom-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     setCart((c) => ({
       ...c,
       [id]: { id, name: "", specs: "", unit: 0, qty: 1 },
@@ -356,6 +330,9 @@ export default function App() {
     subject: "",
   });
 
+  // NEW: firm selector state (persisted)
+  const [firm, setFirm] = useState("HVF Agency");
+
   // --- Persist quote state in localStorage so refresh won't log out ---
   useEffect(() => {
     const saved = loadQuoteState();
@@ -365,29 +342,26 @@ export default function App() {
         if (saved.qHeader) setQHeader(saved.qHeader);
         if (saved.page) setPage(saved.page);
         if (typeof saved.quoteMode === "boolean") setQuoteMode(saved.quoteMode);
+        if (saved.firm) setFirm(saved.firm);
       } catch (e) {
         console.error("Failed to restore quote state", e);
       }
     }
   }, []);
 
-  // whenever cart, qHeader, page, or quoteMode changes, save them
+  // whenever cart, qHeader, page, quoteMode, or firm changes, save them
   useEffect(() => {
-    saveQuoteState({ cart, qHeader, page, quoteMode });
-  }, [cart, qHeader, page, quoteMode]);
+    saveQuoteState({ cart, qHeader, page, quoteMode, firm });
+  }, [cart, qHeader, page, quoteMode, firm]);
 
   const goToEditor = async () => {
-    if (cartList.length === 0)
-      return alert("Add at least 1 item to the quote.");
+    if (cartList.length === 0) return alert("Add at least 1 item to the quote.");
     if (!qHeader.number) {
       try {
         const num = await getNextQuoteNumber();
         setQHeader((h) => ({ ...h, number: num, date: todayStr() }));
       } catch {
-        setQHeader((h) => ({
-          ...h,
-          number: `APP/H${Date.now().toString().slice(-3)}`,
-        }));
+        setQHeader((h) => ({ ...h, number: `APP/H${Date.now().toString().slice(-3)}` }));
       }
     }
     setPage("quoteEditor");
@@ -442,11 +416,7 @@ export default function App() {
     setSaved(data || []);
   };
   const editSaved = async (number) => {
-    const { data: q } = await supabase
-      .from("quotes")
-      .select("id,number,customer_name,phone")
-      .eq("number", number)
-      .maybeSingle();
+    const { data: q } = await supabase.from("quotes").select("id,number,customer_name,phone").eq("number", number).maybeSingle();
     if (!q) return;
     const { data: lines } = await supabase
       .from("quote_items")
@@ -456,13 +426,7 @@ export default function App() {
     const newCart = {};
     (lines || []).forEach((ln, idx) => {
       const id = `saved-${idx}`;
-      newCart[id] = {
-        id,
-        name: ln.name,
-        specs: ln.specs || "",
-        unit: Number(ln.mrp || 0),
-        qty: Number(ln.qty || 0),
-      };
+      newCart[id] = { id, name: ln.name, specs: ln.specs || "", unit: Number(ln.mrp || 0), qty: Number(ln.qty || 0) };
     });
     setCart(newCart);
     setQHeader((h) => ({
@@ -489,78 +453,90 @@ export default function App() {
     const margin = 40;
     const contentW = pw - margin * 2; // width inside margins
 
-    // ----- LOGO -----
+    // ------------------------------------------------------------------
+    // BRANDING (logo for HVF; bold firm name for others)
+    // ------------------------------------------------------------------
     let logoBottom = 24;
-    try {
-      const img = new Image();
-      img.crossOrigin = "anonymous";
-      img.src = "/hvf-logo.png";
-      await new Promise((r) => (img.onload = r));
-      const w = 110;
-      const h = (img.height * w) / img.width;
-      const x = (pw - w) / 2;
-      const y = 24;
-      doc.addImage(img, "PNG", x, y, w, h);
-      logoBottom = y + h;
-    } catch {}
+    if (firm === "HVF Agency") {
+      try {
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.src = "/hvf-logo.png";
+        await new Promise((r) => (img.onload = r));
+        const w = 110;
+        const h = (img.height * w) / img.width;
+        const x = (pw - w) / 2;
+        const y = 24;
+        doc.addImage(img, "PNG", x, y, w, h);
+        logoBottom = y + h;
+      } catch {}
+    } else {
+      // Victor/Mahabir: show the firm name in bold at top
+      const firmFont = firm === "Victor Engineering" ? "times" : "courier";
+      doc.setFont(firmFont, "bold");
+      doc.setFontSize(20);
+      doc.text(firm, pw / 2, 48, { align: "center" });
+      logoBottom = 48;
+    }
 
-    // ----- TITLE + HEADER LINES -----
-    doc.setFont("helvetica", "bold");
+    // ------------------------------------------------------------------
+    // Title + global font choice per firm
+    // ------------------------------------------------------------------
+    const titleFont =
+      firm === "Victor Engineering" ? "times"
+      : firm === "Mahabir Hardware Stores" ? "courier"
+      : "helvetica";
+    const bodyFont = titleFont;
+
+    doc.setFont(titleFont, "bold");
     doc.setFontSize(16);
     doc.text("QUOTATION", pw / 2, logoBottom + 28, { align: "center" });
 
-    doc.setFont("helvetica", "normal");
+    doc.setFont(bodyFont, "normal");
     doc.setFontSize(10);
 
     // left block (customer info) — To, + bold details (name, address, phone)
     const L = margin;
-    let y0 = logoBottom + 40; // start position below the logo
+    let y0 = logoBottom + 40; // start position below the branding
 
     // "To," line
-    doc.setFont("helvetica", "normal");
+    doc.setFont(bodyFont, "normal");
     doc.setFontSize(11);
     doc.text("To,", L, y0);
     y0 += 18;
 
     // bold customer details (no labels)
-    doc.setFont("helvetica", "bold");
+    doc.setFont(bodyFont, "bold");
     doc.text(String(qHeader.customer_name || ""), L, y0);
     y0 += 16;
     doc.text(String(qHeader.address || ""), L, y0);
     y0 += 16;
     doc.text(String(qHeader.phone || ""), L, y0);
 
-    // (leave font as-is; the right-block code sets it back to normal anyway)
-
     // right block (aligned with table right edge)
     const tableRightX = doc.internal.pageSize.getWidth() - margin;
 
-    doc.setFont("helvetica", "normal");
+    doc.setFont(bodyFont, "normal");
     doc.setFontSize(10);
-
     doc.text(`Ref: ${num}`, tableRightX, logoBottom + 40, { align: "right" });
-    doc.text(`Date: ${qHeader.date || todayStr()}`, tableRightX, logoBottom + 55, {
-      align: "right",
-    });
+    doc.text(`Date: ${qHeader.date || todayStr()}`, tableRightX, logoBottom + 55, { align: "right" });
 
     // intro line (fixed)
     const introY = y0 + 28;
     doc.setFontSize(11);
     doc.text("Dear Sir/Madam,", L, introY);
-    doc.text(
-      "With reference to your enquiry we are pleased to offer you as under:",
-      L,
-      introY + 16
-    );
+    doc.text("With reference to your enquiry we are pleased to offer you as under:", L, introY + 16);
 
-    // ----- TABLE (always fits) -----
+    // ------------------------------------------------------------------
+    // TABLE (keeps your custom specs handling)
+    // ------------------------------------------------------------------
     // Build body: keep specs as a newline in the raw text
     const body = cartList.map((r, i) => [
       String(i + 1),
       `${r.name || ""}${r.specs ? `\n(${r.specs})` : ""}`, // name on line 1, specs on line 2
       String(r.qty || 0),
-      inr(r.unit || 0), // plain number (no "Rs")
-      inr((r.qty || 0) * (r.unit || 0)), // plain number (no "Rs")
+      inr(r.unit || 0),                          // plain number (no "Rs")
+      inr((r.qty || 0) * (r.unit || 0)),         // plain number (no "Rs")
     ]);
 
     // Column widths that sum to content width
@@ -568,37 +544,31 @@ export default function App() {
     const colQty = 40;
     const colUnit = 90;
     const colTotal = 110;
-    const colDesc = Math.max(
-      120,
-      contentW - (colSl + colQty + colUnit + colTotal)
-    ); // remainder
+    const colDesc = Math.max(120, contentW - (colSl + colQty + colUnit + colTotal)); // remainder
+
+    // choose a header background per firm
+    const headFill =
+      firm === "Victor Engineering" ? [220, 235, 255] :        // light blue
+      firm === "Mahabir Hardware Stores" ? [225, 248, 225] :   // light green
+      [230, 230, 230];                                         // HVF grey
 
     autoTable(doc, {
       startY: introY + 38,
       head: [["Sl.", "Description", "Qty", "Unit Price", "Total (Incl. GST)"]],
       body,
 
-      styles: {
-        fontSize: 10,
-        cellPadding: 6,
-        overflow: "linebreak",
-        textColor: [0, 0, 0],
-      },
-      headStyles: {
-        fillColor: [230, 230, 230],
-        textColor: [0, 0, 0],
-        fontStyle: "bold",
-      },
+      styles: { font: bodyFont, fontSize: 10, cellPadding: 6, overflow: "linebreak", textColor: [0, 0, 0] },
+      headStyles: { fillColor: headFill, textColor: [0, 0, 0], fontStyle: "bold" },
       columnStyles: {
-        0: { cellWidth: colSl, halign: "center" },
-        1: { cellWidth: colDesc }, // description
-        2: { cellWidth: colQty, halign: "center" },
+        0: { cellWidth: colSl,   halign: "center" },
+        1: { cellWidth: colDesc },                   // description
+        2: { cellWidth: colQty,  halign: "center" },
         3: { cellWidth: colUnit, halign: "right" },
-        4: { cellWidth: colTotal, halign: "right" },
+        4: { cellWidth: colTotal,halign: "right" },
       },
       margin: { left: margin, right: margin },
       tableLineColor: [200, 200, 200],
-      tableLineWidth: 0.5,
+      tableLineWidth: firm === "Mahabir Hardware Stores" ? 0.7 : 0.5, // a bit heavier for Mahabir
       theme: "grid",
 
       // Keep two-line height; we'll draw specs ourselves as a second line.
@@ -609,7 +579,7 @@ export default function App() {
         const nl = raw.indexOf("\n(");
         if (nl === -1) return;
 
-        const name = raw.slice(0, nl);
+        const name  = raw.slice(0, nl);
         const specs = raw.slice(nl); // includes "("
 
         // Reserve two lines of height; leave 2nd line blank so plugin won't draw it.
@@ -626,114 +596,158 @@ export default function App() {
 
         // Resolve paddings safely (jspdf-autotable v3+)
         const cellPad = (side) => {
-          if (typeof data.cell.padding === "function")
-            return data.cell.padding(side);
+          if (typeof data.cell.padding === "function") return data.cell.padding(side);
           const cp = data.cell.styles?.cellPadding;
           if (typeof cp === "number") return cp;
           if (cp && typeof cp === "object") return cp[side] ?? 6;
           return 6;
         };
-        const padLeft = cellPad("left");
+        const padLeft  = cellPad("left");
         const padRight = cellPad("right");
-        const padTop = cellPad("top");
+        const padTop   = cellPad("top");
 
         const x = data.cell.x + padLeft;
 
         // Baselines based on table body font
         const fsMain = (data.row.styles && data.row.styles.fontSize) || 10;
-        const lineH = fsMain * 1.15; // approx line height
+        const lineH  = fsMain * 1.15;            // approx line height
         const specsY = data.cell.y + padTop + lineH; // exactly one line under the name
 
         // Wrap specs to stay within the cell
-        const maxW = data.cell.width - padLeft - padRight;
+        const maxW    = data.cell.width - padLeft - padRight;
         const wrapped = doc.splitTextToSize(specs, maxW);
 
         // Draw specs 15% smaller & lighter
         const prevSize = doc.getFontSize();
         doc.setFontSize(prevSize * 0.85); // ~15% smaller
-        doc.setTextColor(120); // lighter grey
+        doc.setTextColor(120);            // lighter grey
         doc.text(wrapped, x, specsY);
 
         // Restore
         doc.setTextColor(0, 0, 0);
         doc.setFontSize(prevSize);
-      },
-    }); // <-- closes autoTable correctly
+      }
+    }); // end autoTable
 
-    // ----- TOTAL (single line, aligned with table right edge) -----
+    // ------------------------------------------------------------------
+    // TOTAL (single line, aligned with table right edge) — with ₹ font
+    // ------------------------------------------------------------------
     const at = doc.lastAutoTable || null;
     const totalsRightX = doc.internal.pageSize.getWidth() - margin;
-    let totalsY = (at?.finalY ?? introY + 38) + 22;
+    let totalsY = (at?.finalY ?? (introY + 38)) + 22;
 
     try {
       // Load and switch to a font that DEFINITELY contains the ₹ glyph
       await loadRupeeFont(doc);
-      doc.setFont("NotoSans", "bold"); // use Noto Sans Bold just for this line
+      doc.setFont("NotoSans", "bold");   // use Noto Sans Bold just for this line
       doc.setFontSize(12);
       doc.setTextColor(0, 0, 0);
 
       // Use the explicit Unicode rupee sign to avoid any accidental substitution
-      const RUPEE = String.fromCharCode(0x20b9); // "₹"
-      doc.text(`Total: ${RUPEE} ${inr(cartSubtotal)}`, totalsRightX, totalsY, {
-        align: "right",
-      });
+      const RUPEE = String.fromCharCode(0x20B9); // "₹"
+      doc.text(`Total: ${RUPEE} ${inr(cartSubtotal)}`, totalsRightX, totalsY, { align: "right" });
     } catch (_e) {
       // Fallback if the custom font couldn't be fetched (offline etc.)
-      doc.setFont("helvetica", "bold");
+      doc.setFont(bodyFont, "bold");
       doc.setFontSize(12);
       doc.setTextColor(0, 0, 0);
-      doc.text(`Total: Rs ${inr(cartSubtotal)}`, totalsRightX, totalsY, {
-        align: "right",
-      });
+      doc.text(`Total: Rs ${inr(cartSubtotal)}`, totalsRightX, totalsY, { align: "right" });
     } finally {
-      // Restore your default font for anything after this
-      doc.setFont("helvetica", "normal");
+      // Restore body font for the rest
+      doc.setFont(bodyFont, "normal");
       doc.setTextColor(0, 0, 0);
     }
 
-    // ----- TERMS & BANK -----
-    const ty = totalsY + 36; // <-- use totalsY so it stays below totals
+    // ------------------------------------------------------------------
+    // TERMS & BANK (firm-specific)
+    // ------------------------------------------------------------------
+    const ty = totalsY + 36; // keep below totals
 
     // underline + bold "Terms & Conditions:"
-    doc.setFont("helvetica", "bold");
+    doc.setFont(bodyFont, "bold");
     doc.setFontSize(11);
     doc.setTextColor(0, 0, 0);
     doc.text("Terms & Conditions:", L, ty, { underline: true });
 
-    doc.setFont("helvetica", "normal");
+    // Terms body (you can refine per firm later if you want)
+    doc.setFont(bodyFont, "normal");
     doc.setFontSize(10);
-    doc.text(
-      [
-        "This quotation is valid for one month from the date of issue.",
-        "Delivery is subject to stock availability and may take up to 2 weeks.",
-        "Goods once sold are non-returnable and non-exchangeable.",
-        "",
-        "Yours Faithfully",
-        "HVF Agency",
-        "9957239143 / 9954425780",
-        "GST: 18AFCPC4260P1ZB",
-        "",
-      ],
-      L,
-      ty + 16
-    );
 
-    // BANK DETAILS in bold
-    doc.setFont("helvetica", "bold");
-    doc.text("BANK DETAILS", L, ty + 120);
+    const termsCommon = [
+      "This quotation is valid for one month from the date of issue.",
+      "Delivery is subject to stock availability and may take up to 2 weeks.",
+      "Goods once sold are non-returnable and non-exchangeable.",
+      "",
+      "Yours Faithfully",
+    ];
 
-    // back to normal font for bank info
-    doc.setFont("helvetica", "normal");
-    doc.text(
-      [
-        "HVF AGENCY",
-        "ICICI BANK (Moran Branch)",
-        "A/C No - 199505500412",
-        "IFSC Code - ICIC0001995",
-      ],
-      L,
-      ty + 136
-    );
+    if (firm === "HVF Agency") {
+      doc.text(
+        [...termsCommon, "HVF Agency", "9957239143 / 9954425780", "GST: 18AFCPC4260P1ZB", ""],
+        L,
+        ty + 16
+      );
+
+      // BANK DETAILS in bold
+      doc.setFont(bodyFont, "bold");
+      doc.text("BANK DETAILS", L, ty + 120);
+
+      // back to normal font for bank info
+      doc.setFont(bodyFont, "normal");
+      doc.text(
+        [
+          "HVF AGENCY",
+          "ICICI BANK (Moran Branch)",
+          "A/C No - 199505500412",
+          "IFSC Code - ICIC0001995",
+        ],
+        L,
+        ty + 136
+      );
+    } else if (firm === "Victor Engineering") {
+      doc.text(
+        [...termsCommon, "Victor Engineering", "0361-0000000", "GST: 18ABCDE1234F1Z1", ""],
+        L,
+        ty + 16
+      );
+
+      // BANK DETAILS (Victor)
+      doc.setFont(bodyFont, "bold");
+      doc.text("BANK DETAILS", L, ty + 120);
+      doc.setFont(bodyFont, "normal");
+      doc.text(
+        [
+          "VICTOR ENGINEERING",
+          "HDFC BANK (Dibrugarh)",
+          "A/C No - 50100234567890",
+          "IFSC Code - HDFC0001234",
+        ],
+        L,
+        ty + 136
+      );
+    } else {
+      // Mahabir
+      doc.text(
+        [...termsCommon, "Mahabir Hardware Stores", "0374-0000000", "GST: 18ABCDE9999Z5Q", ""],
+        L,
+        ty + 16
+      );
+
+      // BANK DETAILS (Mahabir)
+      doc.setFont(bodyFont, "bold");
+      doc.text("BANK DETAILS", L, ty + 120);
+      doc.setFont(bodyFont, "normal");
+      doc.text(
+        [
+          "MAHABIR HARDWARE STORES",
+          "SBI (Moranhat Branch)",
+          "A/C No - 302187654321",
+          "IFSC Code - SBIN0001995",
+        ],
+        L,
+        ty + 136
+      );
+    }
 
     // open in new tab
     window.open(doc.output("bloburl"), "_blank");
@@ -741,48 +755,16 @@ export default function App() {
 
   /*** UI ***/
   return (
-    <div
-      style={{
-        fontFamily: "Arial, sans-serif",
-        minHeight: "100vh",
-        background: "linear-gradient(to bottom right,#f8f9fa,#eef2f7)",
-      }}
-    >
+    <div style={{ fontFamily: "Arial, sans-serif", minHeight: "100vh", background: "linear-gradient(to bottom right,#f8f9fa,#eef2f7)" }}>
       {/* top-right Login menu */}
-      <div
-        style={{ display: "flex", justifyContent: "flex-end", padding: "8px 16px" }}
-      >
+      <div style={{ display: "flex", justifyContent: "flex-end", padding: "8px 16px" }}>
         <details>
-          <summary
-            style={{
-              cursor: "pointer",
-              padding: "6px 12px",
-              borderRadius: 6,
-              background: "#f2f2f2",
-            }}
-          >
-            Login
-          </summary>
-          <div
-            style={{
-              position: "absolute",
-              right: 16,
-              marginTop: 6,
-              background: "#fff",
-              border: "1px solid #e5e7eb",
-              borderRadius: 8,
-              padding: 8,
-              minWidth: 210,
-              boxShadow: "0 8px 24px rgba(0,0,0,.08)",
-            }}
-          >
+          <summary style={{ cursor: "pointer", padding: "6px 12px", borderRadius: 6, background: "#f2f2f2" }}>Login</summary>
+          <div style={{ position: "absolute", right: 16, marginTop: 6, background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8, padding: 8, minWidth: 210, boxShadow: "0 8px 24px rgba(0,0,0,.08)" }}>
             <button onClick={toggleStaff} style={{ width: "100%", marginBottom: 6 }}>
               {staffMode ? "Logout Staff View" : "Login as Staff (PIN)"}
             </button>
-            <button
-              onClick={() => setShowLoginBox(true)}
-              style={{ width: "100%", marginBottom: 6 }}
-            >
+            <button onClick={() => setShowLoginBox(true)} style={{ width: "100%", marginBottom: 6 }}>
               Login as Admin (Email)
             </button>
             <button onClick={enableQuoteMode} style={{ width: "100%" }}>
@@ -794,70 +776,32 @@ export default function App() {
 
       {/* Header */}
       <div style={{ textAlign: "center", marginBottom: 18 }}>
-        <img
-          src="/hvf-logo.png"
-          alt="HVF Agency"
-          style={{ width: 160, height: "auto", marginBottom: 8 }}
-        />
+        <img src="/hvf-logo.png" alt="HVF Agency" style={{ width: 160, height: "auto", marginBottom: 8 }} />
         <h1 style={{ margin: 0 }}>HVF Machinery Catalog</h1>
         <p style={{ color: "#777", marginTop: 6 }}>by HVF Agency, Moranhat, Assam</p>
 
         {/* inline admin email box */}
         {!session && showLoginBox && (
           <div style={{ display: "inline-flex", gap: 8 }}>
-            <input
-              type="email"
-              placeholder="your@email.com"
-              value={loginEmail}
-              onChange={(e) => setLoginEmail(e.target.value)}
-              style={{
-                padding: "6px 10px",
-                borderRadius: 6,
-                border: "1px solid #ddd",
-              }}
-            />
+            <input type="email" placeholder="your@email.com" value={loginEmail} onChange={(e) => setLoginEmail(e.target.value)} style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #ddd" }} />
             <button onClick={sendLoginLink}>Send Login Link</button>
-            <button onClick={() => setShowLoginBox(false)} style={{ marginLeft: 6 }}>
-              Cancel
-            </button>
+            <button onClick={() => setShowLoginBox(false)} style={{ marginLeft: 6 }}>Cancel</button>
           </div>
         )}
         {session && (
           <div style={{ marginTop: 8 }}>
-            <button onClick={signOut} style={{ marginRight: 8 }}>
-              Sign Out
-            </button>
-            <span
-              style={{
-                padding: "4px 8px",
-                borderRadius: 6,
-                background: isAdmin ? "#e8f6ed" : "#f7e8e8",
-                color: isAdmin ? "#1f7a3f" : "#b11e1e",
-                marginRight: 8,
-              }}
-            >
+            <button onClick={signOut} style={{ marginRight: 8 }}>Sign Out</button>
+            <span style={{ padding: "4px 8px", borderRadius: 6, background: isAdmin ? "#e8f6ed" : "#f7e8e8", color: isAdmin ? "#1f7a3f" : "#b11e1e", marginRight: 8 }}>
               {isAdmin ? "Admin: ON" : "Not admin"}
             </span>
-            <span style={{ color: "#777", fontSize: 12 }}>
-              UID: {session?.user?.id?.slice(0, 8)}…
-            </span>
+            <span style={{ color: "#777", fontSize: 12 }}>UID: {session?.user?.id?.slice(0, 8)}…</span>
           </div>
         )}
       </div>
 
       {/* Search */}
       <div style={{ maxWidth: 1100, margin: "0 auto 10px", padding: "0 12px" }}>
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search products…"
-          style={{
-            width: "100%",
-            padding: "10px 12px",
-            borderRadius: 10,
-            border: "1px solid #e5e7eb",
-          }}
-        />
+        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search products…" style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: "1px solid #e5e7eb" }} />
       </div>
 
       {/* Categories */}
@@ -927,32 +871,17 @@ export default function App() {
                     {m.specs && <p style={{ color: "#666" }}>{m.specs}</p>}
                     <p style={{ fontWeight: 700 }}>₹{inr(m.mrp)}</p>
                     {(staffMode || isAdmin) && m.sell_price != null && (
-                      <div
-                        style={{
-                          fontWeight: 700,
-                          marginTop: -2,
-                          marginBottom: 6,
-                          display: "inline-flex",
-                          alignItems: "baseline",
-                          gap: 8,
-                        }}
-                      >
-                        <span style={{ color: "#d32f2f" }}>
-                          ₹{inr(m.sell_price)}
-                        </span>
+                      <div style={{ fontWeight: 700, marginTop: -2, marginBottom: 6, display: "inline-flex", alignItems: "baseline", gap: 8 }}>
+                        <span style={{ color: "#d32f2f" }}>₹{inr(m.sell_price)}</span>
                         {isAdmin && m.cost_price != null && (
                           <>
                             <span style={{ color: "#bbb" }}>/</span>
-                            <span style={{ color: "#d4a106" }}>
-                              ₹{inr(m.cost_price)}
-                            </span>
+                            <span style={{ color: "#d4a106" }}>₹{inr(m.cost_price)}</span>
                           </>
                         )}
                       </div>
                     )}
-                    {m.category && (
-                      <p style={{ color: "#777", fontSize: 12 }}>{m.category}</p>
-                    )}
+                    {m.category && <p style={{ color: "#777", fontSize: 12 }}>{m.category}</p>}
 
                     {quoteMode && (
                       <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
@@ -968,11 +897,7 @@ export default function App() {
               ))}
             </div>
           )}
-          {msg && (
-            <p style={{ textAlign: "center", color: "crimson", marginTop: 10 }}>
-              {msg}
-            </p>
-          )}
+          {msg && <p style={{ textAlign: "center", color: "crimson", marginTop: 10 }}>{msg}</p>}
         </div>
       )}
 
@@ -988,6 +913,7 @@ export default function App() {
             padding: 14,
           }}
         >
+
           {/* top bar: Back button */}
           <div style={{ display: "flex", alignItems: "center", marginBottom: 8 }}>
             <button
@@ -997,7 +923,7 @@ export default function App() {
                 borderRadius: 6,
                 border: "1px solid #e5e7eb",
                 background: "#f8f9fa",
-                cursor: "pointer",
+                cursor: "pointer"
               }}
               aria-label="Back to product selection"
             >
@@ -1009,13 +935,7 @@ export default function App() {
           <div style={{ display: "flex", justifyContent: "space-between", gap: 16 }}>
             {/* left: customer fields */}
             <div style={{ flex: 1 }}>
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr 1fr",
-                  gap: 8,
-                }}
-              >
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                 <label>
                   <div style={{ fontSize: 12, color: "#666" }}>Customer Name</div>
                   <input
@@ -1047,8 +967,7 @@ export default function App() {
                 </label>
 
                 <div style={{ gridColumn: "1 / span 2", marginTop: 8, fontSize: 14 }}>
-                  Dear Sir/Madam,
-                  <br />
+                  Dear Sir/Madam,<br />
                   With reference to your enquiry we are pleased to offer you as under:
                 </div>
               </div>
@@ -1060,6 +979,22 @@ export default function App() {
               <div>Ref: {qHeader.number || "APP/H###"}</div>
               <div>Date: {qHeader.date}</div>
             </div>
+          </div>
+
+          {/* Firm selector (NEW) */}
+          <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 12, marginBottom: 8 }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 12, color: "#666", minWidth: 44 }}>Firm</span>
+              <select
+                value={firm}
+                onChange={(e) => setFirm(e.target.value)}
+                style={{ padding: "6px 8px", borderRadius: 6, border: "1px solid #e5e7eb" }}
+              >
+                <option>HVF Agency</option>
+                <option>Victor Engineering</option>
+                <option>Mahabir Hardware Stores</option>
+              </select>
+            </label>
           </div>
 
           {/* rows */}
@@ -1081,26 +1016,10 @@ export default function App() {
                   <tr key={r.id}>
                     <td>{i + 1}</td>
                     <td>
-                      <input
-                        value={r.name}
-                        onChange={(e) =>
-                          setCart((c) => ({
-                            ...c,
-                            [r.id]: { ...r, name: e.target.value },
-                          }))
-                        }
-                      />
+                      <input value={r.name} onChange={(e) => setCart((c) => ({ ...c, [r.id]: { ...r, name: e.target.value } }))} />
                     </td>
                     <td>
-                      <input
-                        value={r.specs}
-                        onChange={(e) =>
-                          setCart((c) => ({
-                            ...c,
-                            [r.id]: { ...r, specs: e.target.value },
-                          }))
-                        }
-                      />
+                      <input value={r.specs} onChange={(e) => setCart((c) => ({ ...c, [r.id]: { ...r, specs: e.target.value } }))} />
                     </td>
                     <td>
                       <input
@@ -1108,10 +1027,7 @@ export default function App() {
                         value={r.qty}
                         min={0}
                         onChange={(e) =>
-                          setCart((c) => ({
-                            ...c,
-                            [r.id]: { ...r, qty: Number(e.target.value) },
-                          }))
+                          setCart((c) => ({ ...c, [r.id]: { ...r, qty: Number(e.target.value) } }))
                         }
                       />
                     </td>
@@ -1121,16 +1037,14 @@ export default function App() {
                         value={r.unit}
                         min={0}
                         onChange={(e) =>
-                          setCart((c) => ({
-                            ...c,
-                            [r.id]: { ...r, unit: Number(e.target.value) },
-                          }))
+                          setCart((c) => ({ ...c, [r.id]: { ...r, unit: Number(e.target.value) } }))
                         }
                       />
                     </td>
                     <td style={{ textAlign: "right", fontWeight: 700 }}>
                       ₹{inr((r.qty || 0) * (r.unit || 0))}
                     </td>
+
                     {/* Action cell: small circular remove button */}
                     <td style={{ textAlign: "center" }}>
                       <button
@@ -1156,32 +1070,21 @@ export default function App() {
             </table>
 
             {/* Action bar under table: Add Row on the left, totals on the right */}
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                marginTop: 12,
-              }}
-            >
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 12 }}>
               <button onClick={addBlankRow}>+ Add Row</button>
 
               <div style={{ display: "flex", gap: 24 }}>
-                <div>
-                  Subtotal <b>₹{inr(cartSubtotal)}</b>
-                </div>
-                <div>
-                  Grand Total <b>₹{inr(cartSubtotal)}</b>
-                </div>
+                <div>Subtotal <b>₹{inr(cartSubtotal)}</b></div>
+                <div>Grand Total <b>₹{inr(cartSubtotal)}</b></div>
               </div>
             </div>
 
+            {/* Buttons (Export uses selected firm) */}
             <div style={{ marginTop: 14, display: "flex", gap: 8 }}>
               <button
                 onClick={async () => {
                   const n = await saveQuote();
-                  if (n && !qHeader.number)
-                    setQHeader((h) => ({ ...h, number: n }));
+                  if (n && !qHeader.number) setQHeader((h) => ({ ...h, number: n }));
                 }}
               >
                 Save
@@ -1194,17 +1097,7 @@ export default function App() {
       )}
 
       {/* FLOATING bottom-right controls */}
-      <div
-        style={{
-          position: "fixed",
-          right: 16,
-          bottom: 16,
-          display: "flex",
-          flexDirection: "column",
-          gap: 8,
-          zIndex: 20,
-        }}
-      >
+      <div style={{ position: "fixed", right: 16, bottom: 16, display: "flex", flexDirection: "column", gap: 8, zIndex: 20 }}>
         {quoteMode && (
           <button onClick={goToEditor}>View Quote ({cartCount})</button>
         )}
@@ -1239,46 +1132,18 @@ export default function App() {
           zIndex: 25,
         }}
       >
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            marginBottom: 6,
-          }}
-        >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
           <b>Saved Quotes</b>
-          <button
-            onClick={() =>
-              (document.getElementById("saved-pop").style.display = "none")
-            }
-          >
-            ✕
-          </button>
+          <button onClick={() => (document.getElementById("saved-pop").style.display = "none")}>✕</button>
         </div>
         {saved.length === 0 ? (
           <div style={{ color: "#777" }}>No saved quotes yet.</div>
         ) : (
           saved.map((q) => (
-            <div
-              key={q.number}
-              style={{
-                border: "1px solid #eee",
-                borderRadius: 8,
-                padding: 8,
-                marginBottom: 6,
-                display: "grid",
-                gridTemplateColumns: "1fr auto",
-                gap: 8,
-              }}
-            >
+            <div key={q.number} style={{ border: "1px solid #eee", borderRadius: 8, padding: 8, marginBottom: 6, display: "grid", gridTemplateColumns: "1fr auto", gap: 8 }}>
               <div>
-                <div>
-                  <b>{q.number}</b> — {q.customer_name || "—"}
-                </div>
-                <div style={{ fontSize: 12, color: "#666" }}>
-                  ₹{inr(q.total || 0)}
-                </div>
+                <div><b>{q.number}</b> — {q.customer_name || "—"}</div>
+                <div style={{ fontSize: 12, color: "#666" }}>₹{inr(q.total || 0)}</div>
               </div>
               <div style={{ display: "flex", gap: 6 }}>
                 <button onClick={() => editSaved(q.number)}>Edit</button>
