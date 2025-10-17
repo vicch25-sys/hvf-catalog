@@ -46,6 +46,11 @@ const supabase = createClient(supabaseUrl, supabaseKey, {
 });
 
 /* --- Helpers --- */
+const forceTodayDate = (set) => {
+  const t = todayStr();
+  set((h) => (h?.date === t ? h : { ...h, date: t }));
+};
+
 const inr = (n) =>
   Number(n ?? 0).toLocaleString("en-IN", {
     minimumFractionDigits: 0,
@@ -134,6 +139,31 @@ export default function App() {
   const [saving, setSaving] = useState(false);
 
   /* ---------- AUTH ---------- */
+// ⬇️ Put this inside App(), alongside your other useEffects
+useEffect(() => {
+  // ensure today's date is in the editor on mount too
+  setQHeader(h => ({ ...h, date: todayStr() }));
+
+  function scheduleNextMidnight() {
+    const now = new Date();
+    const next = new Date(now);
+    // fire just after midnight to avoid race conditions
+    next.setDate(now.getDate() + 1);
+    next.setHours(0, 0, 1, 0); // 00:00:01
+    const ms = next.getTime() - now.getTime();
+
+    const tid = setTimeout(() => {
+      setQHeader(h => ({ ...h, date: todayStr() })); // roll to new date
+      scheduleNextMidnight(); // schedule again for the next day
+    }, ms);
+
+    return tid;
+  }
+
+  const timerId = scheduleNextMidnight();
+  return () => clearTimeout(timerId);
+}, []);
+
   useEffect(() => {
     const init = async () => {
       const { data } = await supabase.auth.getSession();
@@ -328,19 +358,19 @@ export default function App() {
 
   // --- Persist quote state in localStorage so refresh won't log out ---
   useEffect(() => {
-    const saved = loadQuoteState();
-    if (saved) {
-      try {
-        if (saved.cart) setCart(saved.cart);
-        if (saved.qHeader) setQHeader(saved.qHeader);
-        if (saved.page) setPage(saved.page);
-        if (typeof saved.quoteMode === "boolean") setQuoteMode(saved.quoteMode);
-        if (saved.firm) setFirm(saved.firm);
-      } catch (e) {
-        console.error("Failed to restore quote state", e);
-      }
-    }
-  }, []);
+  const saved = loadQuoteState ? loadQuoteState() : JSON.parse(localStorage.getItem("quoteState") || "{}");
+  try {
+    if (saved.cart) setCart(saved.cart);
+    if (saved.qHeader) setQHeader(saved.qHeader);
+    if (saved.page) setPage(saved.page);
+    if (typeof saved.quoteMode === "boolean") setQuoteMode(saved.quoteMode);
+  } catch (e) {
+    console.error("Failed to restore quote state", e);
+  }
+
+  // ⬇️ always make today the active date in the editor
+  forceTodayDate(setQHeader); // << add this
+}, []);
 
   // whenever cart, qHeader, page, quoteMode, or firm changes, save them
   useEffect(() => {
@@ -348,17 +378,21 @@ export default function App() {
   }, [cart, qHeader, page, quoteMode, firm]);
 
   const goToEditor = async () => {
-    if (cartList.length === 0) return alert("Add at least 1 item to the quote.");
-    if (!qHeader.number) {
-      try {
-        const num = await getNextQuoteNumber();
-        setQHeader((h) => ({ ...h, number: num, date: todayStr() }));
-      } catch {
-        setQHeader((h) => ({ ...h, number: `APP/H${Date.now().toString().slice(-3)}` }));
-      }
+  if (cartList.length === 0) return alert("Add at least 1 item to the quote.");
+
+  // ⬇️ always stamp today's date when opening the editor
+  forceTodayDate(setQHeader); // << add this
+
+  if (!qHeader.number) {
+    try {
+      const num = await getNextQuoteNumber();
+      setQHeader((h) => ({ ...h, number: num, date: todayStr() }));
+    } catch {
+      setQHeader((h) => ({ ...h, number: `APP/H${Date.now().toString().slice(-3)}`, date: todayStr() }));
     }
-    setPage("quoteEditor");
-  };
+  }
+  setPage("quoteEditor");
+};
 
   const backToCatalog = () => setPage("catalog");
 
@@ -437,6 +471,10 @@ export default function App() {
 const exportPDF = async () => {
   if (cartList.length === 0) return alert("Nothing to print.");
 
+  // ⬇️ Always use today's date for the editor + PDF
+  const dateStr = todayStr();
+  setQHeader((h) => ({ ...h, date: dateStr }));
+
   // ensure quote number
   const num = qHeader.number || (await getNextQuoteNumber());
   setQHeader((h) => ({ ...h, number: num }));
@@ -510,7 +548,8 @@ const exportPDF = async () => {
   doc.setFont(bodyFont, "normal");
   doc.setFontSize(10);
   doc.text(`Ref: ${num}`, tableRightX, logoBottom + 40, { align: "right" });
-  doc.text(`Date: ${qHeader.date || todayStr()}`, tableRightX, logoBottom + 55, { align: "right" });
+  // ⬇️ use the fresh dateStr here (instead of qHeader.date || todayStr())
+  doc.text(`Date: ${dateStr}`, tableRightX, logoBottom + 55, { align: "right" });
 
   // intro line (fixed)
   const introY = y0 + 28;
