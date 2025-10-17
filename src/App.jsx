@@ -512,10 +512,11 @@ doc.text(`Date: ${qHeader.date || todayStr()}`, tableRightX, logoBottom + 55, { 
   doc.text("With reference to your enquiry we are pleased to offer you as under:", L, introY + 16);
 
   // ----- TABLE (always fits) -----
-// Build body: specs under name in lighter line
+// Build body: keep specs on a reserved second line (we paint that line ourselves)
+// so row heights/positions stay identical.
 const body = cartList.map((r, i) => [
   String(i + 1),
-  `${r.name || ""}${r.specs ? `\n(${r.specs})` : ""}`,
+  { content: `${r.name || ""}\n `, _specs: (r.specs || "").trim() }, // "\n " reserves the second line
   String(r.qty || 0),
   inr(r.unit || 0),                          // plain number (no "Rs")
   inr((r.qty || 0) * (r.unit || 0)),         // plain number (no "Rs")
@@ -545,6 +546,30 @@ autoTable(doc, {
   tableLineColor: [200, 200, 200],
   tableLineWidth: 0.5,
   theme: "grid",
+
+  // Draw the specs on the reserved 2nd line: ~15% smaller & lighter.
+  didDrawCell(data) {
+    if (data.section !== "body") return;
+    if (data.column.index !== 1) return; // only Description column
+
+    const specs = data.cell?.raw?._specs;
+    if (!specs) return;
+
+    const d = data.doc;
+    const baseSize = data.cell.styles.fontSize || 10;
+
+    // textPos gives baseline for first line; offset down for second line
+    const x = data.cell.textPos.x;
+    const ySecond = data.cell.textPos.y + baseSize * 1.25; // approx one line below
+
+    d.setFontSize(Math.round(baseSize * 0.85)); // ~15% smaller
+    d.setTextColor(110, 110, 110);              // subtle grey (lighter look)
+    d.text(`(${specs})`, x, ySecond);
+
+    // reset to defaults for subsequent cells
+    d.setTextColor(0, 0, 0);
+    d.setFontSize(baseSize);
+  },
 });
 
 // ----- TOTAL (single line, aligned with table right edge) -----
