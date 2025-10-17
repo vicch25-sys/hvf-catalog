@@ -611,20 +611,21 @@ const totalsRightX = doc.internal.pageSize.getWidth() - margin;
 let totalsY = (at?.finalY ?? (introY + 38)) + 22;
 
 try {
-  // Use the font that includes the ₹ glyph if available
-  if (typeof loadRupeeFont === "function") await loadRupeeFont(doc);
-  doc.setFont("NotoSans", "bold");   // or your rupee-capable font
+  // Make sure a ₹-capable font is available (files must be in /public/fonts/)
+  await loadRupeeFont(doc);
+  doc.setFont("NotoSans", "bold");           // use the font that includes ₹
   doc.setFontSize(12);
   doc.setTextColor(0, 0, 0);
+  // NOTE: a space after the ₹ avoids any accidental kerning issues
   doc.text(`Total: ₹ ${inr(cartSubtotal)}`, totalsRightX, totalsY, { align: "right" });
 } catch (_e) {
-  // Fallback if that font isn't loaded
+  // Fallback if font couldn’t be fetched (offline etc.)
   doc.setFont("helvetica", "bold");
   doc.setFontSize(12);
   doc.setTextColor(0, 0, 0);
   doc.text(`Total: Rs ${inr(cartSubtotal)}`, totalsRightX, totalsY, { align: "right" });
 } finally {
-  // Restore default for anything after this
+  // Restore default font for anything that follows
   doc.setFont("helvetica", "normal");
 }
 
