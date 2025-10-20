@@ -543,88 +543,78 @@ if (firm === "HVF Agency") {
   afterHeaderY = introY + 38; // table start
 }
 else if (firm === "Victor Engineering") {
-  // ============================
-  // VICTOR ENGINEERING: PERFORMA INVOICE (boxed layout, single lines)
-  // ============================
+  // Victor Engineering: single outer frame + internal divider lines (no inner boxes)
+  const LINE_W = 0.9;
+  const gap = 10;          // vertical breathing space between strips
+  const subH = 26;         // height of the "Sub" strip
+  const introH = 36;       // height of the intro strip
 
-  // Drawing helpers with a single consistent stroke
-  const LINE_W = 0.9;               // slightly heavier like printed forms
-  const BOX_GAP = 6;                 // gap between stacked boxes to avoid double lines
-  const strokeBox = (x, y, w, h) => { doc.setLineWidth(LINE_W); doc.rect(x, y, w, h); };
-  const vLine = (x, y1, y2) => { doc.setLineWidth(LINE_W); doc.line(x, y1, x, y2); };
-  const hLine = (x1, x2, y) => { doc.setLineWidth(LINE_W); doc.line(x1, y, x2, y); };
-
-  // Title band (top)
+  // Title
   doc.setFont("times", "bold");
   doc.setFontSize(22);
-  doc.text("Victor Engineering", pw / 2, 50, { align: "center" });
+  doc.text("Victor Engineering", pw / 2, 60, { align: "center" });
   doc.setFontSize(14);
-  doc.text("PERFORMA INVOICE", pw / 2, 70, { align: "center" });
+  doc.text("PERFORMA INVOICE", pw / 2, 80, { align: "center" });
 
-  // Outer content frame (kept inside margins)
-  const contentTop = 84;                 // just under the title
-  const contentBottom = ph - 40;         // keep bottom margin clear
-  strokeBox(L, contentTop, contentW, contentBottom - contentTop);
+  // --- Outer frame (just once) ---
+  const frameTop = 92;                 // top of the framed content
+  const frameBottom = ph - 40;         // bottom margin
+  const frameH = frameBottom - frameTop;
 
-  // ───────────────────────────────────────────────────────────────────
-  // HEADER GRID: single framed area, internally divided (no doubles)
-  // left: "To"   | right: meta (Ref/Date/GSTIN)
-  // ───────────────────────────────────────────────────────────────────
-  const headTop = contentTop + 10;
-  const headH   = 90;
-  const headLeft = L + 10;
-  const headRight = R - 10;
+  doc.setLineWidth(LINE_W);
+  doc.rect(L, frameTop, contentW, frameH); // single big rectangle
 
-  // Frame once
-  strokeBox(L + 10, headTop, contentW - 20, headH);
+  // --- Header row lines inside the frame ---
+  const headerH = 86;                  // height of header band
+  const headerBottom = frameTop + headerH;
 
-  // Vertical split inside the header frame
-  const splitX = L + 10 + Math.floor((contentW - 20) * 0.58);
-  vLine(splitX, headTop, headTop + headH);
+  // bottom line of header band
+  doc.line(L, headerBottom, R, headerBottom);
 
-  // Left sub-box content ("To, ...")
+  // vertical split between "To" (left) and meta (right)
+  const splitX = L + contentW * 0.60;
+  doc.line(splitX, frameTop, splitX, headerBottom);
+
+  // Left (To:)
   doc.setFont("times", "normal");
   doc.setFontSize(11);
-  let y = headTop + 18;
-  doc.text("To,", headLeft, y); y += 18;
+  doc.text("To,", L + 10, frameTop + 18);
 
   doc.setFont("times", "bold");
-  doc.text(String(qHeader.customer_name || ""), headLeft, y); y += 16;
-  doc.text(String(qHeader.address || ""), headLeft, y);       y += 16;
-  doc.text(String(qHeader.phone || ""), headLeft, y);
+  doc.text(String(qHeader.customer_name || ""), L + 10, frameTop + 36);
+  doc.text(String(qHeader.address || ""),      L + 10, frameTop + 52);
+  doc.text(String(qHeader.phone || ""),        L + 10, frameTop + 68);
 
-  // Right sub-box (meta)
+  // Right (Ref/Date/GSTIN)
   doc.setFont("times", "normal");
   const rx = splitX + 10;
-  let ry = headTop + 18;
-  doc.text(`Ref No : ${num}`, rx, ry);   ry += 16;
-  doc.text(`Date   : ${dateStr}`, rx, ry); ry += 16;
-  doc.text(`GSTIN  : 18BCYCP9744A1ZA`, rx, ry); // adjust if you have a real value
+  doc.text(`Ref No : ${num}`, rx, frameTop + 20);
+  doc.text(`Date   : ${dateStr}`, rx, frameTop + 36);
+  doc.text(`GSTIN  : 18BCYCP9744A1ZA`, rx, frameTop + 52); // adjust if needed
 
-  // ───────────────────────────────────────────────────────────────────
-  // SUBJECT ROW (single frame)
-  // ───────────────────────────────────────────────────────────────────
-  const subTop = headTop + headH + BOX_GAP;
-  const subH   = 26;
-  strokeBox(L + 10, subTop, contentW - 20, subH);
+  // --- Subject strip (two horizontal lines only) ---
+  const subTop = headerBottom + gap;
+  const subBottom = subTop + subH;
+  doc.line(L, subTop,   R, subTop);
+  doc.line(L, subBottom, R, subBottom);
+
   doc.setFont("times", "normal");
-  doc.text("Sub :  Performa Invoice for Machinery", L + 20, subTop + 17);
+  doc.text("Sub :  Performa Invoice for Machinery", L + 10, subTop + 18);
 
-  // ───────────────────────────────────────────────────────────────────
-  // INTRO ROW (single frame)
-  // ───────────────────────────────────────────────────────────────────
-  const introTop = subTop + subH + BOX_GAP;
-  const introH   = 38;
-  strokeBox(L + 10, introTop, contentW - 20, introH);
-  doc.text("Dear Sir/Madam,", L + 20, introTop + 16);
+  // --- Intro strip (two horizontal lines only) ---
+  const introTop = subBottom + gap;
+  const introBottom = introTop + introH;
+  doc.line(L, introTop,    R, introTop);
+  doc.line(L, introBottom, R, introBottom);
+
+  doc.text("Dear Sir/Madam,", L + 10, introTop + 16);
   doc.text(
     "With reference to your enquiry we are pleased to offer you as under:",
-    L + 20,
-    introTop + 30
+    L + 10, introTop + 30
   );
 
-  // Table must begin AFTER intro frame with a tiny gap (prevents double lines)
-  afterHeaderY = introTop + introH + 4;
+  // Table must start after the intro strip
+  afterHeaderY = introBottom + gap;
 }
 else {
   // Mahabir Hardware Stores (unchanged)
