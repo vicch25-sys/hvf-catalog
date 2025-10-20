@@ -65,7 +65,21 @@ const todayStr = () => {
   return `${dd}/${mm}/${yyyy}`;
 };
 
-/* Create APP/H### by counting existing quotes */
+// Per-firm next number via Supabase RPC (sequence + formatting)
+async function getNextFirmQuoteNumber(firm) {
+  const { data, error } = await supabase.rpc("next_quote_number", { p_firm: firm });
+  if (error) throw error;
+  return data; // e.g. "APP/H004", "VE001", "MH1052"
+}
+
+// (kept for save fallback if needed)
+async function getNextQuoteCode(firmName) {
+  const { data, error } = await supabase.rpc("next_quote_code", { p_firm: firmName });
+  if (error) throw error;
+  return data;
+}
+
+/* Legacy: Create APP/H### by counting existing quotes (fallback only) */
 async function getNextQuoteNumber() {
   const { count, error } = await supabase
     .from("quotes")
@@ -78,16 +92,17 @@ async function getNextQuoteNumber() {
 /* ===== Persist quote UI state ===== */
 const LS_KEY = "quoteState";
 const loadQuoteState = () => {
-  try { return JSON.parse(localStorage.getItem(LS_KEY) || "{}"); }
-  catch { return {}; }
+  try {
+    return JSON.parse(localStorage.getItem(LS_KEY) || "{}");
+  } catch {
+    return {};
+  }
 };
-const saveQuoteState = (s) =>
-  localStorage.setItem(LS_KEY, JSON.stringify(s));
+const saveQuoteState = (s) => localStorage.setItem(LS_KEY, JSON.stringify(s));
 /* ================================= */
 
 /* --- App --- */
 export default function App() {
-
   /*** DATA ***/
   const [items, setItems] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -111,8 +126,8 @@ export default function App() {
   };
 
   // quotation “cart” mode (PIN 9990)
-  const [quoteMode, setQuoteMode] = useState(false);    // true = show qty steppers on catalog
-  const [page, setPage] = useState("catalog");          // "catalog" | "quoteEditor"
+  const [quoteMode, setQuoteMode] = useState(false); // true = show qty steppers on catalog
+  const [page, setPage] = useState("catalog"); // "catalog" | "quoteEditor"
   const enableQuoteMode = () => {
     if (quoteMode) {
       setQuoteMode(false);
@@ -139,30 +154,28 @@ export default function App() {
   const [saving, setSaving] = useState(false);
 
   /* ---------- AUTH ---------- */
-// ⬇️ Put this inside App(), alongside your other useEffects
-useEffect(() => {
-  // ensure today's date is in the editor on mount too
-  setQHeader(h => ({ ...h, date: todayStr() }));
+  useEffect(() => {
+    // ensure today's date is in the editor on mount too
+    setQHeader((h) => ({ ...h, date: todayStr() }));
 
-  function scheduleNextMidnight() {
-    const now = new Date();
-    const next = new Date(now);
-    // fire just after midnight to avoid race conditions
-    next.setDate(now.getDate() + 1);
-    next.setHours(0, 0, 1, 0); // 00:00:01
-    const ms = next.getTime() - now.getTime();
+    function scheduleNextMidnight() {
+      const now = new Date();
+      const next = new Date(now);
+      next.setDate(now.getDate() + 1);
+      next.setHours(0, 0, 1, 0); // 00:00:01
+      const ms = next.getTime() - now.getTime();
 
-    const tid = setTimeout(() => {
-      setQHeader(h => ({ ...h, date: todayStr() })); // roll to new date
-      scheduleNextMidnight(); // schedule again for the next day
-    }, ms);
+      const tid = setTimeout(() => {
+        setQHeader((h) => ({ ...h, date: todayStr() }));
+        scheduleNextMidnight();
+      }, ms);
 
-    return tid;
-  }
+      return tid;
+    }
 
-  const timerId = scheduleNextMidnight();
-  return () => clearTimeout(timerId);
-}, []);
+    const timerId = scheduleNextMidnight();
+    return () => clearTimeout(timerId);
+  }, []);
 
   useEffect(() => {
     const init = async () => {
@@ -220,7 +233,10 @@ useEffect(() => {
     setLoading(false);
   };
   const loadCategories = async () => {
-    const { data } = await supabase.from("categories").select("name").order("name");
+    const { data } = await supabase
+      .from("categories")
+      .select("name")
+      .order("name");
     setCategories((data || []).map((r) => r.name));
   };
   useEffect(() => {
@@ -263,7 +279,11 @@ useEffect(() => {
     setSaving(true);
     try {
       const ext = form.imageFile.name.split(".").pop().toLowerCase();
-      const safeBase = form.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 40);
+      const safeBase = form.name
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .slice(0, 40);
       const filePath = `products/${Date.now()}-${safeBase}.${ext}`;
       const { error: upErr } = await supabase.storage
         .from("images")
@@ -288,10 +308,18 @@ useEffect(() => {
         specs: form.specs || "",
         image_url,
       };
-      const { error: insErr } = await supabase.from("machines").insert(payload);
+      const { error: insErr } = await supabase
+        .from("machines")
+        .insert(payload);
       if (insErr) throw new Error("INSERT: " + insErr.message);
       setForm({
-        name: "", category: "", mrp: "", sell_price: "", cost_price: "", specs: "", imageFile: null,
+        name: "",
+        category: "",
+        mrp: "",
+        sell_price: "",
+        cost_price: "",
+        specs: "",
+        imageFile: null,
       });
       await loadMachines();
       alert("Product added ✅");
@@ -307,11 +335,21 @@ useEffect(() => {
   const [cart, setCart] = useState({});
   const cartList = Object.values(cart);
   const cartCount = cartList.reduce((a, r) => a + (r.qty || 0), 0);
-  const cartSubtotal = cartList.reduce((a, r) => a + (r.qty || 0) * (r.unit || 0), 0);
+  const cartSubtotal = cartList.reduce(
+    (a, r) => a + (r.qty || 0) * (r.unit || 0),
+    0
+  );
 
   const inc = (m) =>
     setCart((c) => {
-      const prev = c[m.id] || { id: m.id, name: m.name, specs: m.specs || "", unit: Number(m.mrp || 0), qty: 0 };
+      const prev =
+        c[m.id] || {
+          id: m.id,
+          name: m.name,
+          specs: m.specs || "",
+          unit: Number(m.mrp || 0),
+          qty: 0,
+        };
       return { ...c, [m.id]: { ...prev, qty: prev.qty + 1 } };
     });
   const dec = (m) =>
@@ -328,7 +366,9 @@ useEffect(() => {
 
   // Create a new editable blank line item (not in catalog)
   const addBlankRow = () => {
-    const id = `custom-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const id = `custom-${Date.now()}-${Math.random()
+      .toString(36)
+      .slice(2, 6)}`;
     setCart((c) => ({
       ...c,
       [id]: { id, name: "", specs: "", unit: 0, qty: 1 },
@@ -358,19 +398,22 @@ useEffect(() => {
 
   // --- Persist quote state in localStorage so refresh won't log out ---
   useEffect(() => {
-  const saved = loadQuoteState ? loadQuoteState() : JSON.parse(localStorage.getItem("quoteState") || "{}");
-  try {
-    if (saved.cart) setCart(saved.cart);
-    if (saved.qHeader) setQHeader(saved.qHeader);
-    if (saved.page) setPage(saved.page);
-    if (typeof saved.quoteMode === "boolean") setQuoteMode(saved.quoteMode);
-  } catch (e) {
-    console.error("Failed to restore quote state", e);
-  }
+    const saved = loadQuoteState
+      ? loadQuoteState()
+      : JSON.parse(localStorage.getItem("quoteState") || "{}");
+    try {
+      if (saved.cart) setCart(saved.cart);
+      if (saved.qHeader) setQHeader(saved.qHeader);
+      if (saved.page) setPage(saved.page);
+      if (typeof saved.quoteMode === "boolean") setQuoteMode(saved.quoteMode);
+      if (saved.firm) setFirm(saved.firm);
+    } catch (e) {
+      console.error("Failed to restore quote state", e);
+    }
 
-  // ⬇️ always make today the active date in the editor
-  forceTodayDate(setQHeader); // << add this
-}, []);
+    // always make today the active date in the editor
+    forceTodayDate(setQHeader);
+  }, []);
 
   // whenever cart, qHeader, page, quoteMode, or firm changes, save them
   useEffect(() => {
@@ -378,28 +421,37 @@ useEffect(() => {
   }, [cart, qHeader, page, quoteMode, firm]);
 
   const goToEditor = async () => {
-  if (cartList.length === 0) return alert("Add at least 1 item to the quote.");
+    if (cartList.length === 0)
+      return alert("Add at least 1 item to the quote.");
 
-  // ⬇️ always stamp today's date when opening the editor
-  forceTodayDate(setQHeader); // << add this
+    // always stamp today's date when opening the editor
+    forceTodayDate(setQHeader);
 
-  if (!qHeader.number) {
-    try {
-      const num = await getNextQuoteNumber();
-      setQHeader((h) => ({ ...h, number: num, date: todayStr() }));
-    } catch {
-      setQHeader((h) => ({ ...h, number: `APP/H${Date.now().toString().slice(-3)}`, date: todayStr() }));
+    if (!qHeader.number) {
+      try {
+        const num = await getNextFirmQuoteNumber(firm); // firm-specific sequence from Supabase
+        setQHeader((h) => ({ ...h, number: num, date: todayStr() }));
+      } catch (e) {
+        console.error(e);
+        // very last-resort fallback if RPC fails
+        const fallback =
+          firm === "Mahabir Hardware Stores"
+            ? `MH${Date.now().toString().slice(-4)}`
+            : firm === "Victor Engineering"
+            ? `VE${Date.now().toString().slice(-3)}`
+            : `APP/H${Date.now().toString().slice(-3)}`;
+        setQHeader((h) => ({ ...h, number: fallback, date: todayStr() }));
+      }
     }
-  }
-  setPage("quoteEditor");
-};
+    setPage("quoteEditor");
+  };
 
   const backToCatalog = () => setPage("catalog");
 
   /* ---------- SAVE USING YOUR SCHEMA (quotes + quote_items) ---------- */
   const saveQuote = async () => {
     try {
-      const number = qHeader.number || (await getNextQuoteNumber());
+      const number = qHeader.number || (await getNextQuoteCode(firm));
       const { data: qins, error: qerr } = await supabase
         .from("quotes")
         .insert({
@@ -420,7 +472,9 @@ useEffect(() => {
         mrp: r.unit,
       }));
       if (rows.length) {
-        const { error: ierr } = await supabase.from("quote_items").insert(rows);
+        const { error: ierr } = await supabase
+          .from("quote_items")
+          .insert(rows);
         if (ierr) throw ierr;
       }
       setQHeader((h) => ({ ...h, number }));
@@ -443,7 +497,11 @@ useEffect(() => {
     setSaved(data || []);
   };
   const editSaved = async (number) => {
-    const { data: q } = await supabase.from("quotes").select("id,number,customer_name,phone").eq("number", number).maybeSingle();
+    const { data: q } = await supabase
+      .from("quotes")
+      .select("id,number,customer_name,phone")
+      .eq("number", number)
+      .maybeSingle();
     if (!q) return;
     const { data: lines } = await supabase
       .from("quote_items")
@@ -453,7 +511,13 @@ useEffect(() => {
     const newCart = {};
     (lines || []).forEach((ln, idx) => {
       const id = `saved-${idx}`;
-      newCart[id] = { id, name: ln.name, specs: ln.specs || "", unit: Number(ln.mrp || 0), qty: Number(ln.qty || 0) };
+      newCart[id] = {
+        id,
+        name: ln.name,
+        specs: ln.specs || "",
+        unit: Number(ln.mrp || 0),
+        qty: Number(ln.qty || 0),
+      };
     });
     setCart(newCart);
     setQHeader((h) => ({
@@ -468,417 +532,483 @@ useEffect(() => {
   };
 
   /* ---------- CLEAN PDF (NOT web print) ---------- */
-const exportPDF = async () => {
-  if (cartList.length === 0) return alert("Nothing to print.");
+  const exportPDF = async () => {
+    if (cartList.length === 0) return alert("Nothing to print.");
 
-  // Always use today for editor + PDF
-  const dateStr = todayStr();
-  setQHeader((h) => ({ ...h, date: dateStr }));
+    // Always use today for editor + PDF
+    const dateStr = todayStr();
+    setQHeader((h) => ({ ...h, date: dateStr }));
 
-  // ensure quote number
-  const num = qHeader.number || (await getNextQuoteNumber());
-  setQHeader((h) => ({ ...h, number: num }));
+    // ensure firm-specific quote number
+    const num =
+      qHeader.number || (await getNextFirmQuoteNumber(firm));
+    setQHeader((h) => ({ ...h, number: num }));
 
-  const doc = new jsPDF({ unit: "pt", format: "a4" });
-  const pw = doc.internal.pageSize.getWidth();
-  const ph = doc.internal.pageSize.getHeight();
-  const margin = 40;
-  const L = margin;
-  const R = pw - margin;
-  const contentW = R - L;
+    const doc = new jsPDF({ unit: "pt", format: "a4" });
+    const pw = doc.internal.pageSize.getWidth();
+    const ph = doc.internal.pageSize.getHeight();
+    const margin = 40;
+    const L = margin;
+    const R = pw - margin;
+    const contentW = R - L;
 
-  // -------------------------------
-  // BRANDING / HEADER AREA
-  // -------------------------------
-  let afterHeaderY;
+    // -------------------------------
+    // BRANDING / HEADER AREA
+    // -------------------------------
+    let afterHeaderY;
 
-  if (firm === "HVF Agency") {
-    // HVF: logo + QUOTATION (unchanged)
-    let logoBottom = 24;
-    try {
-      const img = new Image();
-      img.crossOrigin = "anonymous";
-      img.src = "/hvf-logo.png";
-      await new Promise((r) => (img.onload = r));
-      const w = 110;
-      const h = (img.height * w) / img.width;
-      const x = (pw - w) / 2;
-      const y = 24;
-      doc.addImage(img, "PNG", x, y, w, h);
-      logoBottom = y + h;
-    } catch {}
+    if (firm === "HVF Agency") {
+      // HVF: logo + QUOTATION (unchanged)
+      let logoBottom = 24;
+      try {
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.src = "/hvf-logo.png";
+        await new Promise((r) => (img.onload = r));
+        const w = 110;
+        const h = (img.height * w) / img.width;
+        const x = (pw - w) / 2;
+        const y = 24;
+        doc.addImage(img, "PNG", x, y, w, h);
+        logoBottom = y + h;
+      } catch {}
 
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(16);
-    doc.text("QUOTATION", pw / 2, logoBottom + 28, { align: "center" });
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(16);
+      doc.text("QUOTATION", pw / 2, logoBottom + 28, { align: "center" });
 
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(10);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
 
-    // Left block (To)
-    let y0 = logoBottom + 40;
-    doc.setFontSize(11);
-    doc.text("To,", L, y0); y0 += 18;
+      // Left block (To)
+      let y0 = logoBottom + 40;
+      doc.setFontSize(11);
+      doc.text("To,", L, y0);
+      y0 += 18;
 
-    doc.setFont("helvetica", "bold");
-    doc.text(String(qHeader.customer_name || ""), L, y0); y0 += 16;
-    doc.text(String(qHeader.address || ""), L, y0);       y0 += 16;
-    doc.text(String(qHeader.phone || ""), L, y0);
+      doc.setFont("helvetica", "bold");
+      doc.text(String(qHeader.customer_name || ""), L, y0);
+      y0 += 16;
+      doc.text(String(qHeader.address || ""), L, y0);
+      y0 += 16;
+      doc.text(String(qHeader.phone || ""), L, y0);
 
-    // Right meta
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(10);
-    doc.text(`Ref: ${num}`, R, logoBottom + 40, { align: "right" });
-    doc.text(`Date: ${dateStr}`, R, logoBottom + 55, { align: "right" });
+      // Right meta (HVF keeps "Ref:")
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.text(`Ref: ${num}`, R, logoBottom + 40, { align: "right" });
+      doc.text(`Date: ${dateStr}`, R, logoBottom + 55, { align: "right" });
 
-    // Intro
-    const introY = y0 + 28;
-    doc.setFontSize(11);
-    doc.text("Dear Sir/Madam,", L, introY);
-    doc.text(
-      "With reference to your enquiry we are pleased to offer you as under:",
-      L, introY + 16
-    );
+      // Intro
+      const introY = y0 + 28;
+      doc.setFontSize(11);
+      doc.text("Dear Sir/Madam,", L, introY);
+      doc.text(
+        "With reference to your enquiry we are pleased to offer you as under:",
+        L,
+        introY + 16
+      );
 
-    afterHeaderY = introY + 38; // table start
-  }
-  else if (firm === "Victor Engineering") {
-    // Victor Engineering — remove the 6 extra lines the arrows pointed to
-    const LINE_W = 0.9;
-    const gap = 10;     // vertical spacing between strips
-    const subH = 26;
-    const introH = 36;
+      afterHeaderY = introY + 38; // table start
+    } else if (firm === "Victor Engineering") {
+      // Victor Engineering — single outer frame + divider lines (no inner boxes)
+      const LINE_W = 0.9;
+      const gap = 10; // vertical spacing between strips
+      const subH = 26;
+      const introH = 36;
 
-    // Title
-    doc.setFont("times", "bold");
-    doc.setFontSize(22);
-    doc.text("Victor Engineering", pw / 2, 60, { align: "center" });
-    doc.setFontSize(14);
-    doc.text("PERFORMA INVOICE", pw / 2, 80, { align: "center" });
+      // Title
+      doc.setFont("times", "bold");
+      doc.setFontSize(22);
+      doc.text("Victor Engineering", pw / 2, 60, { align: "center" });
+      doc.setFontSize(14);
+      doc.text("PERFORMA INVOICE", pw / 2, 80, { align: "center" });
 
-    // Outer frame (keep)
-    const frameTop = 92;
-    const frameBottom = ph - 40;
-    const frameH = frameBottom - frameTop;
-    doc.setLineWidth(LINE_W);
-    doc.rect(L, frameTop, contentW, frameH);
+      // Outer frame
+      const frameTop = 92;
+      const frameBottom = ph - 40;
+      const frameH = frameBottom - frameTop;
+      doc.setLineWidth(LINE_W);
+      doc.rect(L, frameTop, contentW, frameH);
 
-    // Header band: one bottom line + one vertical split only
-    const headerH = 86;
-    const headerBottom = frameTop + headerH;
-    const splitX = L + contentW * 0.60;
+      // Header band: bottom line + vertical split only
+      const headerH = 86;
+      const headerBottom = frameTop + headerH;
+      const splitX = L + contentW * 0.6;
 
-    doc.line(L, headerBottom, R, headerBottom);
-    doc.line(splitX, frameTop, splitX, headerBottom);
+      doc.line(L, headerBottom, R, headerBottom);
+      doc.line(splitX, frameTop, splitX, headerBottom);
 
-    // Left (To:)
-    doc.setFont("times", "normal");
-    doc.setFontSize(11);
-    doc.text("To,", L + 10, frameTop + 18);
-    doc.setFont("times", "bold");
-    doc.text(String(qHeader.customer_name || ""), L + 10, frameTop + 36);
-    doc.text(String(qHeader.address || ""),      L + 10, frameTop + 52);
-    doc.text(String(qHeader.phone || ""),        L + 10, frameTop + 68);
+      // Left (To:)
+      doc.setFont("times", "normal");
+      doc.setFontSize(11);
+      doc.text("To,", L + 10, frameTop + 18);
+      doc.setFont("times", "bold");
+      doc.text(String(qHeader.customer_name || ""), L + 10, frameTop + 36);
+      doc.text(String(qHeader.address || ""), L + 10, frameTop + 52);
+      doc.text(String(qHeader.phone || ""), L + 10, frameTop + 68);
 
-    // Right (Ref/Date/GSTIN)
-    doc.setFont("times", "normal");
-    const rx = splitX + 10;
-    doc.text(`Ref No : ${num}`,   rx, frameTop + 20);
-    doc.text(`Date   : ${dateStr}`, rx, frameTop + 36);
-    doc.text(`GSTIN  : 18BCYCP9744A1ZA`, rx, frameTop + 52); // update if needed
+      // Right (Ref/Date/GSTIN)
+      doc.setFont("times", "normal");
+      const rx = splitX + 10;
+      doc.text(`Ref No : ${num}`, rx, frameTop + 20);
+      doc.text(`Date   : ${dateStr}`, rx, frameTop + 36);
+      doc.text(`GSTIN  : 18BCYCP9744A1ZA`, rx, frameTop + 52); // update if needed
 
-    // Subject strip — ONE horizontal line on top (remove the bottom line)
-    const subTop = headerBottom + gap;
-    doc.line(L, subTop, R, subTop);                // ← keep only this line
-    doc.setFont("times", "normal");
-    doc.text("Sub :  Performa Invoice for Machinery", L + 10, subTop + 18);
+      // Subject strip — single top line
+      const subTop = headerBottom + gap;
+      doc.line(L, subTop, R, subTop);
+      doc.setFont("times", "normal");
+      doc.text("Sub :  Performa Invoice for Machinery", L + 10, subTop + 18);
 
-    // Intro strip — ONE horizontal line on top (remove the bottom line)
-    const introTop = subTop + subH + gap;
-    doc.line(L, introTop, R, introTop);            // ← keep only this line
-    doc.text("Dear Sir/Madam,", L + 10, introTop + 16);
-    doc.text(
-      "With reference to your enquiry we are pleased to offer you as under:",
-      L + 10, introTop + 30
-    );
+      // Intro strip — single top line
+      const introTop = subTop + subH + gap;
+      doc.line(L, introTop, R, introTop);
+      doc.text("Dear Sir/Madam,", L + 10, introTop + 16);
+      doc.text(
+        "With reference to your enquiry we are pleased to offer you as under:",
+        L + 10,
+        introTop + 30
+      );
 
-    // Table starts after intro block (no double line with table header)
-    afterHeaderY = introTop + introH;
-  }
-  else {
-    // Mahabir Hardware Stores (unchanged)
-    doc.setFont("courier", "bold");
-    doc.setFontSize(20);
-    doc.text("Mahabir Hardware Stores", pw / 2, 48, { align: "center" });
+      // Table starts after intro block
+      afterHeaderY = introTop + introH;
+    } else {
+      // Mahabir Hardware Stores
+      doc.setFont("courier", "bold");
+      doc.setFontSize(20);
+      doc.text("Mahabir Hardware Stores", pw / 2, 48, { align: "center" });
 
-    doc.setFont("courier", "bold");
-    doc.setFontSize(16);
-    doc.text("QUOTATION", pw / 2, 74, { align: "center" });
+      doc.setFont("courier", "bold");
+      doc.setFontSize(16);
+      doc.text("QUOTATION", pw / 2, 74, { align: "center" });
 
-    doc.setFont("courier", "normal");
-    doc.setFontSize(10);
+      doc.setFont("courier", "normal");
+      doc.setFontSize(10);
 
-    let y0 = 92;
-    doc.setFontSize(11);
-    doc.text("To,", L, y0); y0 += 18;
+      let y0 = 92;
+      doc.setFontSize(11);
+      doc.text("To,", L, y0);
+      y0 += 18;
 
-    doc.setFont("courier", "bold");
-    doc.text(String(qHeader.customer_name || ""), L, y0); y0 += 16;
-    doc.text(String(qHeader.address || ""), L, y0);       y0 += 16;
-    doc.text(String(qHeader.phone || ""), L, y0);
+      doc.setFont("courier", "bold");
+      doc.text(String(qHeader.customer_name || ""), L, y0);
+      y0 += 16;
+      doc.text(String(qHeader.address || ""), L, y0);
+      y0 += 16;
+      doc.text(String(qHeader.phone || ""), L, y0);
 
-    doc.setFont("courier", "normal");
-    doc.setFontSize(10);
-    doc.text(`Ref: ${num}`, R, 92, { align: "right" });
-    doc.text(`Date: ${dateStr}`, R, 107, { align: "right" });
+      doc.setFont("courier", "normal");
+      doc.setFontSize(10);
+      // Mahabir label: Quotation Number
+      doc.text(`Quotation Number: ${num}`, R, 92, { align: "right" });
+      doc.text(`Date: ${dateStr}`, R, 107, { align: "right" });
 
-    const introY = y0 + 28;
-    doc.setFontSize(11);
-    doc.text("Dear Sir/Madam,", L, introY);
-    doc.text(
-      "With reference to your enquiry we are pleased to offer you as under:",
-      L, introY + 16
-    );
+      const introY = y0 + 28;
+      doc.setFontSize(11);
+      doc.text("Dear Sir/Madam,", L, introY);
+      doc.text(
+        "With reference to your enquiry we are pleased to offer you as under:",
+        L,
+        introY + 16
+      );
 
-    afterHeaderY = introY + 38;
-  }
-
-  // -------------------------------
-  // ITEMS TABLE (all firms)
-  // -------------------------------
-  const body = cartList.map((r, i) => [
-    String(i + 1),
-    `${r.name || ""}${r.specs ? `\n(${r.specs})` : ""}`,
-    String(r.qty || 0),
-    inr(r.unit || 0),
-    inr((r.qty || 0) * (r.unit || 0)),
-  ]);
-
-  const colSl = 28;
-  const colQty = 40;
-  const colUnit = 90;
-  const colTotal = 110;
-  const colDesc = Math.max(120, contentW - (colSl + colQty + colUnit + colTotal));
-
-  const headFill =
-    firm === "Victor Engineering" ? [220, 235, 255] :
-    firm === "Mahabir Hardware Stores" ? [225, 248, 225] :
-    [230, 230, 230];
-
-  const tableFont =
-    firm === "Victor Engineering" ? "times" :
-    firm === "Mahabir Hardware Stores" ? "courier" :
-    "helvetica";
-
-  autoTable(doc, {
-    startY: afterHeaderY,
-    head: [["Sl.", "Description", "Qty", "Unit Price", "Total (Incl. GST)"]],
-    body,
-    styles: { font: tableFont, fontSize: 10, cellPadding: 6, overflow: "linebreak", textColor: [0, 0, 0] },
-    headStyles: { fillColor: headFill, textColor: [0, 0, 0], fontStyle: "bold" },
-    columnStyles: {
-      0: { cellWidth: colSl,   halign: "center" },
-      1: { cellWidth: colDesc },
-      2: { cellWidth: colQty,  halign: "center" },
-      3: { cellWidth: colUnit, halign: "right" },
-      4: { cellWidth: colTotal,halign: "right" },
-    },
-    margin: { left: margin, right: margin },
-    tableLineColor: [200, 200, 200],
-    tableLineWidth: firm === "Mahabir Hardware Stores" ? 0.7 : 0.5,
-    theme: "grid",
-
-    // preserve your two-line Description + custom 2nd line
-    didParseCell: (data) => {
-      if (data.section !== "body") return;
-      if (data.column.index !== 1) return;
-      const raw = (data.cell.raw ?? "").toString();
-      const nl = raw.indexOf("\n(");
-      if (nl === -1) return;
-      const name  = raw.slice(0, nl);
-      const specs = raw.slice(nl);
-      data.cell.text = [name, " "];
-      data.cell._specs = specs;
-    },
-
-    didDrawCell: (data) => {
-      if (data.section !== "body") return;
-      if (data.column.index !== 1) return;
-      const specs = data.cell && data.cell._specs;
-      if (!specs) return;
-
-      const cellPad = (side) => {
-        if (typeof data.cell.padding === "function") return data.cell.padding(side);
-        const cp = data.cell.styles?.cellPadding;
-        if (typeof cp === "number") return cp;
-        if (cp && typeof cp === "object") return cp[side] ?? 6;
-        return 6;
-      };
-      const padLeft  = cellPad("left");
-      const padRight = cellPad("right");
-      const padTop   = cellPad("top");
-
-      const x = data.cell.x + padLeft;
-      const fsMain = (data.row.styles && data.row.styles.fontSize) || 10;
-      const lineH  = fsMain * 1.15;
-      const specsY = data.cell.y + padTop + lineH;
-
-      const maxW    = data.cell.width - padLeft - padRight;
-      const wrapped = doc.splitTextToSize(specs, maxW);
-
-      const prevSize = doc.getFontSize();
-      doc.setFontSize(prevSize * 0.85);
-      doc.setTextColor(120);
-      doc.text(wrapped, x, specsY);
-      doc.setTextColor(0, 0, 0);
-      doc.setFontSize(prevSize);
+      afterHeaderY = introY + 38;
     }
-  });
 
-  // -------------------------------
-  // TOTAL LINE
-  // -------------------------------
-  const at = doc.lastAutoTable || null;
-  const totalsRightX = R - 10;
-  let totalsY = (at?.finalY ?? afterHeaderY) + 18;
+    // -------------------------------
+    // ITEMS TABLE (all firms)
+    // -------------------------------
+    const body = cartList.map((r, i) => [
+      String(i + 1),
+      `${r.name || ""}${r.specs ? `\n(${r.specs})` : ""}`,
+      String(r.qty || 0),
+      inr(r.unit || 0),
+      inr((r.qty || 0) * (r.unit || 0)),
+    ]);
 
-  if (firm === "Victor Engineering") {
-    // Remove the extra separator line above total (arrowed) – just the text
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(12);
-    doc.text(`Total = Rs ${inr(cartSubtotal)}`, totalsRightX, totalsY, { align: "right" });
-  } else {
-    // HVF & Mahabir keep your ₹ style
-    try {
-      await loadRupeeFont(doc);
-      doc.setFont("NotoSans", "bold");
-      doc.setFontSize(12);
-      const RUPEE = String.fromCharCode(0x20B9);
-      doc.text(`Total: ${RUPEE} ${inr(cartSubtotal)}`, totalsRightX, totalsY, { align: "right" });
-    } catch {
+    const colSl = 28;
+    const colQty = 40;
+    const colUnit = 90;
+    const colTotal = 110;
+    const colDesc = Math.max(
+      120,
+      contentW - (colSl + colQty + colUnit + colTotal)
+    );
+
+    const headFill =
+      firm === "Victor Engineering"
+        ? [220, 235, 255]
+        : firm === "Mahabir Hardware Stores"
+        ? [225, 248, 225]
+        : [230, 230, 230];
+
+    const tableFont =
+      firm === "Victor Engineering"
+        ? "times"
+        : firm === "Mahabir Hardware Stores"
+        ? "courier"
+        : "helvetica";
+
+    autoTable(doc, {
+      startY: afterHeaderY,
+      head: [["Sl.", "Description", "Qty", "Unit Price", "Total (Incl. GST)"]],
+      body,
+      styles: {
+        font: tableFont,
+        fontSize: 10,
+        cellPadding: 6,
+        overflow: "linebreak",
+        textColor: [0, 0, 0],
+      },
+      headStyles: { fillColor: headFill, textColor: [0, 0, 0], fontStyle: "bold" },
+      columnStyles: {
+        0: { cellWidth: colSl, halign: "center" },
+        1: { cellWidth: colDesc },
+        2: { cellWidth: colQty, halign: "center" },
+        3: { cellWidth: colUnit, halign: "right" },
+        4: { cellWidth: colTotal, halign: "right" },
+      },
+      margin: { left: margin, right: margin },
+      tableLineColor: [200, 200, 200],
+      tableLineWidth: firm === "Mahabir Hardware Stores" ? 0.7 : 0.5,
+      theme: "grid",
+
+      // preserve your two-line Description + custom 2nd line
+      didParseCell: (data) => {
+        if (data.section !== "body") return;
+        if (data.column.index !== 1) return;
+        const raw = (data.cell.raw ?? "").toString();
+        const nl = raw.indexOf("\n(");
+        if (nl === -1) return;
+        const name = raw.slice(0, nl);
+        const specs = raw.slice(nl);
+        data.cell.text = [name, " "];
+        data.cell._specs = specs;
+      },
+
+      didDrawCell: (data) => {
+        if (data.section !== "body") return;
+        if (data.column.index !== 1) return;
+        const specs = data.cell && data.cell._specs;
+        if (!specs) return;
+
+        const cellPad = (side) => {
+          if (typeof data.cell.padding === "function")
+            return data.cell.padding(side);
+          const cp = data.cell.styles?.cellPadding;
+          if (typeof cp === "number") return cp;
+          if (cp && typeof cp === "object") return cp[side] ?? 6;
+          return 6;
+        };
+        const padLeft = cellPad("left");
+        const padRight = cellPad("right");
+        const padTop = cellPad("top");
+
+        const x = data.cell.x + padLeft;
+        const fsMain = (data.row.styles && data.row.styles.fontSize) || 10;
+        const lineH = fsMain * 1.15;
+        const specsY = data.cell.y + padTop + lineH;
+
+        const maxW = data.cell.width - padLeft - padRight;
+        const wrapped = doc.splitTextToSize(specs, maxW);
+
+        const prevSize = doc.getFontSize();
+        doc.setFontSize(prevSize * 0.85);
+        doc.setTextColor(120);
+        doc.text(wrapped, x, specsY);
+        doc.setTextColor(0, 0, 0);
+        doc.setFontSize(prevSize);
+      },
+    });
+
+    // -------------------------------
+    // TOTAL LINE
+    // -------------------------------
+    const at = doc.lastAutoTable || null;
+    const totalsRightX = R - 10;
+    let totalsY = (at?.finalY ?? afterHeaderY) + 18;
+
+    if (firm === "Victor Engineering") {
+      // Just the text (no extra separator line)
       doc.setFont("helvetica", "bold");
       doc.setFontSize(12);
-      doc.text(`Total: Rs ${inr(cartSubtotal)}`, totalsRightX, totalsY, { align: "right" });
-    }
-  }
-
-  // -------------------------------
-  // TERMS & BANK
-  // -------------------------------
-  const ty = totalsY + 28;
-
-  if (firm === "Victor Engineering") {
-    // Keep TERMS box, remove BANK rectangle (2 arrowed lines)
-    const termsH = 110;
-
-    // TERMS rectangle (kept)
-    doc.setDrawColor(90);
-    doc.setLineWidth(0.9);
-    doc.rect(L, ty, contentW, termsH);
-
-    doc.setFont("times", "bold");
-    doc.setFontSize(11);
-    doc.text("Terms & Conditions", L + 10, ty + 16);
-
-    doc.setFont("times", "normal");
-    doc.setFontSize(10);
-    doc.text(
-      [
-        "Price will be including GST % as applicable.",
-        "This Performa Invoice is valid for 15 days only.",
-        "Delivery ex-stock/2 weeks.",
-        "Goods once sold cannot be taken back."
-      ],
-      L + 10,
-      ty + 34
-    );
-
-    // BANK section — NO rectangle (removes the two extra lines)
-    const bankTop = ty + termsH + 10;
-    doc.setFont("times", "bold");
-    doc.setFontSize(11);
-    doc.text("BANK DETAILS", L + 10, bankTop + 16);
-
-    doc.setFont("times", "normal");
-    doc.setFontSize(10);
-    doc.text(
-  [
-    "M/S VICTOR ENGINEERING",
-    "Axis Bank (Moran, 785670)",
-    "Current Account",
-    "A/C No: 921020019081364",
-    "IFSC: UTIB0003701",
-  ],
-  L + 10,
-  bankTop + 34
-);
-
-    // reset draw defaults
-    doc.setDrawColor(0);
-    doc.setLineWidth(0.5);
-  } else {
-    // HVF & Mahabir: unchanged
-    doc.setFont(tableFont, "bold");
-    doc.setFontSize(11);
-    doc.text("Terms & Conditions:", L, ty, { underline: true });
-
-    doc.setFont(tableFont, "normal");
-    doc.setFontSize(10);
-    doc.text(
-      [
-        "This quotation is valid for one month from the date of issue.",
-        "Delivery is subject to stock availability and may take up to 2 weeks.",
-        "Goods once sold are non-returnable and non-exchangeable.",
-        "",
-        "Yours Faithfully",
-        "HVF Agency",
-        "9957239143 / 9954425780",
-        "GST: 18AFCPC4260P1ZB",
-        "",
-      ],
-      L,
-      ty + 16
-    );
-
-    doc.setFont(tableFont, "bold");
-    doc.text("BANK DETAILS", L, ty + 120);
-
-    doc.setFont(tableFont, "normal");
-    let bankLines = [];
-    if (firm === "HVF Agency") {
-      bankLines = [
-        "HVF AGENCY",
-        "ICICI BANK (Moran Branch)",
-        "A/C No - 199505500412",
-        "IFSC Code - ICIC0001995",
-      ];
+      doc.text(`Total = Rs ${inr(cartSubtotal)}`, totalsRightX, totalsY, {
+        align: "right",
+      });
     } else {
-      bankLines = [
-        "MAHABIR HARDWARE STORES",
-        "SBI (Moranhat Branch)",
-        "A/C No - 302187654321",
-        "IFSC Code - SBIN0001995",
-      ];
+      // HVF & Mahabir keep ₹ style
+      try {
+        await loadRupeeFont(doc);
+        doc.setFont("NotoSans", "bold");
+        doc.setFontSize(12);
+        const RUPEE = String.fromCharCode(0x20b9);
+        doc.text(`Total: ${RUPEE} ${inr(cartSubtotal)}`, totalsRightX, totalsY, {
+          align: "right",
+        });
+      } catch {
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(12);
+        doc.text(`Total: Rs ${inr(cartSubtotal)}`, totalsRightX, totalsY, {
+          align: "right",
+        });
+      }
     }
-    doc.text(bankLines, L, ty + 136);
-  }
 
-  // Done — open in new tab
-  window.open(doc.output("bloburl"), "_blank");
-};
+    // -------------------------------
+    // TERMS & BANK
+    // -------------------------------
+    const ty = totalsY + 28;
+
+    if (firm === "Victor Engineering") {
+      // Keep TERMS box, BANK as text only (no rectangle)
+      const termsH = 110;
+
+      // TERMS rectangle (kept)
+      doc.setDrawColor(90);
+      doc.setLineWidth(0.9);
+      doc.rect(L, ty, contentW, termsH);
+
+      doc.setFont("times", "bold");
+      doc.setFontSize(11);
+      doc.text("Terms & Conditions", L + 10, ty + 16);
+
+      doc.setFont("times", "normal");
+      doc.setFontSize(10);
+      doc.text(
+        [
+          "Price will be including GST % as applicable.",
+          "This Performa Invoice is valid for 15 days only.",
+          "Delivery ex-stock/2 weeks.",
+          "Goods once sold cannot be taken back.",
+        ],
+        L + 10,
+        ty + 34
+      );
+
+      // BANK section — NO rectangle
+      const bankTop = ty + termsH + 10;
+      doc.setFont("times", "bold");
+      doc.setFontSize(11);
+      doc.text("BANK DETAILS", L + 10, bankTop + 16);
+
+      doc.setFont("times", "normal");
+      doc.setFontSize(10);
+      doc.text(
+        [
+          "M/S VICTOR ENGINEERING",
+          "Axis Bank (Moran, 785670)",
+          "Current Account",
+          "A/C No: 921020019081364",
+          "IFSC: UTIB0003701",
+        ],
+        L + 10,
+        bankTop + 34
+      );
+
+      // reset draw defaults
+      doc.setDrawColor(0);
+      doc.setLineWidth(0.5);
+    } else {
+      // HVF & Mahabir: unchanged
+      const tableFontLocal =
+        firm === "Mahabir Hardware Stores" ? "courier" : "helvetica";
+
+      doc.setFont(tableFontLocal, "bold");
+      doc.setFontSize(11);
+      doc.text("Terms & Conditions:", L, ty, { underline: true });
+
+      doc.setFont(tableFontLocal, "normal");
+      doc.setFontSize(10);
+      doc.text(
+        [
+          "This quotation is valid for one month from the date of issue.",
+          "Delivery is subject to stock availability and may take up to 2 weeks.",
+          "Goods once sold are non-returnable and non-exchangeable.",
+          "",
+          "Yours Faithfully",
+          firm === "Mahabir Hardware Stores" ? "Mahabir Hardware Stores" : "HVF Agency",
+          firm === "Mahabir Hardware Stores"
+            ? "—"
+            : "9957239143 / 9954425780",
+          firm === "Mahabir Hardware Stores" ? "GST: —" : "GST: 18AFCPC4260P1ZB",
+          "",
+        ],
+        L,
+        ty + 16
+      );
+
+      doc.setFont(tableFontLocal, "bold");
+      doc.text("BANK DETAILS", L, ty + 120);
+
+      doc.setFont(tableFontLocal, "normal");
+      let bankLines = [];
+      if (firm === "HVF Agency") {
+        bankLines = [
+          "HVF AGENCY",
+          "ICICI BANK (Moran Branch)",
+          "A/C No - 199505500412",
+          "IFSC Code - ICIC0001995",
+        ];
+      } else {
+        bankLines = [
+          "MAHABIR HARDWARE STORES",
+          "SBI (Moranhat Branch)",
+          "A/C No - 302187654321",
+          "IFSC Code - SBIN0001995",
+        ];
+      }
+      doc.text(bankLines, L, ty + 136);
+    }
+
+    // Done — open in new tab
+    window.open(doc.output("bloburl"), "_blank");
+  };
 
   /*** UI ***/
   return (
-    <div style={{ fontFamily: "Arial, sans-serif", minHeight: "100vh", background: "linear-gradient(to bottom right,#f8f9fa,#eef2f7)" }}>
+    <div
+      style={{
+        fontFamily: "Arial, sans-serif",
+        minHeight: "100vh",
+        background: "linear-gradient(to bottom right,#f8f9fa,#eef2f7)",
+      }}
+    >
       {/* top-right Login menu */}
-      <div style={{ display: "flex", justifyContent: "flex-end", padding: "8px 16px" }}>
+      <div
+        style={{ display: "flex", justifyContent: "flex-end", padding: "8px 16px" }}
+      >
         <details>
-          <summary style={{ cursor: "pointer", padding: "6px 12px", borderRadius: 6, background: "#f2f2f2" }}>Login</summary>
-          <div style={{ position: "absolute", right: 16, marginTop: 6, background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8, padding: 8, minWidth: 210, boxShadow: "0 8px 24px rgba(0,0,0,.08)" }}>
+          <summary
+            style={{
+              cursor: "pointer",
+              padding: "6px 12px",
+              borderRadius: 6,
+              background: "#f2f2f2",
+            }}
+          >
+            Login
+          </summary>
+          <div
+            style={{
+              position: "absolute",
+              right: 16,
+              marginTop: 6,
+              background: "#fff",
+              border: "1px solid #e5e7eb",
+              borderRadius: 8,
+              padding: 8,
+              minWidth: 210,
+              boxShadow: "0 8px 24px rgba(0,0,0,.08)",
+            }}
+          >
             <button onClick={toggleStaff} style={{ width: "100%", marginBottom: 6 }}>
               {staffMode ? "Logout Staff View" : "Login as Staff (PIN)"}
             </button>
-            <button onClick={() => setShowLoginBox(true)} style={{ width: "100%", marginBottom: 6 }}>
+            <button
+              onClick={() => setShowLoginBox(true)}
+              style={{ width: "100%", marginBottom: 6 }}
+            >
               Login as Admin (Email)
             </button>
             <button onClick={enableQuoteMode} style={{ width: "100%" }}>
@@ -890,32 +1020,66 @@ const exportPDF = async () => {
 
       {/* Header */}
       <div style={{ textAlign: "center", marginBottom: 18 }}>
-        <img src="/hvf-logo.png" alt="HVF Agency" style={{ width: 160, height: "auto", marginBottom: 8 }} />
+        <img
+          src="/hvf-logo.png"
+          alt="HVF Agency"
+          style={{ width: 160, height: "auto", marginBottom: 8 }}
+        />
         <h1 style={{ margin: 0 }}>HVF Machinery Catalog</h1>
         <p style={{ color: "#777", marginTop: 6 }}>by HVF Agency, Moranhat, Assam</p>
 
         {/* inline admin email box */}
         {!session && showLoginBox && (
           <div style={{ display: "inline-flex", gap: 8 }}>
-            <input type="email" placeholder="your@email.com" value={loginEmail} onChange={(e) => setLoginEmail(e.target.value)} style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #ddd" }} />
+            <input
+              type="email"
+              placeholder="your@email.com"
+              value={loginEmail}
+              onChange={(e) => setLoginEmail(e.target.value)}
+              style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #ddd" }}
+            />
             <button onClick={sendLoginLink}>Send Login Link</button>
-            <button onClick={() => setShowLoginBox(false)} style={{ marginLeft: 6 }}>Cancel</button>
+            <button onClick={() => setShowLoginBox(false)} style={{ marginLeft: 6 }}>
+              Cancel
+            </button>
           </div>
         )}
         {session && (
           <div style={{ marginTop: 8 }}>
-            <button onClick={signOut} style={{ marginRight: 8 }}>Sign Out</button>
-            <span style={{ padding: "4px 8px", borderRadius: 6, background: isAdmin ? "#e8f6ed" : "#f7e8e8", color: isAdmin ? "#1f7a3f" : "#b11e1e", marginRight: 8 }}>
+            <button onClick={signOut} style={{ marginRight: 8 }}>
+              Sign Out
+            </button>
+            <span
+              style={{
+                padding: "4px 8px",
+                borderRadius: 6,
+                background: isAdmin ? "#e8f6ed" : "#f7e8e8",
+                color: isAdmin ? "#1f7a3f" : "#b11e1e",
+                marginRight: 8,
+              }}
+            >
               {isAdmin ? "Admin: ON" : "Not admin"}
             </span>
-            <span style={{ color: "#777", fontSize: 12 }}>UID: {session?.user?.id?.slice(0, 8)}…</span>
+            <span style={{ color: "#777", fontSize: 12 }}>
+              UID: {session?.user?.id?.slice(0, 8)}…
+            </span>
           </div>
         )}
       </div>
 
       {/* Search */}
       <div style={{ maxWidth: 1100, margin: "0 auto 10px", padding: "0 12px" }}>
-        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search products…" style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: "1px solid #e5e7eb" }} />
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search products…"
+          style={{
+            width: "100%",
+            padding: "10px 12px",
+            borderRadius: 10,
+            border: "1px solid #e5e7eb",
+          }}
+        />
       </div>
 
       {/* Categories */}
@@ -985,17 +1149,30 @@ const exportPDF = async () => {
                     {m.specs && <p style={{ color: "#666" }}>{m.specs}</p>}
                     <p style={{ fontWeight: 700 }}>₹{inr(m.mrp)}</p>
                     {(staffMode || isAdmin) && m.sell_price != null && (
-                      <div style={{ fontWeight: 700, marginTop: -2, marginBottom: 6, display: "inline-flex", alignItems: "baseline", gap: 8 }}>
+                      <div
+                        style={{
+                          fontWeight: 700,
+                          marginTop: -2,
+                          marginBottom: 6,
+                          display: "inline-flex",
+                          alignItems: "baseline",
+                          gap: 8,
+                        }}
+                      >
                         <span style={{ color: "#d32f2f" }}>₹{inr(m.sell_price)}</span>
                         {isAdmin && m.cost_price != null && (
                           <>
                             <span style={{ color: "#bbb" }}>/</span>
-                            <span style={{ color: "#d4a106" }}>₹{inr(m.cost_price)}</span>
+                            <span style={{ color: "#d4a106" }}>
+                              ₹{inr(m.cost_price)}
+                            </span>
                           </>
                         )}
                       </div>
                     )}
-                    {m.category && <p style={{ color: "#777", fontSize: 12 }}>{m.category}</p>}
+                    {m.category && (
+                      <p style={{ color: "#777", fontSize: 12 }}>{m.category}</p>
+                    )}
 
                     {quoteMode && (
                       <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
@@ -1011,7 +1188,11 @@ const exportPDF = async () => {
               ))}
             </div>
           )}
-          {msg && <p style={{ textAlign: "center", color: "crimson", marginTop: 10 }}>{msg}</p>}
+          {msg && (
+            <p style={{ textAlign: "center", color: "crimson", marginTop: 10 }}>
+              {msg}
+            </p>
+          )}
         </div>
       )}
 
@@ -1027,7 +1208,6 @@ const exportPDF = async () => {
             padding: 14,
           }}
         >
-
           {/* top bar: Back button */}
           <div style={{ display: "flex", alignItems: "center", marginBottom: 8 }}>
             <button
@@ -1037,7 +1217,7 @@ const exportPDF = async () => {
                 borderRadius: 6,
                 border: "1px solid #e5e7eb",
                 background: "#f8f9fa",
-                cursor: "pointer"
+                cursor: "pointer",
               }}
               aria-label="Back to product selection"
             >
@@ -1049,7 +1229,13 @@ const exportPDF = async () => {
           <div style={{ display: "flex", justifyContent: "space-between", gap: 16 }}>
             {/* left: customer fields */}
             <div style={{ flex: 1 }}>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: 8,
+                }}
+              >
                 <label>
                   <div style={{ fontSize: 12, color: "#666" }}>Customer Name</div>
                   <input
@@ -1082,27 +1268,56 @@ const exportPDF = async () => {
 
                 <div style={{ gridColumn: "1 / span 2", marginTop: 8, fontSize: 14 }}>
                   Dear Sir/Madam,<br />
-                  With reference to your enquiry we are pleased to offer you as under:
+                  With reference to your enquiry we are pleased to offer you as
+                  under:
                 </div>
               </div>
             </div>
 
-            {/* right: quotation meta */}
+            {/* right: quotation meta (firm-aware) */}
             <div style={{ width: 240, textAlign: "right" }}>
-              <div style={{ fontWeight: 700, marginBottom: 6 }}>QUOTATION</div>
-              <div>Ref: {qHeader.number || "APP/H###"}</div>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>
+                {firm === "Victor Engineering" ? "PERFORMA INVOICE" : "QUOTATION"}
+              </div>
+
+              <div>
+                {firm === "Mahabir Hardware Stores"
+                  ? "Quotation Number: "
+                  : firm === "Victor Engineering"
+                  ? "Ref No: "
+                  : "Ref: "}
+                {qHeader.number ||
+                  (firm === "Mahabir Hardware Stores"
+                    ? "MH1052"
+                    : firm === "Victor Engineering"
+                    ? "VE001"
+                    : "APP/H###")}
+              </div>
+
               <div>Date: {qHeader.date}</div>
             </div>
           </div>
 
-          {/* Firm selector (NEW) */}
-          <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 12, marginBottom: 8 }}>
+          {/* Firm selector */}
+          <div
+            style={{
+              display: "flex",
+              gap: 12,
+              alignItems: "center",
+              marginTop: 12,
+              marginBottom: 8,
+            }}
+          >
             <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <span style={{ fontSize: 12, color: "#666", minWidth: 44 }}>Firm</span>
               <select
                 value={firm}
                 onChange={(e) => setFirm(e.target.value)}
-                style={{ padding: "6px 8px", borderRadius: 6, border: "1px solid #e5e7eb" }}
+                style={{
+                  padding: "6px 8px",
+                  borderRadius: 6,
+                  border: "1px solid #e5e7eb",
+                }}
               >
                 <option>HVF Agency</option>
                 <option>Victor Engineering</option>
@@ -1122,7 +1337,7 @@ const exportPDF = async () => {
                   <th style={{ width: 80 }}>Qty</th>
                   <th style={{ width: 120 }}>Unit Price</th>
                   <th style={{ width: 130 }}>Total (Incl. GST)</th>
-                  <th style={{ width: 40 }}></th> {/* Action */}
+                  <th style={{ width: 40 }}></th>
                 </tr>
               </thead>
               <tbody>
@@ -1130,10 +1345,26 @@ const exportPDF = async () => {
                   <tr key={r.id}>
                     <td>{i + 1}</td>
                     <td>
-                      <input value={r.name} onChange={(e) => setCart((c) => ({ ...c, [r.id]: { ...r, name: e.target.value } }))} />
+                      <input
+                        value={r.name}
+                        onChange={(e) =>
+                          setCart((c) => ({
+                            ...c,
+                            [r.id]: { ...r, name: e.target.value },
+                          }))
+                        }
+                      />
                     </td>
                     <td>
-                      <input value={r.specs} onChange={(e) => setCart((c) => ({ ...c, [r.id]: { ...r, specs: e.target.value } }))} />
+                      <input
+                        value={r.specs}
+                        onChange={(e) =>
+                          setCart((c) => ({
+                            ...c,
+                            [r.id]: { ...r, specs: e.target.value },
+                          }))
+                        }
+                      />
                     </td>
                     <td>
                       <input
@@ -1141,7 +1372,10 @@ const exportPDF = async () => {
                         value={r.qty}
                         min={0}
                         onChange={(e) =>
-                          setCart((c) => ({ ...c, [r.id]: { ...r, qty: Number(e.target.value) } }))
+                          setCart((c) => ({
+                            ...c,
+                            [r.id]: { ...r, qty: Number(e.target.value) },
+                          }))
                         }
                       />
                     </td>
@@ -1151,7 +1385,10 @@ const exportPDF = async () => {
                         value={r.unit}
                         min={0}
                         onChange={(e) =>
-                          setCart((c) => ({ ...c, [r.id]: { ...r, unit: Number(e.target.value) } }))
+                          setCart((c) => ({
+                            ...c,
+                            [r.id]: { ...r, unit: Number(e.target.value) },
+                          }))
                         }
                       />
                     </td>
@@ -1183,22 +1420,34 @@ const exportPDF = async () => {
               </tbody>
             </table>
 
-            {/* Action bar under table: Add Row on the left, totals on the right */}
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 12 }}>
+            {/* Action bar under table */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                marginTop: 12,
+              }}
+            >
               <button onClick={addBlankRow}>+ Add Row</button>
 
               <div style={{ display: "flex", gap: 24 }}>
-                <div>Subtotal <b>₹{inr(cartSubtotal)}</b></div>
-                <div>Grand Total <b>₹{inr(cartSubtotal)}</b></div>
+                <div>
+                  Subtotal <b>₹{inr(cartSubtotal)}</b>
+                </div>
+                <div>
+                  Grand Total <b>₹{inr(cartSubtotal)}</b>
+                </div>
               </div>
             </div>
 
-            {/* Buttons (Export uses selected firm) */}
+            {/* Buttons */}
             <div style={{ marginTop: 14, display: "flex", gap: 8 }}>
               <button
                 onClick={async () => {
                   const n = await saveQuote();
-                  if (n && !qHeader.number) setQHeader((h) => ({ ...h, number: n }));
+                  if (n && !qHeader.number)
+                    setQHeader((h) => ({ ...h, number: n }));
                 }}
               >
                 Save
@@ -1211,7 +1460,17 @@ const exportPDF = async () => {
       )}
 
       {/* FLOATING bottom-right controls */}
-      <div style={{ position: "fixed", right: 16, bottom: 16, display: "flex", flexDirection: "column", gap: 8, zIndex: 20 }}>
+      <div
+        style={{
+          position: "fixed",
+          right: 16,
+          bottom: 16,
+          display: "flex",
+          flexDirection: "column",
+          gap: 8,
+          zIndex: 20,
+        }}
+      >
         {quoteMode && (
           <button onClick={goToEditor}>View Quote ({cartCount})</button>
         )}
@@ -1246,18 +1505,46 @@ const exportPDF = async () => {
           zIndex: 25,
         }}
       >
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: 6,
+          }}
+        >
           <b>Saved Quotes</b>
-          <button onClick={() => (document.getElementById("saved-pop").style.display = "none")}>✕</button>
+          <button
+            onClick={() =>
+              (document.getElementById("saved-pop").style.display = "none")
+            }
+          >
+            ✕
+          </button>
         </div>
         {saved.length === 0 ? (
           <div style={{ color: "#777" }}>No saved quotes yet.</div>
         ) : (
           saved.map((q) => (
-            <div key={q.number} style={{ border: "1px solid #eee", borderRadius: 8, padding: 8, marginBottom: 6, display: "grid", gridTemplateColumns: "1fr auto", gap: 8 }}>
+            <div
+              key={q.number}
+              style={{
+                border: "1px solid #eee",
+                borderRadius: 8,
+                padding: 8,
+                marginBottom: 6,
+                display: "grid",
+                gridTemplateColumns: "1fr auto",
+                gap: 8,
+              }}
+            >
               <div>
-                <div><b>{q.number}</b> — {q.customer_name || "—"}</div>
-                <div style={{ fontSize: 12, color: "#666" }}>₹{inr(q.total || 0)}</div>
+                <div>
+                  <b>{q.number}</b> — {q.customer_name || "—"}
+                </div>
+                <div style={{ fontSize: 12, color: "#666" }}>
+                  ₹{inr(q.total || 0)}
+                </div>
               </div>
               <div style={{ display: "flex", gap: 6 }}>
                 <button onClick={() => editSaved(q.number)}>Edit</button>
