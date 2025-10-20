@@ -65,6 +65,16 @@ const todayStr = () => {
   return `${dd}/${mm}/${yyyy}`;
 };
 
+function numberMatchesFirm(firm, n) {
+  if (!n) return false;
+  if (firm === "HVF Agency") return /^APP\/H\d{3}$/.test(n);
+  if (firm === "Victor Engineering") return /^APP\/VE\d{3}$/.test(n);
+  if (firm === "Mahabir Hardware Stores") return /^MH\d+$/.test(n);
+  return true;
+}
+
+
+
 // Per-firm next number via Supabase RPC (sequence + formatting)
 async function getNextFirmQuoteNumber(firm) {
   const { data, error } = await supabase.rpc("next_quote_number", { p_firm: firm });
@@ -434,58 +444,84 @@ export default function App() {
       } catch (e) {
         console.error(e);
         // very last-resort fallback if RPC fails
-        const fallback =
-          firm === "Mahabir Hardware Stores"
-            ? `MH${Date.now().toString().slice(-4)}`
-            : firm === "Victor Engineering"
-            ? `VE${Date.now().toString().slice(-3)}`
-            : `APP/H${Date.now().toString().slice(-3)}`;
-        setQHeader((h) => ({ ...h, number: fallback, date: todayStr() }));
+const fallback =
+  firm === "Mahabir Hardware Stores"
+    ? `MH${Date.now().toString().slice(-4)}`
+    : firm === "Victor Engineering"
+    ? `APP/VE${Date.now().toString().slice(-3)}`
+    : `APP/H${Date.now().toString().slice(-3)}`;
+setQHeader((h) => ({ ...h, number: fallback, date: todayStr() }));
       }
     }
     setPage("quoteEditor");
   };
 
+// When firm changes, drop the existing number if it doesn't match the new firm's format.
+// A fresh, firm-specific number will be pulled the next time you open the editor/print/save.
+useEffect(() => {
+  setQHeader((h) => {
+    if (!h.number) return h; // nothing set yet
+    if (numberMatchesFirm(firm, h.number)) return h; // already correct for this firm
+    return { ...h, number: "" }; // clear so we fetch the right one on next action
+  });
+}, [firm]);
+
   const backToCatalog = () => setPage("catalog");
 
   /* ---------- SAVE USING YOUR SCHEMA (quotes + quote_items) ---------- */
-  const saveQuote = async () => {
-    try {
-      const number = qHeader.number || (await getNextQuoteCode(firm));
-      const { data: qins, error: qerr } = await supabase
-        .from("quotes")
-        .insert({
-          number,
-          customer_name: qHeader.customer_name || null,
-          phone: qHeader.phone || null,
-          total: cartSubtotal,
-        })
-        .select("id,number")
-        .single();
-      if (qerr) throw qerr;
-
-      const rows = cartList.map((r) => ({
-        quote_id: qins.id,
-        name: r.name,
-        specs: r.specs || null,
-        qty: r.qty,
-        mrp: r.unit,
-      }));
-      if (rows.length) {
-        const { error: ierr } = await supabase
-          .from("quote_items")
-          .insert(rows);
-        if (ierr) throw ierr;
+const saveQuote = async () => {
+  try {
+    // Make sure we have a firm-specific number BEFORE saving (no double-increment)
+    let number = qHeader.number;
+    if (!number) {
+      try {
+        number = await getNextFirmQuoteNumber(firm); // e.g. APP/H004, APP/VE001, MH1052
+        setQHeader((h) => ({ ...h, number }));
+      } catch (e) {
+        console.error("nextFirmQuoteNumber RPC failed, using last-resort fallback", e);
+        number =
+          firm === "Mahabir Hardware Stores"
+            ? `MH${Date.now().toString().slice(-4)}`
+            : firm === "Victor Engineering"
+            ? `APP/VE${Date.now().toString().slice(-3)}`
+            : `APP/H${Date.now().toString().slice(-3)}`;
+        setQHeader((h) => ({ ...h, number }));
       }
-      setQHeader((h) => ({ ...h, number }));
-      alert("Saved ✅");
-      return qins.number;
-    } catch (e) {
-      console.error(e);
-      alert("Save failed: " + e.message);
-      return null;
     }
-  };
+
+    const { data: qins, error: qerr } = await supabase
+      .from("quotes")
+      .insert({
+        number,
+        customer_name: qHeader.customer_name || null,
+        phone: qHeader.phone || null,
+        total: cartSubtotal,
+      })
+      .select("id,number")
+      .single();
+    if (qerr) throw qerr;
+
+    const rows = cartList.map((r) => ({
+      quote_id: qins.id,
+      name: r.name,
+      specs: r.specs || null,
+      qty: r.qty,
+      mrp: r.unit,
+    }));
+    if (rows.length) {
+      const { error: ierr } = await supabase.from("quote_items").insert(rows);
+      if (ierr) throw ierr;
+    }
+
+    setQHeader((h) => ({ ...h, number }));
+    alert("Saved ✅");
+    return qins.number;
+  } catch (e) {
+    console.error(e);
+    alert("Save failed: " + e.message);
+    return null;
+  }
+};
 
   /* ---------- LOAD SAVED LIST / EDIT / PDF ---------- */
   const [saved, setSaved] = useState([]);
@@ -539,18 +575,31 @@ export default function App() {
     const dateStr = todayStr();
     setQHeader((h) => ({ ...h, date: dateStr }));
 
-    // ensure firm-specific quote number
-    const num =
-      qHeader.number || (await getNextFirmQuoteNumber(firm));
-    setQHeader((h) => ({ ...h, number: num }));
+    // ensure quote number (firm-specific)
+let num = qHeader.number;
+if (!num) {
+  try {
+    num = await getNextFirmQuoteNumber(firm); // Supabase RPC -> APP/H###, APP/VE###, MH####
+  } catch (e) {
+    console.error("RPC failed, using fallback", e);
+    // very last-resort fallbacks; these do NOT touch the DB counter
+    num =
+      firm === "Mahabir Hardware Stores"
+        ? `MH${Date.now().toString().slice(-4)}`
+        : firm === "Victor Engineering"
+        ? `APP/VE${Date.now().toString().slice(-3)}`
+        : `APP/H${Date.now().toString().slice(-3)}`;
+  }
+  setQHeader((h) => ({ ...h, number: num }));
+}
 
-    const doc = new jsPDF({ unit: "pt", format: "a4" });
-    const pw = doc.internal.pageSize.getWidth();
-    const ph = doc.internal.pageSize.getHeight();
-    const margin = 40;
-    const L = margin;
-    const R = pw - margin;
-    const contentW = R - L;
+const doc = new jsPDF({ unit: "pt", format: "a4" });
+const pw = doc.internal.pageSize.getWidth();
+const ph = doc.internal.pageSize.getHeight();
+const margin = 40;
+const L = margin;
+const R = pw - margin;
+const contentW = R - L;
 
     // -------------------------------
     // BRANDING / HEADER AREA
@@ -1287,11 +1336,11 @@ export default function App() {
                   ? "Ref No: "
                   : "Ref: "}
                 {qHeader.number ||
-                  (firm === "Mahabir Hardware Stores"
-                    ? "MH1052"
-                    : firm === "Victor Engineering"
-                    ? "VE001"
-                    : "APP/H###")}
+  (firm === "Mahabir Hardware Stores"
+    ? "MH1052"
+    : firm === "Victor Engineering"
+    ? "APP/VE001"
+    : "APP/H###")}
               </div>
 
               <div>Date: {qHeader.date}</div>
