@@ -802,15 +802,16 @@ const exportPDF = async () => {
     doc.setFont("times", "normal");
     doc.setFontSize(10);
     doc.text(
-      [
-        "VICTOR ENGINEERING",
-        "HDFC BANK (Dibrugarh)",
-        "A/C No - 50100234567890",
-        "IFSC Code - HDFC0001234",
-      ],
-      L + 10,
-      bankTop + 34
-    );
+  [
+    "M/S VICTOR ENGINEERING",
+    "Axis Bank (Moran, 785670)",
+    "Current Account",
+    "A/C No: 921020019081364",
+    "IFSC: UTIB0003701",
+  ],
+  L + 10,
+  bankTop + 34
+);
 
     // reset draw defaults
     doc.setDrawColor(0);
