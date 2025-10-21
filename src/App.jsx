@@ -442,35 +442,46 @@ const [loadedFromSaved, setLoadedFromSaved] = useState(false);
     saveQuoteState({ cart, qHeader, page, quoteMode, firm });
   }, [cart, qHeader, page, quoteMode, firm]);
 
-  // Reserve the next number from Supabase exactly once and reuse it everywhere.
-  // - If a correct number is already present for this firm, reuse it.
-  // - If RPC fails, we stop (no date-based fallbacks), so you don't get random IDs.
-  // Ensure we have a firm-correct, RESERVED number in both state and return value.
+  // Ensure we have a firm-correct number that is safe to use (not a stale one).
 const ensureFirmNumber = async () => {
-  const hasFirmNumber =
-    typeof qHeader.number === "string" &&
-    ((firm === "HVF Agency" && /^APP\/H\d{3}$/.test(qHeader.number)) ||
-     (firm === "Victor Engineering" && /^APP\/VE\d{3}$/.test(qHeader.number)) ||
-     (firm === "Mahabir Hardware Stores" && /^MH\d+$/.test(qHeader.number)));
+  const matchesFirm = numberMatchesFirm(firm, qHeader.number);
 
-  // If the current number already matches the selected firm, reuse it.
-  if (hasFirmNumber) return qHeader.number;
+  // If it's a correct number AND we've already saved this quote (or loaded from DB), reuse it.
+  if (matchesFirm && savedOnce) return qHeader.number;
 
+  // If it's a correct number but not marked saved, verify it doesn't already exist in DB.
+  if (matchesFirm && !savedOnce) {
+    try {
+      const { data: existing, error: existErr } = await supabase
+        .from("quotes")
+        .select("number")
+        .eq("number", qHeader.number)
+        .maybeSingle();
+      if (existErr) throw existErr;
+
+      if (!existing) return qHeader.number; // safe to reuse
+      // else: already in DB → fall through to reserve new
+    } catch (e) {
+      console.error("Existence check failed, reserving a new number:", e);
+      // fall through
+    }
+  }
+
+  // Reserve a NEW number from Supabase (increments the correct per-firm counter)
   try {
-    // Reserve from DB (increments the correct counter for the firm)
-    const { data, error } = await supabase.rpc("next_quote_number", { p_firm: firm });
-    if (error) throw error;
-    if (!data) throw new Error("No number returned from sequence");
-
-    // Update the editor immediately so it shows the new number without refresh
+    const { data, error } = await supabase.rpc("next_quote_number", {
+      p_firm: firm,
+    });
+    if (error || !data) throw error || new Error("No number returned");
     const today = todayStr();
     setQHeader((h) => ({ ...h, number: data, date: today }));
-
-    return data; // e.g. "APP/H004", "APP/VE001", "MH1053"
+    setSavedOnce(false); // brand new number, not saved yet
+    return data; // e.g. APP/H003
   } catch (e) {
     console.error("Could not get next number from Supabase RPC:", e);
-    alert("Could not fetch the next quotation number. Please check your internet and try again.");
-    // Throw so callers (Editor/Save/PDF) stop; prevents random/fallback numbers
+    alert(
+      "Could not fetch the next quotation number. Please check your internet and try again."
+    );
     throw e;
   }
 };
@@ -600,8 +611,69 @@ const saveQuote = async (forceNumber) => {
       qty: Number(ln.qty || 0),
     };
   });
-  setCart(newCart);
 
+// Delete a saved quote (header + items) and then rewind that firm's counter
+const deleteSavedQuote = async (number) => {
+  if (!number) return;
+  const ok = confirm(`Delete quote ${number}? This cannot be undone.`);
+  if (!ok) return;
+
+  try {
+    // 1) Figure out which firm this number belongs to
+    const firmOfQuote = inferFirmFromNumber(number);
+    if (!firmOfQuote) throw new Error(`Cannot infer firm from number: ${number}`);
+
+    // 2) Find the quote id
+    const { data: q, error: qerr } = await supabase
+      .from("quotes")
+      .select("id")
+      .eq("number", number)
+      .maybeSingle();
+    if (qerr) throw qerr;
+    if (!q?.id) throw new Error(`Quote not found: ${number}`);
+
+    // 3) Delete line items first (FK safety)
+    const { error: ierr } = await supabase
+      .from("quote_items")
+      .delete()
+      .eq("quote_id", q.id);
+    if (ierr) throw ierr;
+
+    // 4) Delete the quote header
+    const { error: derr } = await supabase
+      .from("quotes")
+      .delete()
+      .eq("id", q.id);
+    if (derr) throw derr;
+
+    // 5) Rewind that firm's counter to the current max in quotes
+    // (so next new quote uses the first missing number)
+    const { error: rpcErr } = await supabase.rpc("sync_counter_to_max", {
+      p_firm: firmOfQuote,
+    });
+    if (rpcErr) throw rpcErr;
+
+    // 6) If the editor was showing this number, clear it
+    setQHeader((h) => (h.number === number ? { ...h, number: "" } : h));
+    setSavedOnce(false);
+
+    // Refresh the list
+await loadSaved();
+
+// If the editor is showing the same (now deleted) number,
+// clear it so the next reservation pulls the rewound value.
+setQHeader(h => (h.number === number ? { ...h, number: "" } : h));
+setSavedOnce(false);
+
+// (Optional) close the popup after delete:
+// document.getElementById("saved-pop").style.display = "none";
+
+alert(`Deleted ${number} ✅`);
+} catch (e) {
+  console.error(e);
+  alert("Delete failed: " + (e?.message || e));
+}
+};
   // NEW: align the firm with the loaded quote number
   const inferred = inferFirmFromNumber(q.number);
   if (inferred) setFirm(inferred);
@@ -1648,16 +1720,23 @@ const exportPDF = async () => {
                 </div>
               </div>
               <div style={{ display: "flex", gap: 6 }}>
-                <button onClick={() => editSaved(q.number)}>Edit</button>
-                <button
-                  onClick={async () => {
-                    await editSaved(q.number);
-                    await exportPDF();
-                  }}
-                >
-                  PDF
-                </button>
-              </div>
+  <button onClick={() => editSaved(q.number)}>Edit</button>
+  <button
+    onClick={async () => {
+      await editSaved(q.number);
+      await exportPDF();
+    }}
+  >
+    PDF
+  </button>
+  <button
+    onClick={() => deleteSavedQuote(q.number)}
+    style={{ borderColor: "#f3d1d1", color: "#b11e1e", background: "#fff5f5" }}
+    title="Delete this quote"
+  >
+    Delete
+  </button>
+</div>
             </div>
           ))
         )}
