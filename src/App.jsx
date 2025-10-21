@@ -582,74 +582,76 @@ const saveQuote = async (forceNumber) => {
   /* ---------- LOAD SAVED LIST / EDIT / PDF ---------- */
 const [saved, setSaved] = useState([]);
 
+// Fetch the list of saved quotes
 const loadSaved = async () => {
-  const { data, error } = await supabase
-    .from("quotes")
-    .select("id,number,customer_name,total,created_at")
-    .order("created_at", { ascending: false });
-  if (error) {
-    console.error(error);
-    alert("Could not load saved quotes.");
-    return;
+  try {
+    const { data, error } = await supabase
+      .from("quotes")
+      .select("id,number,customer_name,total,created_at")
+      .order("created_at", { ascending: false });
+
+    if (error) throw error;
+    setSaved(data || []);
+  } catch (err) {
+    // Make the error obvious in Console and to the user
+    console.error("loadSaved failed:", err);
+    alert(`Could not load saved quotes.\n${err?.message || err}`);
+    setSaved([]);
   }
-  setSaved(data || []);
 };
 
-// Load a saved quote into the editor
+// Load one saved quote into the editor
 const editSaved = async (number) => {
-  // 1) Load the quote header
-  const { data: q, error: qerr } = await supabase
-    .from("quotes")
-    .select("id,number,customer_name,phone")
-    .eq("number", number)
-    .maybeSingle();
-  if (qerr) {
-    console.error(qerr);
-    alert("Could not load the saved quote.");
-    return;
+  try {
+    // 1) Header
+    const { data: q, error: qerr } = await supabase
+      .from("quotes")
+      .select("id,number,customer_name,phone")
+      .eq("number", number)
+      .maybeSingle();
+    if (qerr) throw qerr;
+    if (!q) return;
+
+    // 2) Lines
+    const { data: lines, error: lerr } = await supabase
+      .from("quote_items")
+      .select("name,specs,qty,mrp")
+      .eq("quote_id", q.id);
+    if (lerr) throw lerr;
+
+    // 3) Rebuild cart
+    const newCart = {};
+    (lines || []).forEach((ln, idx) => {
+      const id = `saved-${idx}`;
+      newCart[id] = {
+        id,
+        name: ln.name,
+        specs: ln.specs || "",
+        unit: Number(ln.mrp || 0),
+        qty: Number(ln.qty || 0),
+      };
+    });
+    setCart(newCart);
+
+    // 4) Align firm with number; mark as loaded-from-saved
+    const firmGuess = inferFirmFromNumber(q.number);
+    if (firmGuess) setFirm(firmGuess);
+    setLoadedFromSaved(true);
+
+    // 5) Push state & open editor
+    setQHeader((h) => ({
+      ...h,
+      number: q.number,
+      customer_name: q.customer_name || "",
+      phone: q.phone || "",
+      date: todayStr(),
+    }));
+    setQuoteMode(true);
+    setPage("quoteEditor");
+  } catch (err) {
+    console.error("editSaved failed:", err);
+    alert(`Could not load the saved quote.\n${err?.message || err}`);
   }
-  if (!q) return;
-
-  // 2) Load its line items
-  const { data: lines, error: lerr } = await supabase
-    .from("quote_items")
-    .select("name,specs,qty,mrp")
-    .eq("quote_id", q.id);
-  if (lerr) {
-    console.error(lerr);
-    alert("Could not load quote items.");
-    return;
-  }
-
-  // 3) Rebuild the cart
-  const newCart = {};
-  (lines || []).forEach((ln, idx) => {
-    const id = `saved-${idx}`;
-    newCart[id] = {
-      id,
-      name: ln.name,
-      specs: ln.specs || "",
-      unit: Number(ln.mrp || 0),
-      qty: Number(ln.qty || 0),
-    };
-  });
-  setCart(newCart);
-
-  // 4) Align firm with the number, mark as loaded-from-saved
-  const firmGuess = inferFirmFromNumber(q.number);
-  if (firmGuess) setFirm(firmGuess);
-  setLoadedFromSaved(true);
-
-  // 5) Push state and open editor
-  setQHeader((h) => ({
-    ...h,
-    number: q.number,
-    customer_name: q.customer_name || "",
-    phone: q.phone || "",
-    date: todayStr(),
-  }));
-  setQuoteMode(true);
-  setPage("quoteEditor");
 };
 
 // Delete a saved quote (header + items) and then rewind that firm's counter
@@ -659,11 +661,11 @@ const deleteSavedQuote = async (number) => {
   if (!ok) return;
 
   try {
-    // 1) Figure out which firm this number belongs to
+    // 1) Which firm?
     const firmOfQuote = inferFirmFromNumber(number);
     if (!firmOfQuote) throw new Error(`Cannot infer firm from number: ${number}`);
 
-    // 2) Find the quote id
+    // 2) Find quote id
     const { data: q, error: qerr } = await supabase
       .from("quotes")
       .select("id")
@@ -672,14 +674,14 @@ const deleteSavedQuote = async (number) => {
     if (qerr) throw qerr;
     if (!q?.id) throw new Error(`Quote not found: ${number}`);
 
-    // 3) Delete line items first (FK safety)
+    // 3) Delete items first (FK safety)
     const { error: ierr } = await supabase
       .from("quote_items")
       .delete()
       .eq("quote_id", q.id);
     if (ierr) throw ierr;
 
-    // 4) Delete the quote header
+    // 4) Delete header
     const { error: derr } = await supabase
       .from("quotes")
       .delete()
@@ -692,7 +694,7 @@ const deleteSavedQuote = async (number) => {
     });
     if (rpcErr) throw rpcErr;
 
-    // 6) Refresh list & clear editor if it was showing this number
+    // 6) Refresh list & clear editor if it showed the deleted number
     await loadSaved();
     if (qHeader.number === number) {
       setQHeader((h) => ({ ...h, number: "" }));
@@ -700,11 +702,12 @@ const deleteSavedQuote = async (number) => {
     }
 
     alert(`Deleted ${number} ✅`);
-  } catch (e) {
-    console.error(e);
-    alert("Delete failed: " + (e?.message || e));
+  } catch (err) {
+    console.error("deleteSavedQuote failed:", err);
+    alert(`Delete failed: ${err?.message || err}`);
   }
 };
+
  /* ---------- CLEAN PDF (NOT web print) ---------- */
 const exportPDF = async () => {
   if (cartList.length === 0) return alert("Nothing to print.");
