@@ -65,6 +65,14 @@ const todayStr = () => {
   return `${dd}/${mm}/${yyyy}`;
 };
 
+const inferFirmFromNumber = (num) => {
+  if (!num) return null;
+  if (/^APP\/H\d{3}$/.test(num)) return "HVF Agency";
+  if (/^APP\/VE\d{3}$/.test(num)) return "Victor Engineering";
+  if (/^MH\d+$/.test(num)) return "Mahabir Hardware Stores";
+  return null;
+};
+
 function numberMatchesFirm(firm, n) {
   if (!n) return false;
   if (firm === "HVF Agency") return /^APP\/H\d{3}$/.test(n);
@@ -403,8 +411,12 @@ export default function App() {
     subject: "",
   });
 
-  // NEW: firm selector state (persisted)
   const [firm, setFirm] = useState("HVF Agency");
+const [savedOnce, setSavedOnce] = useState(false);
+
+// marks that we loaded an existing, already-saved quote
+const [loadedFromSaved, setLoadedFromSaved] = useState(false);
+
 
   // --- Persist quote state in localStorage so refresh won't log out ---
   useEffect(() => {
@@ -430,31 +442,58 @@ export default function App() {
     saveQuoteState({ cart, qHeader, page, quoteMode, firm });
   }, [cart, qHeader, page, quoteMode, firm]);
 
-  const goToEditor = async () => {
-    if (cartList.length === 0)
-      return alert("Add at least 1 item to the quote.");
+  // Reserve the next number from Supabase exactly once and reuse it everywhere.
+  // - If a correct number is already present for this firm, reuse it.
+  // - If RPC fails, we stop (no date-based fallbacks), so you don't get random IDs.
+  // Ensure we have a firm-correct, RESERVED number in both state and return value.
+const ensureFirmNumber = async () => {
+  const hasFirmNumber =
+    typeof qHeader.number === "string" &&
+    ((firm === "HVF Agency" && /^APP\/H\d{3}$/.test(qHeader.number)) ||
+     (firm === "Victor Engineering" && /^APP\/VE\d{3}$/.test(qHeader.number)) ||
+     (firm === "Mahabir Hardware Stores" && /^MH\d+$/.test(qHeader.number)));
 
-    // always stamp today's date when opening the editor
-    forceTodayDate(setQHeader);
+  // If the current number already matches the selected firm, reuse it.
+  if (hasFirmNumber) return qHeader.number;
 
-    if (!qHeader.number) {
-      try {
-        const num = await getNextFirmQuoteNumber(firm); // firm-specific sequence from Supabase
-        setQHeader((h) => ({ ...h, number: num, date: todayStr() }));
-      } catch (e) {
-        console.error(e);
-        // very last-resort fallback if RPC fails
-const fallback =
-  firm === "Mahabir Hardware Stores"
-    ? `MH${Date.now().toString().slice(-4)}`
-    : firm === "Victor Engineering"
-    ? `APP/VE${Date.now().toString().slice(-3)}`
-    : `APP/H${Date.now().toString().slice(-3)}`;
-setQHeader((h) => ({ ...h, number: fallback, date: todayStr() }));
-      }
-    }
-    setPage("quoteEditor");
-  };
+  try {
+    // Reserve from DB (increments the correct counter for the firm)
+    const { data, error } = await supabase.rpc("next_quote_number", { p_firm: firm });
+    if (error) throw error;
+    if (!data) throw new Error("No number returned from sequence");
+
+    // Update the editor immediately so it shows the new number without refresh
+    const today = todayStr();
+    setQHeader((h) => ({ ...h, number: data, date: today }));
+
+    return data; // e.g. "APP/H004", "APP/VE001", "MH1053"
+  } catch (e) {
+    console.error("Could not get next number from Supabase RPC:", e);
+    alert("Could not fetch the next quotation number. Please check your internet and try again.");
+    // Throw so callers (Editor/Save/PDF) stop; prevents random/fallback numbers
+    throw e;
+  }
+};
+
+    const goToEditor = async () => {
+  if (cartList.length === 0) {
+    alert("Add at least 1 item to the quote.");
+    return;
+  }
+
+  // always stamp today's date when opening the editor
+  forceTodayDate(setQHeader);
+
+  // Reserve/ensure the correct firm-specific number and push it into state.
+  // If this fails (offline / RPC error), it already alerts and throws, so just abort.
+  try {
+    await ensureFirmNumber(); // sets qHeader.number to the reserved number
+  } catch {
+    return; // don't open editor with a fake/placeholder number
+  }
+
+  setPage("quoteEditor");
+};
 
 // When firm changes, drop the existing number if it doesn't match the new firm's format.
 // A fresh, firm-specific number will be pulled the next time you open the editor/print/save.
@@ -466,29 +505,31 @@ useEffect(() => {
   });
 }, [firm]);
 
+// 4B: whenever the number changes, mark "not saved yet"
+useEffect(() => {
+  if (loadedFromSaved) {
+    // keep it marked as saved for quotes loaded from DB
+    setSavedOnce(true);
+    setLoadedFromSaved(false);
+    return;
+  }
+  // new number (reserved fresh) => not saved yet
+  setSavedOnce(false);
+}, [qHeader.number, loadedFromSaved]);
+// 4B: also reset the flag when firm changes
+useEffect(() => {
+  setSavedOnce(false);
+}, [firm]);
+
   const backToCatalog = () => setPage("catalog");
 
   /* ---------- SAVE USING YOUR SCHEMA (quotes + quote_items) ---------- */
-const saveQuote = async () => {
+const saveQuote = async (forceNumber) => {
   try {
-    // Make sure we have a firm-specific number BEFORE saving (no double-increment)
-    let number = qHeader.number;
-    if (!number) {
-      try {
-        number = await getNextFirmQuoteNumber(firm); // e.g. APP/H004, APP/VE001, MH1052
-        setQHeader((h) => ({ ...h, number }));
-      } catch (e) {
-        console.error("nextFirmQuoteNumber RPC failed, using last-resort fallback", e);
-        number =
-          firm === "Mahabir Hardware Stores"
-            ? `MH${Date.now().toString().slice(-4)}`
-            : firm === "Victor Engineering"
-            ? `APP/VE${Date.now().toString().slice(-3)}`
-            : `APP/H${Date.now().toString().slice(-3)}`;
-        setQHeader((h) => ({ ...h, number }));
-      }
-    }
+    // 1) If exportPDF already picked a number, use it; otherwise reserve one now
+    const number = forceNumber ?? (await ensureFirmNumber()); // throws & alerts if RPC fails
 
+    // 2) Save the quote header
     const { data: qins, error: qerr } = await supabase
       .from("quotes")
       .insert({
@@ -501,6 +542,7 @@ const saveQuote = async () => {
       .single();
     if (qerr) throw qerr;
 
+    // 3) Save line items
     const rows = cartList.map((r) => ({
       quote_id: qins.id,
       name: r.name,
@@ -513,12 +555,14 @@ const saveQuote = async () => {
       if (ierr) throw ierr;
     }
 
+    // 4) Keep editor in sync with the reserved number
     setQHeader((h) => ({ ...h, number }));
-    alert("Saved ✅");
+    setSavedOnce(true); // 4C: mark this number as saved
+    alert(`Saved ✅ (${number})`);
     return qins.number;
   } catch (e) {
     console.error(e);
-    alert("Save failed: " + e.message);
+    alert("Save failed: " + (e?.message || e));
     return null;
   }
 };
@@ -533,486 +577,494 @@ const saveQuote = async () => {
     setSaved(data || []);
   };
   const editSaved = async (number) => {
-    const { data: q } = await supabase
-      .from("quotes")
-      .select("id,number,customer_name,phone")
-      .eq("number", number)
-      .maybeSingle();
-    if (!q) return;
-    const { data: lines } = await supabase
-      .from("quote_items")
-      .select("name,specs,qty,mrp")
-      .eq("quote_id", q.id);
+  const { data: q } = await supabase
+    .from("quotes")
+    .select("id,number,customer_name,phone")
+    .eq("number", number)
+    .maybeSingle();
+  if (!q) return;
 
-    const newCart = {};
-    (lines || []).forEach((ln, idx) => {
-      const id = `saved-${idx}`;
-      newCart[id] = {
-        id,
-        name: ln.name,
-        specs: ln.specs || "",
-        unit: Number(ln.mrp || 0),
-        qty: Number(ln.qty || 0),
-      };
-    });
-    setCart(newCart);
-    setQHeader((h) => ({
-      ...h,
-      number: q.number,
-      customer_name: q.customer_name || "",
-      phone: q.phone || "",
-      date: todayStr(),
-    }));
-    setQuoteMode(true);
-    setPage("quoteEditor");
-  };
+  const { data: lines } = await supabase
+    .from("quote_items")
+    .select("name,specs,qty,mrp")
+    .eq("quote_id", q.id);
 
-  /* ---------- CLEAN PDF (NOT web print) ---------- */
-  const exportPDF = async () => {
-    if (cartList.length === 0) return alert("Nothing to print.");
+  const newCart = {};
+  (lines || []).forEach((ln, idx) => {
+    const id = `saved-${idx}`;
+    newCart[id] = {
+      id,
+      name: ln.name,
+      specs: ln.specs || "",
+      unit: Number(ln.mrp || 0),
+      qty: Number(ln.qty || 0),
+    };
+  });
+  setCart(newCart);
 
-    // Always use today for editor + PDF
-    const dateStr = todayStr();
-    setQHeader((h) => ({ ...h, date: dateStr }));
+  // NEW: align the firm with the loaded quote number
+  const inferred = inferFirmFromNumber(q.number);
+  if (inferred) setFirm(inferred);
 
-    // ensure quote number (firm-specific)
-let num = qHeader.number;
-if (!num) {
+  setLoadedFromSaved(true); // <<< add this line
+
+  setQHeader((h) => ({
+    ...h,
+    number: q.number,
+    customer_name: q.customer_name || "",
+    phone: q.phone || "",
+    date: todayStr(),
+  }));
+  setQuoteMode(true);
+  setPage("quoteEditor");
+};
+
+ /* ---------- CLEAN PDF (NOT web print) ---------- */
+const exportPDF = async () => {
+  if (cartList.length === 0) return alert("Nothing to print.");
+
+  // Always use today for editor + PDF
+  const dateStr = todayStr();
+  setQHeader((h) => ({ ...h, date: dateStr }));
+
+  // Reserve/ensure the number once for editor, PDF & DB (no fallbacks)
+  let number;
   try {
-    num = await getNextFirmQuoteNumber(firm); // Supabase RPC -> APP/H###, APP/VE###, MH####
-  } catch (e) {
-    console.error("RPC failed, using fallback", e);
-    // very last-resort fallbacks; these do NOT touch the DB counter
-    num =
-      firm === "Mahabir Hardware Stores"
-        ? `MH${Date.now().toString().slice(-4)}`
-        : firm === "Victor Engineering"
-        ? `APP/VE${Date.now().toString().slice(-3)}`
-        : `APP/H${Date.now().toString().slice(-3)}`;
+    number = await ensureFirmNumber(); // throws & alerts if RPC fails
+  } catch {
+    return; // abort PDF if reservation failed
   }
-  setQHeader((h) => ({ ...h, number: num }));
+
+  // If not saved yet, save now so that "Saved Quotes" shows this immediately
+  try {
+    if (!savedOnce) {
+  const savedNum = await saveQuote(number); // pass the reserved number explicitly
+  if (!savedNum) return;
 }
+  } catch (e) {
+    console.error(e);
+    alert("Could not save before exporting. Aborting.");
+    return;
+  }
 
-const doc = new jsPDF({ unit: "pt", format: "a4" });
-const pw = doc.internal.pageSize.getWidth();
-const ph = doc.internal.pageSize.getHeight();
-const margin = 40;
-const L = margin;
-const R = pw - margin;
-const contentW = R - L;
+  const doc = new jsPDF({ unit: "pt", format: "a4" });
+  const pw = doc.internal.pageSize.getWidth();
+  const ph = doc.internal.pageSize.getHeight();
+  const margin = 40;
+  const L = margin;
+  const R = pw - margin;
+  const contentW = R - L;
 
-    // -------------------------------
-    // BRANDING / HEADER AREA
-    // -------------------------------
-    let afterHeaderY;
+  // -------------------------------
+  // BRANDING / HEADER AREA
+  // -------------------------------
+  let afterHeaderY;
 
-    if (firm === "HVF Agency") {
-      // HVF: logo + QUOTATION (unchanged)
-      let logoBottom = 24;
-      try {
-        const img = new Image();
-        img.crossOrigin = "anonymous";
-        img.src = "/hvf-logo.png";
-        await new Promise((r) => (img.onload = r));
-        const w = 110;
-        const h = (img.height * w) / img.width;
-        const x = (pw - w) / 2;
-        const y = 24;
-        doc.addImage(img, "PNG", x, y, w, h);
-        logoBottom = y + h;
-      } catch {}
+  if (firm === "HVF Agency") {
+    // HVF: logo + QUOTATION (unchanged)
+    let logoBottom = 24;
+    try {
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.src = "/hvf-logo.png";
+      await new Promise((r) => (img.onload = r));
+      const w = 110;
+      const h = (img.height * w) / img.width;
+      const x = (pw - w) / 2;
+      const y = 24;
+      doc.addImage(img, "PNG", x, y, w, h);
+      logoBottom = y + h;
+    } catch {}
 
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(16);
-      doc.text("QUOTATION", pw / 2, logoBottom + 28, { align: "center" });
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(16);
+    doc.text("QUOTATION", pw / 2, logoBottom + 28, { align: "center" });
 
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(10);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
 
-      // Left block (To)
-      let y0 = logoBottom + 40;
-      doc.setFontSize(11);
-      doc.text("To,", L, y0);
-      y0 += 18;
+    // Left block (To)
+    let y0 = logoBottom + 40;
+    doc.setFontSize(11);
+    doc.text("To,", L, y0);
+    y0 += 18;
 
-      doc.setFont("helvetica", "bold");
-      doc.text(String(qHeader.customer_name || ""), L, y0);
-      y0 += 16;
-      doc.text(String(qHeader.address || ""), L, y0);
-      y0 += 16;
-      doc.text(String(qHeader.phone || ""), L, y0);
+    doc.setFont("helvetica", "bold");
+    doc.text(String(qHeader.customer_name || ""), L, y0);
+    y0 += 16;
+    doc.text(String(qHeader.address || ""), L, y0);
+    y0 += 16;
+    doc.text(String(qHeader.phone || ""), L, y0);
 
-      // Right meta (HVF keeps "Ref:")
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(10);
-      doc.text(`Ref: ${num}`, R, logoBottom + 40, { align: "right" });
-      doc.text(`Date: ${dateStr}`, R, logoBottom + 55, { align: "right" });
+    // Right meta (HVF keeps "Ref:")
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    doc.text(`Ref: ${number}`, R, logoBottom + 40, { align: "right" });
+    doc.text(`Date: ${dateStr}`, R, logoBottom + 55, { align: "right" });
 
-      // Intro
-      const introY = y0 + 28;
-      doc.setFontSize(11);
-      doc.text("Dear Sir/Madam,", L, introY);
-      doc.text(
-        "With reference to your enquiry we are pleased to offer you as under:",
-        L,
-        introY + 16
-      );
-
-      afterHeaderY = introY + 38; // table start
-    } else if (firm === "Victor Engineering") {
-      // Victor Engineering — single outer frame + divider lines (no inner boxes)
-      const LINE_W = 0.9;
-      const gap = 10; // vertical spacing between strips
-      const subH = 26;
-      const introH = 36;
-
-      // Title
-      doc.setFont("times", "bold");
-      doc.setFontSize(22);
-      doc.text("Victor Engineering", pw / 2, 60, { align: "center" });
-      doc.setFontSize(14);
-      doc.text("PERFORMA INVOICE", pw / 2, 80, { align: "center" });
-
-      // Outer frame
-      const frameTop = 92;
-      const frameBottom = ph - 40;
-      const frameH = frameBottom - frameTop;
-      doc.setLineWidth(LINE_W);
-      doc.rect(L, frameTop, contentW, frameH);
-
-      // Header band: bottom line + vertical split only
-      const headerH = 86;
-      const headerBottom = frameTop + headerH;
-      const splitX = L + contentW * 0.6;
-
-      doc.line(L, headerBottom, R, headerBottom);
-      doc.line(splitX, frameTop, splitX, headerBottom);
-
-      // Left (To:)
-      doc.setFont("times", "normal");
-      doc.setFontSize(11);
-      doc.text("To,", L + 10, frameTop + 18);
-      doc.setFont("times", "bold");
-      doc.text(String(qHeader.customer_name || ""), L + 10, frameTop + 36);
-      doc.text(String(qHeader.address || ""), L + 10, frameTop + 52);
-      doc.text(String(qHeader.phone || ""), L + 10, frameTop + 68);
-
-      // Right (Ref/Date/GSTIN)
-      doc.setFont("times", "normal");
-      const rx = splitX + 10;
-      doc.text(`Ref No : ${num}`, rx, frameTop + 20);
-      doc.text(`Date   : ${dateStr}`, rx, frameTop + 36);
-      doc.text(`GSTIN  : 18BCYCP9744A1ZA`, rx, frameTop + 52); // update if needed
-
-      // Subject strip — single top line
-      const subTop = headerBottom + gap;
-      doc.line(L, subTop, R, subTop);
-      doc.setFont("times", "normal");
-      doc.text("Sub :  Performa Invoice for Machinery", L + 10, subTop + 18);
-
-      // Intro strip — single top line
-      const introTop = subTop + subH + gap;
-      doc.line(L, introTop, R, introTop);
-      doc.text("Dear Sir/Madam,", L + 10, introTop + 16);
-      doc.text(
-        "With reference to your enquiry we are pleased to offer you as under:",
-        L + 10,
-        introTop + 30
-      );
-
-      // Table starts after intro block
-      afterHeaderY = introTop + introH;
-    } else {
-      // Mahabir Hardware Stores
-      doc.setFont("courier", "bold");
-      doc.setFontSize(20);
-      doc.text("Mahabir Hardware Stores", pw / 2, 48, { align: "center" });
-
-      doc.setFont("courier", "bold");
-      doc.setFontSize(16);
-      doc.text("QUOTATION", pw / 2, 74, { align: "center" });
-
-      doc.setFont("courier", "normal");
-      doc.setFontSize(10);
-
-      let y0 = 92;
-      doc.setFontSize(11);
-      doc.text("To,", L, y0);
-      y0 += 18;
-
-      doc.setFont("courier", "bold");
-      doc.text(String(qHeader.customer_name || ""), L, y0);
-      y0 += 16;
-      doc.text(String(qHeader.address || ""), L, y0);
-      y0 += 16;
-      doc.text(String(qHeader.phone || ""), L, y0);
-
-      doc.setFont("courier", "normal");
-      doc.setFontSize(10);
-      // Mahabir label: Quotation Number
-      doc.text(`Quotation Number: ${num}`, R, 92, { align: "right" });
-      doc.text(`Date: ${dateStr}`, R, 107, { align: "right" });
-
-      const introY = y0 + 28;
-      doc.setFontSize(11);
-      doc.text("Dear Sir/Madam,", L, introY);
-      doc.text(
-        "With reference to your enquiry we are pleased to offer you as under:",
-        L,
-        introY + 16
-      );
-
-      afterHeaderY = introY + 38;
-    }
-
-    // -------------------------------
-    // ITEMS TABLE (all firms)
-    // -------------------------------
-    const body = cartList.map((r, i) => [
-      String(i + 1),
-      `${r.name || ""}${r.specs ? `\n(${r.specs})` : ""}`,
-      String(r.qty || 0),
-      inr(r.unit || 0),
-      inr((r.qty || 0) * (r.unit || 0)),
-    ]);
-
-    const colSl = 28;
-    const colQty = 40;
-    const colUnit = 90;
-    const colTotal = 110;
-    const colDesc = Math.max(
-      120,
-      contentW - (colSl + colQty + colUnit + colTotal)
+    // Intro
+    const introY = y0 + 28;
+    doc.setFontSize(11);
+    doc.text("Dear Sir/Madam,", L, introY);
+    doc.text(
+      "With reference to your enquiry we are pleased to offer you as under:",
+      L,
+      introY + 16
     );
 
-    const headFill =
-      firm === "Victor Engineering"
-        ? [220, 235, 255]
-        : firm === "Mahabir Hardware Stores"
-        ? [225, 248, 225]
-        : [230, 230, 230];
+    afterHeaderY = introY + 38; // table start
+  } else if (firm === "Victor Engineering") {
+    // Victor Engineering — single outer frame + divider lines (no inner boxes)
+    const LINE_W = 0.9;
+    const gap = 10; // vertical spacing between strips
+    const subH = 26;
+    const introH = 36;
 
-    const tableFont =
-      firm === "Victor Engineering"
-        ? "times"
-        : firm === "Mahabir Hardware Stores"
-        ? "courier"
-        : "helvetica";
+    // Title
+    doc.setFont("times", "bold");
+    doc.setFontSize(22);
+    doc.text("Victor Engineering", pw / 2, 60, { align: "center" });
+    doc.setFontSize(14);
+    doc.text("PERFORMA INVOICE", pw / 2, 80, { align: "center" });
 
-    autoTable(doc, {
-      startY: afterHeaderY,
-      head: [["Sl.", "Description", "Qty", "Unit Price", "Total (Incl. GST)"]],
-      body,
-      styles: {
-        font: tableFont,
-        fontSize: 10,
-        cellPadding: 6,
-        overflow: "linebreak",
-        textColor: [0, 0, 0],
-      },
-      headStyles: { fillColor: headFill, textColor: [0, 0, 0], fontStyle: "bold" },
-      columnStyles: {
-        0: { cellWidth: colSl, halign: "center" },
-        1: { cellWidth: colDesc },
-        2: { cellWidth: colQty, halign: "center" },
-        3: { cellWidth: colUnit, halign: "right" },
-        4: { cellWidth: colTotal, halign: "right" },
-      },
-      margin: { left: margin, right: margin },
-      tableLineColor: [200, 200, 200],
-      tableLineWidth: firm === "Mahabir Hardware Stores" ? 0.7 : 0.5,
-      theme: "grid",
+    // Outer frame
+    const frameTop = 92;
+    const frameBottom = ph - 40;
+    const frameH = frameBottom - frameTop;
+    doc.setLineWidth(LINE_W);
+    doc.rect(L, frameTop, contentW, frameH);
 
-      // preserve your two-line Description + custom 2nd line
-      didParseCell: (data) => {
-        if (data.section !== "body") return;
-        if (data.column.index !== 1) return;
-        const raw = (data.cell.raw ?? "").toString();
-        const nl = raw.indexOf("\n(");
-        if (nl === -1) return;
-        const name = raw.slice(0, nl);
-        const specs = raw.slice(nl);
-        data.cell.text = [name, " "];
-        data.cell._specs = specs;
-      },
+    // Header band: bottom line + vertical split only
+    const headerH = 86;
+    const headerBottom = frameTop + headerH;
+    const splitX = L + contentW * 0.6;
 
-      didDrawCell: (data) => {
-        if (data.section !== "body") return;
-        if (data.column.index !== 1) return;
-        const specs = data.cell && data.cell._specs;
-        if (!specs) return;
+    doc.line(L, headerBottom, R, headerBottom);
+    doc.line(splitX, frameTop, splitX, headerBottom);
 
-        const cellPad = (side) => {
-          if (typeof data.cell.padding === "function")
-            return data.cell.padding(side);
-          const cp = data.cell.styles?.cellPadding;
-          if (typeof cp === "number") return cp;
-          if (cp && typeof cp === "object") return cp[side] ?? 6;
-          return 6;
-        };
-        const padLeft = cellPad("left");
-        const padRight = cellPad("right");
-        const padTop = cellPad("top");
+    // Left (To:)
+    doc.setFont("times", "normal");
+    doc.setFontSize(11);
+    doc.text("To,", L + 10, frameTop + 18);
+    doc.setFont("times", "bold");
+    doc.text(String(qHeader.customer_name || ""), L + 10, frameTop + 36);
+    doc.text(String(qHeader.address || ""), L + 10, frameTop + 52);
+    doc.text(String(qHeader.phone || ""), L + 10, frameTop + 68);
 
-        const x = data.cell.x + padLeft;
-        const fsMain = (data.row.styles && data.row.styles.fontSize) || 10;
-        const lineH = fsMain * 1.15;
-        const specsY = data.cell.y + padTop + lineH;
+    // Right (Ref/Date/GSTIN)
+    doc.setFont("times", "normal");
+    const rx = splitX + 10;
+    doc.text(`Ref No : ${number}`, rx, frameTop + 20);
+    doc.text(`Date   : ${dateStr}`, rx, frameTop + 36);
+    doc.text(`GSTIN  : 18BCYCP9744A1ZA`, rx, frameTop + 52); // update if needed
 
-        const maxW = data.cell.width - padLeft - padRight;
-        const wrapped = doc.splitTextToSize(specs, maxW);
+    // Subject strip — single top line
+    const subTop = headerBottom + gap;
+    doc.line(L, subTop, R, subTop);
+    doc.setFont("times", "normal");
+    doc.text("Sub :  Performa Invoice for Machinery", L + 10, subTop + 18);
 
-        const prevSize = doc.getFontSize();
-        doc.setFontSize(prevSize * 0.85);
-        doc.setTextColor(120);
-        doc.text(wrapped, x, specsY);
-        doc.setTextColor(0, 0, 0);
-        doc.setFontSize(prevSize);
-      },
+    // Intro strip — single top line
+    const introTop = subTop + subH + gap;
+    doc.line(L, introTop, R, introTop);
+    doc.text("Dear Sir/Madam,", L + 10, introTop + 16);
+    doc.text(
+      "With reference to your enquiry we are pleased to offer you as under:",
+      L + 10,
+      introTop + 30
+    );
+
+    // Table starts after intro block
+    afterHeaderY = introTop + introH;
+  } else {
+    // Mahabir Hardware Stores
+    doc.setFont("courier", "bold");
+    doc.setFontSize(20);
+    doc.text("Mahabir Hardware Stores", pw / 2, 48, { align: "center" });
+
+    doc.setFont("courier", "bold");
+    doc.setFontSize(16);
+    doc.text("QUOTATION", pw / 2, 74, { align: "center" });
+
+    doc.setFont("courier", "normal");
+    doc.setFontSize(10);
+
+    let y0 = 92;
+    doc.setFontSize(11);
+    doc.text("To,", L, y0);
+    y0 += 18;
+
+    doc.setFont("courier", "bold");
+    doc.text(String(qHeader.customer_name || ""), L, y0);
+    y0 += 16;
+    doc.text(String(qHeader.address || ""), L, y0);
+    y0 += 16;
+    doc.text(String(qHeader.phone || ""), L, y0);
+
+    doc.setFont("courier", "normal");
+    doc.setFontSize(10);
+    // Mahabir label: Quotation Number
+    doc.text(`Quotation Number: ${number}`, R, 92, { align: "right" });
+    doc.text(`Date: ${dateStr}`, R, 107, { align: "right" });
+
+    const introY = y0 + 28;
+    doc.setFontSize(11);
+    doc.text("Dear Sir/Madam,", L, introY);
+    doc.text(
+      "With reference to your enquiry we are pleased to offer you as under:",
+      L,
+      introY + 16
+    );
+
+    afterHeaderY = introY + 38;
+  }
+
+  // -------------------------------
+  // ITEMS TABLE (all firms)
+  // -------------------------------
+  const body = cartList.map((r, i) => [
+    String(i + 1),
+    `${r.name || ""}${r.specs ? `\n(${r.specs})` : ""}`,
+    String(r.qty || 0),
+    inr(r.unit || 0),
+    inr((r.qty || 0) * (r.unit || 0)),
+  ]);
+
+  const colSl = 28;
+  const colQty = 40;
+  const colUnit = 90;
+  const colTotal = 110;
+  const colDesc = Math.max(
+    120,
+    contentW - (colSl + colQty + colUnit + colTotal)
+  );
+
+  const headFill =
+    firm === "Victor Engineering"
+      ? [220, 235, 255]
+      : firm === "Mahabir Hardware Stores"
+      ? [225, 248, 225]
+      : [230, 230, 230];
+
+  const tableFont =
+    firm === "Victor Engineering"
+      ? "times"
+      : firm === "Mahabir Hardware Stores"
+      ? "courier"
+      : "helvetica";
+
+  autoTable(doc, {
+    startY: afterHeaderY,
+    head: [["Sl.", "Description", "Qty", "Unit Price", "Total (Incl. GST)"]],
+    body,
+    styles: {
+      font: tableFont,
+      fontSize: 10,
+      cellPadding: 6,
+      overflow: "linebreak",
+      textColor: [0, 0, 0],
+    },
+    headStyles: { fillColor: headFill, textColor: [0, 0, 0], fontStyle: "bold" },
+    columnStyles: {
+      0: { cellWidth: colSl, halign: "center" },
+      1: { cellWidth: colDesc },
+      2: { cellWidth: colQty, halign: "center" },
+      3: { cellWidth: colUnit, halign: "right" },
+      4: { cellWidth: colTotal, halign: "right" },
+    },
+    margin: { left: margin, right: margin },
+    tableLineColor: [200, 200, 200],
+    tableLineWidth: firm === "Mahabir Hardware Stores" ? 0.7 : 0.5,
+    theme: "grid",
+
+    // preserve your two-line Description + custom 2nd line
+    didParseCell: (data) => {
+      if (data.section !== "body") return;
+      if (data.column.index !== 1) return;
+      const raw = (data.cell.raw ?? "").toString();
+      const nl = raw.indexOf("\n(");
+      if (nl === -1) return;
+      const name = raw.slice(0, nl);
+      const specs = raw.slice(nl);
+      data.cell.text = [name, " "];
+      data.cell._specs = specs;
+    },
+
+    didDrawCell: (data) => {
+      if (data.section !== "body") return;
+      if (data.column.index !== 1) return;
+      const specs = data.cell && data.cell._specs;
+      if (!specs) return;
+
+      const cellPad = (side) => {
+        if (typeof data.cell.padding === "function")
+          return data.cell.padding(side);
+        const cp = data.cell.styles?.cellPadding;
+        if (typeof cp === "number") return cp;
+        if (cp && typeof cp === "object") return cp[side] ?? 6;
+        return 6;
+      };
+      const padLeft = cellPad("left");
+      const padRight = cellPad("right");
+      const padTop = cellPad("top");
+
+      const x = data.cell.x + padLeft;
+      const fsMain = (data.row.styles && data.row.styles.fontSize) || 10;
+      const lineH = fsMain * 1.15;
+      const specsY = data.cell.y + padTop + lineH;
+
+      const maxW = data.cell.width - padLeft - padRight;
+      const wrapped = doc.splitTextToSize(specs, maxW);
+
+      const prevSize = doc.getFontSize();
+      doc.setFontSize(prevSize * 0.85);
+      doc.setTextColor(120);
+      doc.text(wrapped, x, specsY);
+      doc.setTextColor(0, 0, 0);
+      doc.setFontSize(prevSize);
+    },
+  });
+
+  // -------------------------------
+  // TOTAL LINE
+  // -------------------------------
+  const at = doc.lastAutoTable || null;
+  const totalsRightX = R - 10;
+  let totalsY = (at?.finalY ?? afterHeaderY) + 18;
+
+  if (firm === "Victor Engineering") {
+    // Just the text (no extra separator line)
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12);
+    doc.text(`Total = Rs ${inr(cartSubtotal)}`, totalsRightX, totalsY, {
+      align: "right",
     });
-
-    // -------------------------------
-    // TOTAL LINE
-    // -------------------------------
-    const at = doc.lastAutoTable || null;
-    const totalsRightX = R - 10;
-    let totalsY = (at?.finalY ?? afterHeaderY) + 18;
-
-    if (firm === "Victor Engineering") {
-      // Just the text (no extra separator line)
-      doc.setFont("helvetica", "bold");
+  } else {
+    // HVF & Mahabir keep ₹ style
+    try {
+      await loadRupeeFont(doc);
+      doc.setFont("NotoSans", "bold");
       doc.setFontSize(12);
-      doc.text(`Total = Rs ${inr(cartSubtotal)}`, totalsRightX, totalsY, {
+      const RUPEE = String.fromCharCode(0x20b9);
+      doc.text(`Total: ${RUPEE} ${inr(cartSubtotal)}`, totalsRightX, totalsY, {
         align: "right",
       });
-    } else {
-      // HVF & Mahabir keep ₹ style
-      try {
-        await loadRupeeFont(doc);
-        doc.setFont("NotoSans", "bold");
-        doc.setFontSize(12);
-        const RUPEE = String.fromCharCode(0x20b9);
-        doc.text(`Total: ${RUPEE} ${inr(cartSubtotal)}`, totalsRightX, totalsY, {
-          align: "right",
-        });
-      } catch {
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(12);
-        doc.text(`Total: Rs ${inr(cartSubtotal)}`, totalsRightX, totalsY, {
-          align: "right",
-        });
-      }
+    } catch {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(12);
+      doc.text(`Total: Rs ${inr(cartSubtotal)}`, totalsRightX, totalsY, {
+        align: "right",
+      });
     }
+  }
 
-    // -------------------------------
-    // TERMS & BANK
-    // -------------------------------
-    const ty = totalsY + 28;
+  // -------------------------------
+  // TERMS & BANK
+  // -------------------------------
+  const ty = totalsY + 28;
 
-    if (firm === "Victor Engineering") {
-      // Keep TERMS box, BANK as text only (no rectangle)
-      const termsH = 110;
+  if (firm === "Victor Engineering") {
+    // Keep TERMS box, BANK as text only (no rectangle)
+    const termsH = 110;
 
-      // TERMS rectangle (kept)
-      doc.setDrawColor(90);
-      doc.setLineWidth(0.9);
-      doc.rect(L, ty, contentW, termsH);
+    // TERMS rectangle (kept)
+    doc.setDrawColor(90);
+    doc.setLineWidth(0.9);
+    doc.rect(L, ty, contentW, termsH);
 
-      doc.setFont("times", "bold");
-      doc.setFontSize(11);
-      doc.text("Terms & Conditions", L + 10, ty + 16);
+    doc.setFont("times", "bold");
+    doc.setFontSize(11);
+    doc.text("Terms & Conditions", L + 10, ty + 16);
 
-      doc.setFont("times", "normal");
-      doc.setFontSize(10);
-      doc.text(
-        [
-          "Price will be including GST % as applicable.",
-          "This Performa Invoice is valid for 15 days only.",
-          "Delivery ex-stock/2 weeks.",
-          "Goods once sold cannot be taken back.",
-        ],
-        L + 10,
-        ty + 34
-      );
+    doc.setFont("times", "normal");
+    doc.setFontSize(10);
+    doc.text(
+      [
+        "Price will be including GST % as applicable.",
+        "This Performa Invoice is valid for 15 days only.",
+        "Delivery ex-stock/2 weeks.",
+        "Goods once sold cannot be taken back.",
+      ],
+      L + 10,
+      ty + 34
+    );
 
-      // BANK section — NO rectangle
-      const bankTop = ty + termsH + 10;
-      doc.setFont("times", "bold");
-      doc.setFontSize(11);
-      doc.text("BANK DETAILS", L + 10, bankTop + 16);
+    // BANK section — NO rectangle
+    const bankTop = ty + termsH + 10;
+    doc.setFont("times", "bold");
+    doc.setFontSize(11);
+    doc.text("BANK DETAILS", L + 10, bankTop + 16);
 
-      doc.setFont("times", "normal");
-      doc.setFontSize(10);
-      doc.text(
-        [
-          "M/S VICTOR ENGINEERING",
-          "Axis Bank (Moran, 785670)",
-          "Current Account",
-          "A/C No: 921020019081364",
-          "IFSC: UTIB0003701",
-        ],
-        L + 10,
-        bankTop + 34
-      );
+    doc.setFont("times", "normal");
+    doc.setFontSize(10);
+    doc.text(
+      [
+        "M/S VICTOR ENGINEERING",
+        "Axis Bank (Moran, 785670)",
+        "Current Account",
+        "A/C No: 921020019081364",
+        "IFSC: UTIB0003701",
+      ],
+      L + 10,
+      bankTop + 34
+    );
 
-      // reset draw defaults
-      doc.setDrawColor(0);
-      doc.setLineWidth(0.5);
+    // reset draw defaults
+    doc.setDrawColor(0);
+    doc.setLineWidth(0.5);
+  } else {
+    // HVF & Mahabir: unchanged
+    const tableFontLocal =
+      firm === "Mahabir Hardware Stores" ? "courier" : "helvetica";
+
+    doc.setFont(tableFontLocal, "bold");
+    doc.setFontSize(11);
+    doc.text("Terms & Conditions:", L, ty, { underline: true });
+
+    doc.setFont(tableFontLocal, "normal");
+    doc.setFontSize(10);
+    doc.text(
+      [
+        "This quotation is valid for one month from the date of issue.",
+        "Delivery is subject to stock availability and may take up to 2 weeks.",
+        "Goods once sold are non-returnable and non-exchangeable.",
+        "",
+        "Yours Faithfully",
+        firm === "Mahabir Hardware Stores" ? "Mahabir Hardware Stores" : "HVF Agency",
+        firm === "Mahabir Hardware Stores" ? "—" : "9957239143 / 9954425780",
+        firm === "Mahabir Hardware Stores" ? "GST: —" : "GST: 18AFCPC4260P1ZB",
+        "",
+      ],
+      L,
+      ty + 16
+    );
+
+    doc.setFont(tableFontLocal, "bold");
+    doc.text("BANK DETAILS", L, ty + 120);
+
+    doc.setFont(tableFontLocal, "normal");
+    let bankLines = [];
+    if (firm === "HVF Agency") {
+      bankLines = [
+        "HVF AGENCY",
+        "ICICI BANK (Moran Branch)",
+        "A/C No - 199505500412",
+        "IFSC Code - ICIC0001995",
+      ];
     } else {
-      // HVF & Mahabir: unchanged
-      const tableFontLocal =
-        firm === "Mahabir Hardware Stores" ? "courier" : "helvetica";
-
-      doc.setFont(tableFontLocal, "bold");
-      doc.setFontSize(11);
-      doc.text("Terms & Conditions:", L, ty, { underline: true });
-
-      doc.setFont(tableFontLocal, "normal");
-      doc.setFontSize(10);
-      doc.text(
-        [
-          "This quotation is valid for one month from the date of issue.",
-          "Delivery is subject to stock availability and may take up to 2 weeks.",
-          "Goods once sold are non-returnable and non-exchangeable.",
-          "",
-          "Yours Faithfully",
-          firm === "Mahabir Hardware Stores" ? "Mahabir Hardware Stores" : "HVF Agency",
-          firm === "Mahabir Hardware Stores"
-            ? "—"
-            : "9957239143 / 9954425780",
-          firm === "Mahabir Hardware Stores" ? "GST: —" : "GST: 18AFCPC4260P1ZB",
-          "",
-        ],
-        L,
-        ty + 16
-      );
-
-      doc.setFont(tableFontLocal, "bold");
-      doc.text("BANK DETAILS", L, ty + 120);
-
-      doc.setFont(tableFontLocal, "normal");
-      let bankLines = [];
-      if (firm === "HVF Agency") {
-        bankLines = [
-          "HVF AGENCY",
-          "ICICI BANK (Moran Branch)",
-          "A/C No - 199505500412",
-          "IFSC Code - ICIC0001995",
-        ];
-      } else {
-        bankLines = [
-          "MAHABIR HARDWARE STORES",
-          "SBI (Moranhat Branch)",
-          "A/C No - 302187654321",
-          "IFSC Code - SBIN0001995",
-        ];
-      }
-      doc.text(bankLines, L, ty + 136);
+      bankLines = [
+        "MAHABIR HARDWARE STORES",
+        "SBI (Moranhat Branch)",
+        "A/C No - 302187654321",
+        "IFSC Code - SBIN0001995",
+      ];
     }
+    doc.text(bankLines, L, ty + 136);
+  }
 
-    // Done — open in new tab
-    window.open(doc.output("bloburl"), "_blank");
-  };
+  // Done — open in new tab
+  window.open(doc.output("bloburl"), "_blank");
+};
 
   /*** UI ***/
   return (
