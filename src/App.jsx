@@ -633,15 +633,23 @@ const deleteSavedQuote = async (number) => {
 };
 
   /* ---------- LOAD SAVED LIST / EDIT / PDF ---------- */
-  const [saved, setSaved] = useState([]);
-  const loadSaved = async () => {
-    const { data } = await supabase
-      .from("quotes")
-      .select("id,number,customer_name,total,created_at")
-      .order("created_at", { ascending: false });
-    setSaved(data || []);
-  };
-  const editSaved = async (number) => {
+const [saved, setSaved] = useState([]);
+
+const loadSaved = async () => {
+  const { data, error } = await supabase
+    .from("quotes")
+    .select("id,number,customer_name,total,created_at")
+    .order("created_at", { ascending: false });
+  if (error) {
+    console.error(error);
+    alert("Could not load saved quotes.");
+    return;
+  }
+  setSaved(data || []);
+};
+
+// Load a saved quote into the editor
+const editSaved = async (number) => {
   // 1) Load the quote header
   const { data: q, error: qerr } = await supabase
     .from("quotes")
@@ -678,14 +686,14 @@ const deleteSavedQuote = async (number) => {
       qty: Number(ln.qty || 0),
     };
   });
+  setCart(newCart);
 
   // 4) Align firm with the number, mark as loaded-from-saved
-  const inferred = inferFirmFromNumber(q.number);
-  if (inferred) setFirm(inferred);
+  const firmGuess = inferFirmFromNumber(q.number);
+  if (firmGuess) setFirm(firmGuess);
   setLoadedFromSaved(true);
 
   // 5) Push state and open editor
-  setCart(newCart);
   setQHeader((h) => ({
     ...h,
     number: q.number,
@@ -697,37 +705,59 @@ const deleteSavedQuote = async (number) => {
   setPage("quoteEditor");
 };
 
-// If the editor is showing the same (now deleted) number,
-// clear it so the next reservation pulls the rewound value.
-setQHeader(h => (h.number === number ? { ...h, number: "" } : h));
-setSavedOnce(false);
+// Delete a saved quote (header + items) and then rewind that firm's counter
+const deleteSavedQuote = async (number) => {
+  if (!number) return;
+  const ok = confirm(`Delete quote ${number}? This cannot be undone.`);
+  if (!ok) return;
 
-// (Optional) close the popup after delete:
-// document.getElementById("saved-pop").style.display = "none";
+  try {
+    // 1) Figure out which firm this number belongs to
+    const firmOfQuote = inferFirmFromNumber(number);
+    if (!firmOfQuote) throw new Error(`Cannot infer firm from number: ${number}`);
 
-alert(`Deleted ${number} ✅`);
-} catch (e) {
-  console.error(e);
-  alert("Delete failed: " + (e?.message || e));
-}
+    // 2) Find the quote id
+    const { data: q, error: qerr } = await supabase
+      .from("quotes")
+      .select("id")
+      .eq("number", number)
+      .maybeSingle();
+    if (qerr) throw qerr;
+    if (!q?.id) throw new Error(`Quote not found: ${number}`);
+
+    // 3) Delete line items first (FK safety)
+    const { error: ierr } = await supabase
+      .from("quote_items")
+      .delete()
+      .eq("quote_id", q.id);
+    if (ierr) throw ierr;
+
+    // 4) Delete the quote header
+    const { error: derr } = await supabase
+      .from("quotes")
+      .delete()
+      .eq("id", q.id);
+    if (derr) throw derr;
+
+    // 5) Rewind that firm's counter to the current max in quotes
+    const { error: rpcErr } = await supabase.rpc("sync_counter_to_max", {
+      p_firm: firmOfQuote,
+    });
+    if (rpcErr) throw rpcErr;
+
+    // 6) Refresh list & clear editor if it was showing this number
+    await loadSaved();
+    if (qHeader.number === number) {
+      setQHeader((h) => ({ ...h, number: "" }));
+      setSavedOnce(false);
+    }
+
+    alert(`Deleted ${number} ✅`);
+  } catch (e) {
+    console.error(e);
+    alert("Delete failed: " + (e?.message || e));
+  }
 };
-  // NEW: align the firm with the loaded quote number
-  const inferred = inferFirmFromNumber(q.number);
-  if (inferred) setFirm(inferred);
-
-  setLoadedFromSaved(true); // <<< add this line
-
-  setQHeader((h) => ({
-    ...h,
-    number: q.number,
-    customer_name: q.customer_name || "",
-    phone: q.phone || "",
-    date: todayStr(),
-  }));
-  setQuoteMode(true);
-  setPage("quoteEditor");
-};
-
  /* ---------- CLEAN PDF (NOT web print) ---------- */
 const exportPDF = async () => {
   if (cartList.length === 0) return alert("Nothing to print.");
