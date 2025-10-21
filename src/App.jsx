@@ -578,59 +578,6 @@ const saveQuote = async (forceNumber) => {
   }
 };
 
-// ---------- DELETE a saved quote (header + items), then resync the counter ----------
-const deleteSavedQuote = async (number) => {
-  if (!number) return;
-  const ok = confirm(`Delete quote ${number}? This cannot be undone.`);
-  if (!ok) return;
-
-  try {
-    // 1) Which firm does this number belong to?
-    const firmOfQuote = inferFirmFromNumber(number);
-    if (!firmOfQuote) throw new Error(`Cannot infer firm from number: ${number}`);
-
-    // 2) Find the quote id
-    const { data: q, error: qerr } = await supabase
-      .from("quotes")
-      .select("id")
-      .eq("number", number)
-      .maybeSingle();
-    if (qerr) throw qerr;
-    if (!q?.id) throw new Error(`Quote not found: ${number}`);
-
-    // 3) Delete line items first
-    const { error: ierr } = await supabase
-      .from("quote_items")
-      .delete()
-      .eq("quote_id", q.id);
-    if (ierr) throw ierr;
-
-    // 4) Delete the quote header
-    const { error: derr } = await supabase
-      .from("quotes")
-      .delete()
-      .eq("id", q.id);
-    if (derr) throw derr;
-
-    // 5) Rewind that firm's counter to the current max in quotes
-    const { error: rpcErr } = await supabase.rpc("sync_counter_to_max", {
-      p_firm: firmOfQuote,
-    });
-    if (rpcErr) throw rpcErr;
-
-    // 6) Refresh UI and clear editor if it showed the deleted number
-    await loadSaved();
-    if (qHeader.number === number) {
-      setQHeader((h) => ({ ...h, number: "" }));
-      setSavedOnce(false);
-    }
-
-    alert(`Deleted ${number} ✅`);
-  } catch (e) {
-    console.error(e);
-    alert("Delete failed: " + (e?.message || e));
-  }
-};
 
   /* ---------- LOAD SAVED LIST / EDIT / PDF ---------- */
 const [saved, setSaved] = useState([]);
