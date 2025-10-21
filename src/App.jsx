@@ -578,48 +578,14 @@ const saveQuote = async (forceNumber) => {
   }
 };
 
-  /* ---------- LOAD SAVED LIST / EDIT / PDF ---------- */
-  const [saved, setSaved] = useState([]);
-  const loadSaved = async () => {
-    const { data } = await supabase
-      .from("quotes")
-      .select("id,number,customer_name,total,created_at")
-      .order("created_at", { ascending: false });
-    setSaved(data || []);
-  };
-  const editSaved = async (number) => {
-  const { data: q } = await supabase
-    .from("quotes")
-    .select("id,number,customer_name,phone")
-    .eq("number", number)
-    .maybeSingle();
-  if (!q) return;
-
-  const { data: lines } = await supabase
-    .from("quote_items")
-    .select("name,specs,qty,mrp")
-    .eq("quote_id", q.id);
-
-  const newCart = {};
-  (lines || []).forEach((ln, idx) => {
-    const id = `saved-${idx}`;
-    newCart[id] = {
-      id,
-      name: ln.name,
-      specs: ln.specs || "",
-      unit: Number(ln.mrp || 0),
-      qty: Number(ln.qty || 0),
-    };
-  });
-
-// Delete a saved quote (header + items) and then rewind that firm's counter
+// ---------- DELETE a saved quote (header + items), then resync the counter ----------
 const deleteSavedQuote = async (number) => {
   if (!number) return;
   const ok = confirm(`Delete quote ${number}? This cannot be undone.`);
   if (!ok) return;
 
   try {
-    // 1) Figure out which firm this number belongs to
+    // 1) Which firm does this number belong to?
     const firmOfQuote = inferFirmFromNumber(number);
     if (!firmOfQuote) throw new Error(`Cannot infer firm from number: ${number}`);
 
@@ -632,7 +598,7 @@ const deleteSavedQuote = async (number) => {
     if (qerr) throw qerr;
     if (!q?.id) throw new Error(`Quote not found: ${number}`);
 
-    // 3) Delete line items first (FK safety)
+    // 3) Delete line items first
     const { error: ierr } = await supabase
       .from("quote_items")
       .delete()
@@ -647,18 +613,89 @@ const deleteSavedQuote = async (number) => {
     if (derr) throw derr;
 
     // 5) Rewind that firm's counter to the current max in quotes
-    // (so next new quote uses the first missing number)
     const { error: rpcErr } = await supabase.rpc("sync_counter_to_max", {
       p_firm: firmOfQuote,
     });
     if (rpcErr) throw rpcErr;
 
-    // 6) If the editor was showing this number, clear it
-    setQHeader((h) => (h.number === number ? { ...h, number: "" } : h));
-    setSavedOnce(false);
+    // 6) Refresh UI and clear editor if it showed the deleted number
+    await loadSaved();
+    if (qHeader.number === number) {
+      setQHeader((h) => ({ ...h, number: "" }));
+      setSavedOnce(false);
+    }
 
-    // Refresh the list
-await loadSaved();
+    alert(`Deleted ${number} ✅`);
+  } catch (e) {
+    console.error(e);
+    alert("Delete failed: " + (e?.message || e));
+  }
+};
+
+  /* ---------- LOAD SAVED LIST / EDIT / PDF ---------- */
+  const [saved, setSaved] = useState([]);
+  const loadSaved = async () => {
+    const { data } = await supabase
+      .from("quotes")
+      .select("id,number,customer_name,total,created_at")
+      .order("created_at", { ascending: false });
+    setSaved(data || []);
+  };
+  const editSaved = async (number) => {
+  // 1) Load the quote header
+  const { data: q, error: qerr } = await supabase
+    .from("quotes")
+    .select("id,number,customer_name,phone")
+    .eq("number", number)
+    .maybeSingle();
+  if (qerr) {
+    console.error(qerr);
+    alert("Could not load the saved quote.");
+    return;
+  }
+  if (!q) return;
+
+  // 2) Load its line items
+  const { data: lines, error: lerr } = await supabase
+    .from("quote_items")
+    .select("name,specs,qty,mrp")
+    .eq("quote_id", q.id);
+  if (lerr) {
+    console.error(lerr);
+    alert("Could not load quote items.");
+    return;
+  }
+
+  // 3) Rebuild the cart
+  const newCart = {};
+  (lines || []).forEach((ln, idx) => {
+    const id = `saved-${idx}`;
+    newCart[id] = {
+      id,
+      name: ln.name,
+      specs: ln.specs || "",
+      unit: Number(ln.mrp || 0),
+      qty: Number(ln.qty || 0),
+    };
+  });
+
+  // 4) Align firm with the number, mark as loaded-from-saved
+  const inferred = inferFirmFromNumber(q.number);
+  if (inferred) setFirm(inferred);
+  setLoadedFromSaved(true);
+
+  // 5) Push state and open editor
+  setCart(newCart);
+  setQHeader((h) => ({
+    ...h,
+    number: q.number,
+    customer_name: q.customer_name || "",
+    phone: q.phone || "",
+    date: todayStr(),
+  }));
+  setQuoteMode(true);
+  setPage("quoteEditor");
+};
 
 // If the editor is showing the same (now deleted) number,
 // clear it so the next reservation pulls the rewound value.
