@@ -1436,13 +1436,30 @@ try {
         border-color: #d7dbe3;
       }
       .card-body {
-        padding: var(--space-4);
+  padding: var(--space-4);
 
-        /* NEW: fill remaining vertical space under the image */
-        display: flex;
-        flex-direction: column;
-        flex: 1;
-      }
+  /* Fill remaining vertical space under the image */
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+/* Mobile only: keep the Add/Counter bar aligned at the bottom of each card */
+@media (max-width: 640px){
+  .card{
+    display: flex;
+    flex-direction: column;
+  }
+  .card-body{
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+  }
+  .addbar{
+    margin-top: auto;     /* pushes the Add bar to the bottom */
+    padding-bottom: 10px; /* consistent gap above card bottom */
+  }
+}
       /* product name: clamp to 2 lines */
 .card-body .pname{
   margin: 0 0 6px;
