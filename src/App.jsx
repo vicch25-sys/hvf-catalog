@@ -366,12 +366,11 @@ const signOut = async () => {
         .slice(0, 40);
       const filePath = `products/${Date.now()}-${safeBase}.${ext}`;
       const { error: upErr } = await supabase.storage
-        .from("images")
-        .upload(filePath, form.imageFile, {
-          cacheControl: "3600",
-          contentType: form.imageFile.type || "image/jpeg",
-          upsert: true,
-        });
+  .from("images")
+  .upload(filePath, form.imageFile, {
+    cacheControl: "3600",
+    contentType: form.imageFile.type || "image/jpeg",
+  });
       if (upErr) throw new Error("UPLOAD: " + upErr.message);
       const { data: urlData, error: urlErr } = supabase.storage
         .from("images")
