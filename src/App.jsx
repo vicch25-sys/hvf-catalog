@@ -1768,25 +1768,131 @@ try {
 )}
          {/* Categories (hidden on savedDetailed) */}
       {page === "catalog" && (
-  <div
-    style={{
-      display: "flex",
-      justifyContent: "center",
-      flexWrap: "wrap",
-      gap: 8,
-      marginBottom: 12,
-    }}
-  >
-    {["All", ...categories].map((c) => (
-      <button
-        key={c}
-        onClick={() => setCategory(c)}
-        className={`chip ${category === c ? "active" : ""}`}
-      >
-        {c}
-      </button>
-    ))}
-  </div>
+  <>
+    <div
+      style={{
+        display: "flex",
+        justifyContent: "center",
+        flexWrap: "wrap",
+        gap: 8,
+        marginBottom: 12,
+      }}
+    >
+      {["All", ...categories].map((c) => (
+        <button
+          key={c}
+          onClick={() => setCategory(c)}
+          className={`chip ${category === c ? "active" : ""}`}
+        >
+          {c}
+        </button>
+      ))}
+    </div>
+
+    {/* --- Admin-only: Add Product panel --- */}
+    {isAdmin && (
+      <details className="paper section" style={{ maxWidth: 1100, margin: "0 auto 16px" }}>
+        <summary className="btn" style={{ cursor: "pointer" }}>
+          ➕ Add Product
+        </summary>
+
+        <form onSubmit={onSave} style={{ marginTop: 12 }}>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr 1fr",
+              gap: 10,
+              alignItems: "end",
+            }}
+          >
+            <label>
+              <div style={{ fontSize: 12, color: "#666" }}>Name *</div>
+              <input name="name" value={form.name} onChange={onChange} required />
+            </label>
+
+            <label>
+              <div style={{ fontSize: 12, color: "#666" }}>Category *</div>
+              <select
+                name="category"
+                value={form.category}
+                onChange={onChange}
+                required
+              >
+                <option value="" disabled>Select category</option>
+                {categories.map((n) => (
+                  <option key={n} value={n}>{n}</option>
+                ))}
+              </select>
+            </label>
+
+            <label>
+              <div style={{ fontSize: 12, color: "#666" }}>MRP (₹) *</div>
+              <input
+                type="number"
+                name="mrp"
+                value={form.mrp}
+                onChange={onChange}
+                min="0"
+                required
+              />
+            </label>
+
+            <label>
+              <div style={{ fontSize: 12, color: "#666" }}>Selling Price (₹)</div>
+              <input
+                type="number"
+                name="sell_price"
+                value={form.sell_price}
+                onChange={onChange}
+                min="0"
+              />
+            </label>
+
+            <label>
+              <div style={{ fontSize: 12, color: "#666" }}>Cost Price (₹)</div>
+              <input
+                type="number"
+                name="cost_price"
+                value={form.cost_price}
+                onChange={onChange}
+                min="0"
+              />
+            </label>
+
+            <label>
+              <div style={{ fontSize: 12, color: "#666" }}>Image *</div>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={onChange}      {/* sets form.imageFile via files */}
+                required
+              />
+            </label>
+
+            <label style={{ gridColumn: "1 / span 3" }}>
+              <div style={{ fontSize: 12, color: "#666" }}>Specs / description</div>
+              <input
+                name="specs"
+                value={form.specs}
+                onChange={onChange}
+                placeholder="Short specs shown on card"
+              />
+            </label>
+
+            <div style={{ gridColumn: "1 / span 3", textAlign: "right" }}>
+              <button
+                type="submit"
+                className="btn primary"
+                disabled={saving}
+              >
+                {saving ? "Saving…" : "Save Product"}
+              </button>
+            </div>
+          </div>
+        </form>
+      </details>
+    )}
+  </>
 )}
 
       {/* PAGE: CATALOG */}
