@@ -1864,7 +1864,7 @@ try {
               <input
                 type="file"
                 accept="image/*"
-                onChange={onChange}      {/* sets form.imageFile via files */}
+                onChange={onChange}
                 required
               />
             </label>
