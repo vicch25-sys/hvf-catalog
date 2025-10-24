@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -133,6 +133,20 @@ export default function App() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [loginEmail, setLoginEmail] = useState("");
   const [showLoginBox, setShowLoginBox] = useState(false);
+
+// --- login menu refs & auto-close ---
+const loginMenuRef = useRef(null);
+const loginIdleTimer = useRef(null);
+
+const closeLoginMenu = () => {
+  if (loginIdleTimer.current) {
+    clearTimeout(loginIdleTimer.current);
+    loginIdleTimer.current = null;
+  }
+  if (loginMenuRef.current) {
+    loginMenuRef.current.open = false; // closes the <details>
+  }
+};
 
   // staff quick view (PIN 2525)
   const [staffMode, setStaffMode] = useState(false);
@@ -1497,34 +1511,73 @@ try {
   min-width:76px; height:34px; line-height:34px; text-align:center;
   background:#fff; color:var(--primary); border-radius:6px; font-weight:800;
 }
+
+/* --- Mobile-only fix: keep full counter visible, no cut-off --- */
+@media (max-width: 640px){
+  .addbar{ margin-top:10px; }
+  .addbtn, .qtywrap{
+    width:92%;          /* wider on phones so - 1 + fit */
+    max-width:340px;    /* allow wider if the card allows */
+    height:42px;        /* a touch shorter */
+  }
+  .qtywrap{ gap:10px; padding:0 8px; }
+  .qtywrap .op{ width:38px; height:42px; font-size:22px; }
+  .qtywrap .num{ min-width:64px; height:32px; line-height:32px; }
+}
     `}</style>
       {/* top-right Login menu */}
 <div
   style={{ display: "flex", justifyContent: "flex-end", padding: "8px 16px" }}
 >
-  
-        <details>
-          <summary className="btn">Login</summary>
-          <div
-  className="paper section"
-  style={{ position: "absolute", right: 16, marginTop: 6, minWidth: 230 }}
->
-            <button onClick={toggleStaff} className="btn" style={{ width: "100%", marginBottom: "var(--space-2)" }}>
-  {staffMode ? "Logout Staff View" : "Login as Staff (PIN)"}
-</button>
-            <button
-  onClick={() => setShowLoginBox(true)}
-  className="btn"
-  style={{ width: "100%", marginBottom: "var(--space-2)" }}
->
-  Login as Admin (Email)
-</button>
-            <button onClick={enableQuoteMode} className="btn" style={{ width: "100%" }}>
-  {quoteMode ? "Exit Quotation Mode" : "Login for Quotation (PIN)"}
-</button>
-          </div>
-        </details>
-      </div>
+  <details
+    ref={loginMenuRef}
+    onToggle={(e) => {
+      // When opened, start a 10s idle timer. When closed, clear it.
+      if (e.currentTarget.open) {
+        if (loginIdleTimer.current) clearTimeout(loginIdleTimer.current);
+        loginIdleTimer.current = setTimeout(() => {
+          if (loginMenuRef.current?.open) loginMenuRef.current.open = false;
+          loginIdleTimer.current = null;
+        }, 10000); // auto-hide after 10s if nothing chosen
+      } else {
+        if (loginIdleTimer.current) {
+          clearTimeout(loginIdleTimer.current);
+          loginIdleTimer.current = null;
+        }
+      }
+    }}
+  >
+    <summary className="btn">Login</summary>
+    <div
+      className="paper section"
+      style={{ position: "absolute", right: 16, marginTop: 6, minWidth: 230 }}
+    >
+      <button
+        onClick={() => { toggleStaff(); closeLoginMenu(); }}
+        className="btn"
+        style={{ width: "100%", marginBottom: "var(--space-2)" }}
+      >
+        {staffMode ? "Logout Staff View" : "Login as Staff (PIN)"}
+      </button>
+
+      <button
+        onClick={() => { setShowLoginBox(true); closeLoginMenu(); }}
+        className="btn"
+        style={{ width: "100%", marginBottom: "var(--space-2)" }}
+      >
+        Login as Admin (Email)
+      </button>
+
+      <button
+        onClick={() => { enableQuoteMode(); closeLoginMenu(); }}
+        className="btn"
+        style={{ width: "100%" }}
+      >
+        {quoteMode ? "Exit Quotation Mode" : "Login for Quotation (PIN)"}
+      </button>
+    </div>
+  </details>
+</div>
 
      {/* Header (logo always visible; rest hidden on savedDetailed) */}
 <>
