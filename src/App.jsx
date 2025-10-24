@@ -1435,15 +1435,20 @@ try {
         box-shadow: 0 12px 36px rgba(16,24,40,.08);
         border-color: #d7dbe3;
       }
-      .card-body {
+      .card-body{
   padding: var(--space-4);
-
-  /* Fill remaining vertical space under the image */
-  display: flex;
-  flex-direction: column;
-  flex: 1;
+  /* fill remaining vertical space under the image */
+  display:flex;
+  flex-direction:column;
+  flex:1;
 }
 
+/* MOBILE ONLY: equalize the text area height so the Add bar lines up */
+@media (max-width:640px){
+  .card{ display:flex; flex-direction:column; }   /* make the whole card a column */
+  .card-body{ min-height:230px; }                 /* reserve room for varying text */
+  .addbar{ margin-top:auto; padding-bottom:10px;} /* stick Add bar at the bottom */
+}
 /* Mobile only: keep the Add/Counter bar aligned at the bottom of each card */
 @media (max-width: 640px){
   /* Make the catalog a real grid on phones and stretch items so each
