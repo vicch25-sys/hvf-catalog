@@ -1836,27 +1836,30 @@ try {
                     {m.specs && <p className="specs">{m.specs}</p>}
                     <p style={{ fontWeight: 700 }}>₹{inr(m.mrp)}</p>
                     {(staffMode || isAdmin) && m.sell_price != null && (
-                      <div
-                        style={{
-                          fontWeight: 700,
-                          marginTop: -2,
-                          marginBottom: 6,
-                          display: "inline-flex",
-                          alignItems: "baseline",
-                          gap: 8,
-                        }}
-                      >
-                        <span style={{ color: "#d32f2f" }}>₹{inr(m.sell_price)}</span>
-                        {isAdmin && m.cost_price != null && (
-                          <>
-                            <span style={{ color: "#bbb" }}>/</span>
-                            <span style={{ color: "#d4a106" }}>
-                              ₹{inr(m.cost_price)}
-                            </span>
-                          </>
-                        )}
-                      </div>
-                    )}
+  <div
+    style={{
+      fontWeight: 700,
+      marginTop: -2,
+      marginBottom: 6,
+      display: "flex",
+      justifyContent: "center",   // center horizontally
+      alignItems: "baseline",
+      gap: 8,
+      width: "100%",
+      alignSelf: "center",
+    }}
+  >
+    <span style={{ color: "#d32f2f" }}>₹{inr(m.sell_price)}</span>
+    {isAdmin && m.cost_price != null && (
+      <>
+        <span style={{ color: "#bbb" }}>/</span>
+        <span style={{ color: "#d4a106" }}>
+          ₹{inr(m.cost_price)}
+        </span>
+      </>
+    )}
+  </div>
+)}
                     {m.category && (
                       <p style={{ color: "#777", fontSize: 12 }}>{m.category}</p>
                     )}
