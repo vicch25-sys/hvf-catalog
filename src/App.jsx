@@ -1446,18 +1446,31 @@ try {
 
 /* Mobile only: keep the Add/Counter bar aligned at the bottom of each card */
 @media (max-width: 640px){
+  /* Make the catalog a real grid on phones and stretch items so each
+     row uses the tallest card's height (keeps Add bars aligned). */
+  .catalog-grid{
+    display: grid !important;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    align-items: stretch;     /* equal height per row */
+  }
+
   .card{
     display: flex;
     flex-direction: column;
+    height: 100%;             /* fill the stretched row height */
   }
+
   .card-body{
     flex: 1;
     display: flex;
     flex-direction: column;
   }
+
+  /* Pin the Add/Counter bar to the bottom inside each card */
   .addbar{
-    margin-top: auto;     /* pushes the Add bar to the bottom */
-    padding-bottom: 10px; /* consistent gap above card bottom */
+    margin-top: auto;
+    padding-bottom: 10px;
   }
 }
       /* product name: clamp to 2 lines */
