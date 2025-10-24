@@ -81,6 +81,11 @@ function numberMatchesFirm(firm, n) {
   return true;
 }
 
+function closeLoginMenu() {
+  const el = document.querySelector('details');
+  if (el && el.open) el.open = false;
+}
+
 
 
 // Per-firm next number via Supabase RPC (sequence + formatting)
@@ -130,9 +135,14 @@ export default function App() {
 
   /*** AUTH / MENUS ***/
   const [session, setSession] = useState(null);
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [loginEmail, setLoginEmail] = useState("");
-  const [showLoginBox, setShowLoginBox] = useState(false);
+const [isAdmin, setIsAdmin] = useState(false);
+
+// two-step local admin
+const [adminEmail, setAdminEmail] = useState("");
+const [adminPin, setAdminPin] = useState("");
+const [adminStep, setAdminStep] = useState(null);
+
+const [showLoginBox, setShowLoginBox] = useState(false);
 
 // --- login menu refs & auto-close ---
 const loginMenuRef = useRef(null);
@@ -216,48 +226,80 @@ const [page, setPage] = useState(() => __boot.page || "catalog"); // "catalog" |
   }, []);
 
   useEffect(() => {
-    const init = async () => {
-      const { data } = await supabase.auth.getSession();
-      setSession(data.session ?? null);
-      if (data.session?.user?.id) {
-        const { data: prof } = await supabase
-          .from("profiles")
-          .select("is_admin")
-          .eq("user_id", data.session.user.id)
-          .maybeSingle();
-        setIsAdmin(!!prof?.is_admin);
-      } else setIsAdmin(false);
-    };
-    init();
+  const init = async () => {
+    const { data } = await supabase.auth.getSession();
+    setSession(data.session ?? null);
 
-    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => {
-      setSession(s);
-      if (s?.user?.id) {
-        supabase
-          .from("profiles")
-          .select("is_admin")
-          .eq("user_id", s.user.id)
-          .maybeSingle()
-          .then(({ data }) => setIsAdmin(!!data?.is_admin));
-      } else setIsAdmin(false);
-      setShowLoginBox(false);
-    });
-    return () => sub.subscription.unsubscribe();
-  }, []);
+    const adminPersist = localStorage.getItem("adminLogin") === "1";
+    if (data.session?.user?.id) {
+      const { data: prof } = await supabase
+        .from("profiles")
+        .select("is_admin")
+        .eq("user_id", data.session.user.id)
+        .maybeSingle();
+      setIsAdmin(Boolean(prof?.is_admin) || adminPersist);
+    } else {
+      setIsAdmin(adminPersist);
+    }
+  };
+  init();
 
-  const sendLoginLink = async () => {
-    if (!loginEmail) return alert("Enter email first.");
-    const { error } = await supabase.auth.signInWithOtp({
-      email: loginEmail,
-      options: { emailRedirectTo: window.location.origin },
-    });
-    if (error) alert(error.message);
-    else alert("Login link sent. Check your email.");
-  };
-  const signOut = async () => {
-    await supabase.auth.signOut();
-    setIsAdmin(false);
-  };
+  const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => {
+    setSession(s);
+    const adminPersist = localStorage.getItem("adminLogin") === "1";
+    if (s?.user?.id) {
+      supabase
+        .from("profiles")
+        .select("is_admin")
+        .eq("user_id", s.user.id)
+        .maybeSingle()
+        .then(({ data }) => setIsAdmin(Boolean(data?.is_admin) || adminPersist));
+    } else {
+      setIsAdmin(adminPersist);
+    }
+    setShowLoginBox(false);
+  });
+  return () => sub.subscription.unsubscribe();
+}, []);
+
+  // --- Admin two-step (email -> PIN) ---
+const ADMIN_EMAIL = "vic.ch25@icloud.com";
+const ADMIN_PIN = "9957";
+
+const startAdminFlow = () => {
+  setShowLoginBox(true);
+  setAdminStep("email");
+  setAdminEmail("");
+  setAdminPin("");
+};
+
+const verifyAdminEmail = () => {
+  if ((adminEmail || "").trim().toLowerCase() === ADMIN_EMAIL) {
+    setAdminStep("pin");
+  } else {
+    alert("Email not recognized.");
+  }
+};
+
+const verifyAdminPin = () => {
+  if ((adminPin || "").trim() === ADMIN_PIN) {
+    setIsAdmin(true);
+    localStorage.setItem("adminLogin", "1"); // persist until manual logout
+    setShowLoginBox(false);
+    setAdminStep(null);
+    setAdminEmail("");
+    setAdminPin("");
+  } else {
+    alert("Wrong PIN.");
+  }
+};
+
+const signOut = async () => {
+  // clear both Supabase session (if any) and local admin login
+  try { await supabase.auth.signOut(); } catch {}
+  localStorage.removeItem("adminLogin");
+  setIsAdmin(false);
+};
 
   /* ---------- LOAD DATA ---------- */
   const loadMachines = async () => {
@@ -1595,12 +1637,12 @@ try {
         {staffMode ? "Logout Staff View" : "Login as Staff (PIN)"}
       </button>
 
-      <button
-        onClick={() => { setShowLoginBox(true); closeLoginMenu(); }}
+     <button
+        onClick={() => { startAdminFlow(); closeLoginMenu(); }}
         className="btn"
         style={{ width: "100%", marginBottom: "var(--space-2)" }}
       >
-        Login as Admin (Email)
+        Login as Admin
       </button>
 
       <button
@@ -1631,45 +1673,79 @@ try {
         by HVF Agency, Moranhat, Assam
       </p>
 
-      {/* inline admin email box */}
-      {!session && showLoginBox && (
-        <div style={{ display: "inline-flex", gap: 8 }}>
-          <input
-            type="email"
-            placeholder="your@email.com"
-            value={loginEmail}
-            onChange={(e) => setLoginEmail(e.target.value)}
-            style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #ddd" }}
-          />
-          <button onClick={sendLoginLink}>Send Login Link</button>
-          <button onClick={() => setShowLoginBox(false)} style={{ marginLeft: 6 }}>
-            Cancel
-          </button>
-        </div>
-      )}
+      {/* inline admin two-step box */}
+{showLoginBox && (
+  <div
+    style={{
+      display: "inline-flex",
+      gap: 8,
+      alignItems: "center",
+      flexWrap: "wrap",
+      justifyContent: "center",
+      marginTop: 8
+    }}
+  >
+    {/* Step 1: email */}
+    {(!adminStep || adminStep === "email") && (
+      <>
+        <input
+          type="email"
+          placeholder="Enter admin email"
+          value={adminEmail}
+          onChange={(e) => setAdminEmail(e.target.value)}
+          style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #ddd", minWidth: 240 }}
+        />
+        <button onClick={verifyAdminEmail}>Verify</button>
+        <button onClick={() => { setShowLoginBox(false); setAdminStep(null); }}>
+          Cancel
+        </button>
+      </>
+    )}
+
+    {/* Step 2: PIN */}
+    {adminStep === "pin" && (
+      <>
+        <input
+          type="password"
+          inputMode="numeric"
+          placeholder="Enter PIN"
+          value={adminPin}
+          onChange={(e) => setAdminPin(e.target.value)}
+          style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #ddd", minWidth: 160 }}
+        />
+        <button onClick={verifyAdminPin}>Login</button>
+        <button onClick={() => { setAdminStep("email"); setAdminPin(""); }}>
+          Back
+        </button>
+      </>
+    )}
+  </div>
+)}
 
       {/* session badge */}
-      {session && (
-        <div style={{ marginTop: 8 }}>
-          <button onClick={signOut} style={{ marginRight: 8 }}>
-            Sign Out
-          </button>
-          <span
-            style={{
-              padding: "4px 8px",
-              borderRadius: 6,
-              background: isAdmin ? "#e8f6ed" : "#f7e8e8",
-              color: isAdmin ? "#1f7a3f" : "#b11e1e",
-              marginRight: 8,
-            }}
-          >
-            {isAdmin ? "Admin: ON" : "Not admin"}
-          </span>
-          <span style={{ color: "#777", fontSize: 12 }}>
-            UID: {session?.user?.id?.slice(0, 8)}…
-          </span>
-        </div>
-      )}
+      {(session || isAdmin) && (
+  <div style={{ marginTop: 8 }}>
+    <button onClick={signOut} style={{ marginRight: 8 }}>
+      {session ? "Sign Out" : "Logout Admin"}
+    </button>
+    <span
+      style={{
+        padding: "4px 8px",
+        borderRadius: 6,
+        background: isAdmin ? "#e8f6ed" : "#f7e8e8",
+        color: isAdmin ? "#1f7a3f" : "#b11e1e",
+        marginRight: 8,
+      }}
+    >
+      {isAdmin ? "Admin: ON" : "Not admin"}
+    </span>
+    {session && (
+      <span style={{ color: "#777", fontSize: 12 }}>
+        UID: {session?.user?.id?.slice(0, 8)}…
+      </span>
+    )}
+  </div>
+)}
     </div>
   )}
 </>
