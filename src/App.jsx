@@ -144,8 +144,14 @@ export default function App() {
   };
 
   // quotation “cart” mode (PIN 9990)
-  const [quoteMode, setQuoteMode] = useState(false); // true = show qty steppers on catalog
-  const [page, setPage] = useState("catalog"); // "catalog" | "quoteEditor"
+  // seed from localStorage immediately so refresh doesn't reset UI
+const __boot = (() => {
+  try { return JSON.parse(localStorage.getItem("quoteState") || "{}"); }
+  catch { return {}; }
+})();
+
+const [quoteMode, setQuoteMode] = useState(() => !!__boot.quoteMode); // true = show qty steppers on catalog
+const [page, setPage] = useState(() => __boot.page || "catalog"); // "catalog" | "quoteEditor" | "savedDetailed"
   const enableQuoteMode = () => {
     if (quoteMode) {
       setQuoteMode(false);
@@ -350,13 +356,20 @@ export default function App() {
   };
 
   /* ---------- QUOTE CART (works only in quoteMode on catalog) ---------- */
-  const [cart, setCart] = useState({});
-  const cartList = Object.values(cart);
-  const cartCount = cartList.reduce((a, r) => a + (r.qty || 0), 0);
-  const cartSubtotal = cartList.reduce(
-    (a, r) => a + (r.qty || 0) * (r.unit || 0),
-    0
-  );
+// Initialize from localStorage immediately so a refresh doesn't wipe items
+const [cart, setCart] = useState(() => {
+  try {
+    return __boot.cart && typeof __boot.cart === "object" ? __boot.cart : {};
+  } catch {
+    return {};
+  }
+});
+const cartList = Object.values(cart);
+const cartCount = cartList.reduce((a, r) => a + (r.qty || 0), 0);
+const cartSubtotal = cartList.reduce(
+  (a, r) => a + (r.qty || 0) * (r.unit || 0),
+  0
+);
 
   const inc = (m) =>
     setCart((c) => {
@@ -411,63 +424,70 @@ export default function App() {
     subject: "",
   });
 
+
+
+const [editingQuoteId, setEditingQuoteId] = useState(null);
+
   const [firm, setFirm] = useState("HVF Agency");
 const [savedOnce, setSavedOnce] = useState(false);
 
 // marks that we loaded an existing, already-saved quote
 const [loadedFromSaved, setLoadedFromSaved] = useState(false);
 
+// prevent saving empties to localStorage before we've restored it once
+const [hydrated, setHydrated] = useState(false);
 
-  // --- Persist quote state in localStorage so refresh won't log out ---
-  useEffect(() => {
+  // --- Restore once from localStorage, then mark "hydrated" ---
+useEffect(() => {
+  try {
     const saved = loadQuoteState
       ? loadQuoteState()
       : JSON.parse(localStorage.getItem("quoteState") || "{}");
-    try {
+
+    if (saved && typeof saved === "object") {
       if (saved.cart) setCart(saved.cart);
       if (saved.qHeader) setQHeader(saved.qHeader);
       if (saved.page) setPage(saved.page);
       if (typeof saved.quoteMode === "boolean") setQuoteMode(saved.quoteMode);
       if (saved.firm) setFirm(saved.firm);
-    } catch (e) {
-      console.error("Failed to restore quote state", e);
     }
-
-    // always make today the active date in the editor
-    forceTodayDate(setQHeader);
-  }, []);
-
-  // whenever cart, qHeader, page, quoteMode, or firm changes, save them
-  useEffect(() => {
-    saveQuoteState({ cart, qHeader, page, quoteMode, firm });
-  }, [cart, qHeader, page, quoteMode, firm]);
-
-  // Ensure we have a firm-correct number that is safe to use (not a stale one).
-const ensureFirmNumber = async () => {
-  const matchesFirm = numberMatchesFirm(firm, qHeader.number);
-
-  // If it's a correct number AND we've already saved this quote (or loaded from DB), reuse it.
-  if (matchesFirm && savedOnce) return qHeader.number;
-
-  // If it's a correct number but not marked saved, verify it doesn't already exist in DB.
-  if (matchesFirm && !savedOnce) {
-    try {
-      const { data: existing, error: existErr } = await supabase
-        .from("quotes")
-        .select("number")
-        .eq("number", qHeader.number)
-        .maybeSingle();
-      if (existErr) throw existErr;
-
-      if (!existing) return qHeader.number; // safe to reuse
-      // else: already in DB → fall through to reserve new
-    } catch (e) {
-      console.error("Existence check failed, reserving a new number:", e);
-      // fall through
-    }
+  } catch (e) {
+    console.error("Failed to restore quote state", e);
+  } finally {
+    setHydrated(true);
   }
 
-  // Reserve a NEW number from Supabase (increments the correct per-firm counter)
+  // keep date fresh; only updates if already different
+  forceTodayDate(setQHeader);
+}, []);
+
+  // whenever cart, qHeader, page, quoteMode, or firm changes, save them
+useEffect(() => {
+  if (!hydrated) return; // don't overwrite before we've restored once
+  saveQuoteState({ cart, qHeader, page, quoteMode, firm });
+}, [hydrated, cart, qHeader, page, quoteMode, firm]);
+
+// When the app lands on the Saved Detailed page (e.g. after a refresh),
+// fetch the data and reset the firm filter to All.
+useEffect(() => {
+  if (page === "savedDetailed") {
+    setSavedFirmFilter("All");
+    loadSavedDetailed();
+  }
+}, [page]);
+
+  // Ensure we have a firm-correct number, but do NOT reserve a new one
+// if a valid number already exists in the editor state.
+const ensureFirmNumber = async () => {
+  const n = qHeader.number;
+
+  // 1) If there is already a number and it matches this firm's format,
+  //    just reuse it. Do NOT touch the counter.
+  if (n && numberMatchesFirm(firm, n)) {
+    return n;
+  }
+
+  // 2) Otherwise, reserve a NEW number from Supabase (increments the counter)
   try {
     const { data, error } = await supabase.rpc("next_quote_number", {
       p_firm: firm,
@@ -476,7 +496,7 @@ const ensureFirmNumber = async () => {
     const today = todayStr();
     setQHeader((h) => ({ ...h, number: data, date: today }));
     setSavedOnce(false); // brand new number, not saved yet
-    return data; // e.g. APP/H003
+    return data;
   } catch (e) {
     console.error("Could not get next number from Supabase RPC:", e);
     alert(
@@ -484,26 +504,6 @@ const ensureFirmNumber = async () => {
     );
     throw e;
   }
-};
-
-    const goToEditor = async () => {
-  if (cartList.length === 0) {
-    alert("Add at least 1 item to the quote.");
-    return;
-  }
-
-  // always stamp today's date when opening the editor
-  forceTodayDate(setQHeader);
-
-  // Reserve/ensure the correct firm-specific number and push it into state.
-  // If this fails (offline / RPC error), it already alerts and throws, so just abort.
-  try {
-    await ensureFirmNumber(); // sets qHeader.number to the reserved number
-  } catch {
-    return; // don't open editor with a fake/placeholder number
-  }
-
-  setPage("quoteEditor");
 };
 
 // When firm changes, drop the existing number if it doesn't match the new firm's format.
@@ -531,46 +531,102 @@ useEffect(() => {
 useEffect(() => {
   setSavedOnce(false);
 }, [firm]);
+   
+
+
+const startNewQuote = () => {
+  setCart({});
+  setQHeader({
+    number: "",
+    date: todayStr(),
+    customer_name: "",
+    address: "",
+    phone: "",
+    subject: "",
+  });
+setEditingQuoteId(null);
+  setSavedOnce(false);
+  setQuoteMode(true);
+  setPage("catalog");
+};
+
+const goToEditor = async () => {
+  if (cartList.length === 0) {
+    alert("Add at least 1 item to the quote.");
+    return;
+  }
+
+  // keep today's date fresh in the editor UI
+  forceTodayDate(setQHeader);
+
+  // Reserve/reuse a correct firm number for this session.
+  // If a valid number is already present for the selected firm,
+  // ensureFirmNumber will just reuse it (no counter increment).
+  try {
+    await ensureFirmNumber();
+  } catch {
+    // ensureFirmNumber already showed an alert; abort opening editor
+    return;
+  }
+
+  // We’re not editing a saved row when coming from catalog
+  setEditingQuoteId(null);
+  setPage("quoteEditor");
+};
 
   const backToCatalog = () => setPage("catalog");
 
   /* ---------- SAVE USING YOUR SCHEMA (quotes + quote_items) ---------- */
 const saveQuote = async (forceNumber) => {
   try {
-    // 1) If exportPDF already picked a number, use it; otherwise reserve one now
-    const number = forceNumber ?? (await ensureFirmNumber()); // throws & alerts if RPC fails
+    // 1) Ensure/reuse the correct firm number
+    const number = forceNumber ?? (await ensureFirmNumber());
 
-    // 2) Save the quote header
-    const { data: qins, error: qerr } = await supabase
+    // 2) Header payload
+    const header = {
+      number,
+      customer_name: qHeader.customer_name || null,
+      address: qHeader.address || null,
+      phone: qHeader.phone || null,
+      subject: qHeader.subject || null,
+      total: cartSubtotal,
+    };
+
+    // 3) UPSERT by unique "number" (avoids duplicate-key error)
+    const { data: up, error: upErr } = await supabase
       .from("quotes")
-      .insert({
-        number,
-        customer_name: qHeader.customer_name || null,
-        phone: qHeader.phone || null,
-        total: cartSubtotal,
-      })
+      .upsert(header, { onConflict: "number" })   // <— KEY CHANGE
       .select("id,number")
       .single();
-    if (qerr) throw qerr;
 
-    // 3) Save line items
+    if (upErr) throw upErr;
+    const quoteId = up.id;
+
+    // 4) Replace line items
     const rows = cartList.map((r) => ({
-      quote_id: qins.id,
+      quote_id: quoteId,
       name: r.name,
       specs: r.specs || null,
       qty: r.qty,
       mrp: r.unit,
     }));
+
+    // delete old items then insert fresh
+    const { error: delErr } = await supabase.from("quote_items").delete().eq("quote_id", quoteId);
+    if (delErr) throw delErr;
+
     if (rows.length) {
-      const { error: ierr } = await supabase.from("quote_items").insert(rows);
-      if (ierr) throw ierr;
+      const { error: insErr } = await supabase.from("quote_items").insert(rows);
+      if (insErr) throw insErr;
     }
 
-    // 4) Keep editor in sync with the reserved number
-    setQHeader((h) => ({ ...h, number }));
-    setSavedOnce(true); // 4C: mark this number as saved
-    alert(`Saved ✅ (${number})`);
-    return qins.number;
+    // 5) Sync editor state
+    setQHeader((h) => ({ ...h, number: up.number }));
+    setSavedOnce(true);
+    setEditingQuoteId(quoteId); // keep track we’re editing this row next time
+
+    alert(`Saved ✅ (${up.number})`);
+    return up.number;
   } catch (e) {
     console.error(e);
     alert("Save failed: " + (e?.message || e));
@@ -578,9 +634,71 @@ const saveQuote = async (forceNumber) => {
   }
 };
 
-
   /* ---------- LOAD SAVED LIST / EDIT / PDF ---------- */
 const [saved, setSaved] = useState([]);
+const [savedDetailed, setSavedDetailed] = useState([]);
+const [savedFirmFilter, setSavedFirmFilter] = useState("All"); // "All" | "HVF Agency" | "Victor Engineering" | "Mahabir Hardware Stores"
+const [savedSearch, setSavedSearch] = useState("");
+
+// Format ISO date to DD/MM/YYYY
+const fmtDate = (iso) => {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const yyyy = d.getFullYear();
+  return `${dd}/${mm}/${yyyy}`;
+};
+
+
+// computed list used by the Detailed page table (respects firm tab + search box) — SAFE
+const savedDetailedFiltered = useMemo(() => {
+  const list = Array.isArray(savedDetailed) ? savedDetailed : [];
+
+  // firm tab filter
+  const byFirm =
+    savedFirmFilter === "All"
+      ? list
+      : list.filter((q) => (inferFirmFromNumber(q?.number) || "") === savedFirmFilter);
+
+  const q = (savedSearch || "").trim().toLowerCase();
+  if (!q) return byFirm;
+
+  // helper to stringify safely
+  const text = (v) => (v == null ? "" : String(v));
+
+  return byFirm.filter((row) => {
+    try {
+      const parts = [];
+
+      // number, date
+      parts.push(text(row?.number));
+      const dateStr = row?.created_at ? text(fmtDate(row.created_at)) : "";
+      parts.push(dateStr);
+
+      // customer fields
+      parts.push(text(row?.customer_name), text(row?.address), text(row?.phone));
+
+      // item names
+      const itemNames = Array.isArray(row?.quote_items)
+        ? row.quote_items.map((it) => text(it?.name)).join(" ")
+        : "";
+      parts.push(itemNames);
+
+      // totals (raw and formatted)
+      const totalNum = Number(row?.total ?? 0);
+      if (Number.isFinite(totalNum)) {
+        parts.push(String(totalNum), text(inr(totalNum)), `₹${text(inr(totalNum))}`);
+      }
+
+      const hay = parts.join(" ").toLowerCase();
+      return hay.includes(q);
+    } catch {
+      // if anything odd slips in, never crash—just keep the row
+      return true;
+    }
+  });
+}, [savedDetailed, savedFirmFilter, savedSearch]);
 
 // Fetch the list of saved quotes
 const loadSaved = async () => {
@@ -600,17 +718,82 @@ const loadSaved = async () => {
   }
 };
 
+
+// "All" | "HVF Agency" | "Victor Engineering" | "Mahabir Hardware Stores"
+
+
+// Show first 2–3 item names, then “+ etc.”
+const summarizeItems = (row) => {
+  const items = row?.quote_items || [];
+  const names = items.map((i) => i?.name).filter(Boolean);
+  if (names.length === 0) return "—";
+  const shown = names.slice(0, 3).join(", ");
+  return names.length > 3 ? `${shown} + etc.` : shown;
+};
+
+// Load quotes WITH their line items (for the detailed page) + build a short items preview
+const loadSavedDetailed = async () => {
+  try {
+    const { data, error } = await supabase
+      .from("quotes")
+      .select(`
+        id,
+        number,
+        customer_name,
+        address,
+        phone,
+        total,
+        created_at,
+        quote_items:quote_items ( name )
+      `)
+      .order("created_at", { ascending: false });
+
+    if (error) throw error;
+
+    // Attach first 2–3 item names as a preview for each quote
+    const enriched = (data || []).map((q) => {
+      const names = (q.quote_items || []).map((it) => it?.name || "");
+      return {
+        ...q,
+        _itemsPreview: names.slice(0, 3),
+        _itemsTotal: names.length,
+      };
+    });
+
+    setSavedDetailed(enriched);
+  } catch (err) {
+    console.error("loadSavedDetailed failed:", err);
+    alert(`Could not load saved quotes (detailed).\n${err?.message || err}`);
+    setSavedDetailed([]);
+  }
+};
+
+// Open the full-screen detailed view
+const goToSavedDetailed = async () => {
+  await loadSavedDetailed();
+  setPage("savedDetailed");
+};
+
+const openSavedDetail = async () => {
+  const pop = document.getElementById("saved-pop");
+  if (pop) pop.style.display = "none";
+  setSavedFirmFilter("All");
+  await loadSavedDetailed();
+  setPage("savedDetailed");  // <-- correct page key
+};
+
 // Load one saved quote into the editor
 const editSaved = async (number) => {
   try {
     // 1) Header
-    const { data: q, error: qerr } = await supabase
-      .from("quotes")
-      .select("id,number,customer_name,phone")
-      .eq("number", number)
-      .maybeSingle();
+   const { data: q, error: qerr } = await supabase
+  .from("quotes")
+  .select("id,number,customer_name,address,phone,subject") // include address (+ subject if present)
+  .eq("number", number)
+  .maybeSingle();
     if (qerr) throw qerr;
     if (!q) return;
+
 
     // 2) Lines
     const { data: lines, error: lerr } = await supabase
@@ -640,12 +823,18 @@ const editSaved = async (number) => {
 
     // 5) Push state & open editor
     setQHeader((h) => ({
-      ...h,
-      number: q.number,
-      customer_name: q.customer_name || "",
-      phone: q.phone || "",
-      date: todayStr(),
-    }));
+  ...h,
+  number: q.number,
+  customer_name: q.customer_name || "",
+  address: q.address || "",
+  phone: q.phone || "",
+  subject: q.subject || "",
+  date: todayStr(),
+}));
+
+setEditingQuoteId(q.id);   // <-- remember which quote row we’re editing
+setSavedOnce(true);        // <-- this quote already exists in DB
+
     setQuoteMode(true);
     setPage("quoteEditor");
   } catch (err) {
@@ -694,12 +883,18 @@ const deleteSavedQuote = async (number) => {
     });
     if (rpcErr) throw rpcErr;
 
-    // 6) Refresh list & clear editor if it showed the deleted number
-    await loadSaved();
-    if (qHeader.number === number) {
-      setQHeader((h) => ({ ...h, number: "" }));
-      setSavedOnce(false);
-    }
+    // 6) Update UI lists immediately so the row vanishes without a refresh
+setSaved((arr) => (arr || []).filter((r) => r.number !== number));
+setSavedDetailed((arr) => (arr || []).filter((r) => r.number !== number));
+
+// (Optional) also refresh the small popup list in background
+loadSaved();
+
+// If the editor currently shows this number, clear it
+if (qHeader.number === number) {
+  setQHeader((h) => ({ ...h, number: "" }));
+  setSavedOnce(false);
+}
 
     alert(`Deleted ${number} ✅`);
   } catch (err) {
@@ -724,17 +919,15 @@ const exportPDF = async () => {
     return; // abort PDF if reservation failed
   }
 
-  // If not saved yet, save now so that "Saved Quotes" shows this immediately
-  try {
-    if (!savedOnce) {
-  const savedNum = await saveQuote(number); // pass the reserved number explicitly
+  // Always save (UPSERT). It’s safe and avoids duplicate-key errors.
+try {
+  const savedNum = await saveQuote(number);
   if (!savedNum) return;
+} catch (e) {
+  console.error(e);
+  alert("Could not save before exporting. Aborting.");
+  return;
 }
-  } catch (e) {
-    console.error(e);
-    alert("Could not save before exporting. Aborting.");
-    return;
-  }
 
   const doc = new jsPDF({ unit: "pt", format: "a4" });
   const pw = doc.internal.pageSize.getWidth();
@@ -1157,140 +1350,280 @@ const exportPDF = async () => {
 
   /*** UI ***/
   return (
-    <div
+  <div
       style={{
-        fontFamily: "Arial, sans-serif",
         minHeight: "100vh",
         background: "linear-gradient(to bottom right,#f8f9fa,#eef2f7)",
       }}
     >
+
+    {/* Global tokens & utilities */}
+    <style>{`
+      :root{
+        --bg: #f7f9fc;
+        --paper: #ffffff;
+        --text: #1f2937;
+        --muted: #6b7280;
+        --border: #e5e7eb;
+        --primary: #1677ff;
+        --radius: 10px;
+        --shadow: 0 6px 24px rgba(16,24,40,.06);
+        --ring: 0 0 0 3px rgba(22,119,255,.18);
+        --space-1: 6px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-5: 20px;
+      }
+      body {
+        color: var(--text);
+        background: linear-gradient(180deg,var(--bg),#eef2f7);
+        font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+                     Arial, "Noto Sans", "Liberation Sans", sans-serif;
+      }
+
+      .container { max-width:1100px; margin:0 auto; }
+      .paper { background:var(--paper); border:1px solid var(--border); border-radius:var(--radius); box-shadow:var(--shadow); }
+      .section { padding: var(--space-4); }
+      .muted { color: var(--muted); }
+      .title { margin:0; font-weight:800; letter-spacing:.2px; }
+
+      .btn { padding:6px 12px; border-radius:6px; border:1px solid var(--border); background:#f8f9fa; cursor:pointer; font-weight:600; }
+      .btn:hover { background:#eef1f5; }
+      .btn.primary { background:var(--primary); border-color:var(--primary); color:#fff; }
+      .btn.danger { background:#fff5f5; border-color:#f3d1d1; color:#b11e1e; }
+
+      .chip { padding:6px 10px; border:1px solid var(--border); border-radius:20px; background:#fff; color:#333; }
+      .chip.active { background:var(--primary); color:#fff; border-color:var(--primary); }
+
+      input, select { padding:6px 10px; border:1px solid var(--border); border-radius:6px; outline:none; }
+      input:focus, select:focus { box-shadow: var(--ring); border-color: var(--primary); }
+
+      table { width:100%; border-collapse:collapse; font-size:14px; }
+      th, td { padding:10px; border-bottom:1px solid var(--border); }
+      thead th { background:#f7f7f7; position:sticky; top:0; z-index:1; }
+      tr:hover td { background:#fafbff; }
+
+      .badge { font-size:12px; color:#555; background:#f0f0f0; border:1px solid #e2e2e2; border-radius:999px; padding:3px 8px; line-height:1; }
+
+      /* Catalog cards polish */
+      .card {
+        background: var(--paper);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        box-shadow: var(--shadow);
+        overflow: hidden;
+        transition: transform .08s ease, box-shadow .2s ease, border-color .2s ease;
+
+        /* NEW: stretch to row height & make a column layout so the Add bar can stick to bottom */
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+      }
+      .card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 12px 36px rgba(16,24,40,.08);
+        border-color: #d7dbe3;
+      }
+      .card-body {
+        padding: var(--space-4);
+
+        /* NEW: fill remaining vertical space under the image */
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+      }
+      /* product name: clamp to 2 lines */
+.card-body .pname{
+  margin: 0 0 6px;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.25;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+  /* keep title block the same height on every card */
+  min-height: calc(1.25em * 2);             /* reserve exactly 2 lines */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;                     /* clamp to 2 lines */
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+      .thumb { background: #fff; }
+
+/* clamp specs/description to 2 lines */
+.card-body .specs{
+  color:#666;
+  margin: 0 0 6px;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+      /* nicer number inputs */
+      input[type=number]::-webkit-outer-spin-button,
+      input[type=number]::-webkit-inner-spin-button{ -webkit-appearance:none; margin:0; }
+      input[type=number]{ -moz-appearance:textfield; }
+
+/* --- Centered Add / Counter bar for cards --- */
+.addbar{ margin-top:auto; display:flex; justify-content:center; width:100%; }
+.addbtn, .qtywrap{
+  width:74%;           /* 92% → 74% (≈20% smaller) */
+  max-width:224px;     /* 280px → 224px (also 20% smaller) */
+  height:44px;
+  border-radius:10px;
+  border:1.5px solid var(--primary);
+  display:flex; align-items:center; justify-content:center;
+  font-weight:700;
+  transition:background .15s ease, color .15s ease, box-shadow .15s ease;
+}
+
+/* initial “Add” button */
+.addbtn{ background:#fff; color:var(--primary); font-size:108%; }
+.addbtn:hover{ background:var(--primary); color:#fff; box-shadow:var(--ring); }
+
+/* counter bar (appears after first click) */
+.qtywrap{ background:var(--primary); color:#fff; gap:14px; padding:0 12px; }
+.qtywrap .op{
+  width:44px; height:44px; display:flex; align-items:center; justify-content:center;
+  font-size:20px; border:none; background:transparent; color:#fff; cursor:pointer;
+}
+.qtywrap .op:active{ transform:scale(.96); }
+.qtywrap .num{
+  min-width:76px; height:34px; line-height:34px; text-align:center;
+  background:#fff; color:var(--primary); border-radius:6px; font-weight:800;
+}
+    `}</style>
       {/* top-right Login menu */}
-      <div
-        style={{ display: "flex", justifyContent: "flex-end", padding: "8px 16px" }}
-      >
+<div
+  style={{ display: "flex", justifyContent: "flex-end", padding: "8px 16px" }}
+>
+  
         <details>
-          <summary
-            style={{
-              cursor: "pointer",
-              padding: "6px 12px",
-              borderRadius: 6,
-              background: "#f2f2f2",
-            }}
-          >
-            Login
-          </summary>
+          <summary className="btn">Login</summary>
           <div
-            style={{
-              position: "absolute",
-              right: 16,
-              marginTop: 6,
-              background: "#fff",
-              border: "1px solid #e5e7eb",
-              borderRadius: 8,
-              padding: 8,
-              minWidth: 210,
-              boxShadow: "0 8px 24px rgba(0,0,0,.08)",
-            }}
-          >
-            <button onClick={toggleStaff} style={{ width: "100%", marginBottom: 6 }}>
-              {staffMode ? "Logout Staff View" : "Login as Staff (PIN)"}
-            </button>
+  className="paper section"
+  style={{ position: "absolute", right: 16, marginTop: 6, minWidth: 230 }}
+>
+            <button onClick={toggleStaff} className="btn" style={{ width: "100%", marginBottom: "var(--space-2)" }}>
+  {staffMode ? "Logout Staff View" : "Login as Staff (PIN)"}
+</button>
             <button
-              onClick={() => setShowLoginBox(true)}
-              style={{ width: "100%", marginBottom: 6 }}
-            >
-              Login as Admin (Email)
-            </button>
-            <button onClick={enableQuoteMode} style={{ width: "100%" }}>
-              {quoteMode ? "Exit Quotation Mode" : "Login for Quotation (PIN)"}
-            </button>
+  onClick={() => setShowLoginBox(true)}
+  className="btn"
+  style={{ width: "100%", marginBottom: "var(--space-2)" }}
+>
+  Login as Admin (Email)
+</button>
+            <button onClick={enableQuoteMode} className="btn" style={{ width: "100%" }}>
+  {quoteMode ? "Exit Quotation Mode" : "Login for Quotation (PIN)"}
+</button>
           </div>
         </details>
       </div>
 
-      {/* Header */}
-      <div style={{ textAlign: "center", marginBottom: 18 }}>
-        <img
-          src="/hvf-logo.png"
-          alt="HVF Agency"
-          style={{ width: 160, height: "auto", marginBottom: 8 }}
-        />
-        <h1 style={{ margin: 0 }}>HVF Machinery Catalog</h1>
-        <p style={{ color: "#777", marginTop: 6 }}>by HVF Agency, Moranhat, Assam</p>
+     {/* Header (logo always visible; rest hidden on savedDetailed) */}
+<>
+  <div style={{ textAlign: "center", marginBottom: 12 }}>
+    <img
+      src="/hvf-logo.png"
+      alt="HVF Agency"
+      style={{ width: 192, height: "auto", marginBottom: 8 }} // 160 → 192 (+20%)
+    />
+  </div>
 
-        {/* inline admin email box */}
-        {!session && showLoginBox && (
-          <div style={{ display: "inline-flex", gap: 8 }}>
-            <input
-              type="email"
-              placeholder="your@email.com"
-              value={loginEmail}
-              onChange={(e) => setLoginEmail(e.target.value)}
-              style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #ddd" }}
-            />
-            <button onClick={sendLoginLink}>Send Login Link</button>
-            <button onClick={() => setShowLoginBox(false)} style={{ marginLeft: 6 }}>
-              Cancel
-            </button>
-          </div>
-        )}
-        {session && (
-          <div style={{ marginTop: 8 }}>
-            <button onClick={signOut} style={{ marginRight: 8 }}>
-              Sign Out
-            </button>
-            <span
-              style={{
-                padding: "4px 8px",
-                borderRadius: 6,
-                background: isAdmin ? "#e8f6ed" : "#f7e8e8",
-                color: isAdmin ? "#1f7a3f" : "#b11e1e",
-                marginRight: 8,
-              }}
-            >
-              {isAdmin ? "Admin: ON" : "Not admin"}
-            </span>
-            <span style={{ color: "#777", fontSize: 12 }}>
-              UID: {session?.user?.id?.slice(0, 8)}…
-            </span>
-          </div>
-        )}
-      </div>
+  {page === "catalog" && (
+    <div style={{ textAlign: "center", marginBottom: 18 }}>
+      <h1 style={{ margin: 0 }}>HVF Machinery Catalog</h1>
+      <p style={{ color: "#777", marginTop: 6 }}>
+        by HVF Agency, Moranhat, Assam
+      </p>
 
-      {/* Search */}
-      <div style={{ maxWidth: 1100, margin: "0 auto 10px", padding: "0 12px" }}>
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search products…"
-          style={{
-            width: "100%",
-            padding: "10px 12px",
-            borderRadius: 10,
-            border: "1px solid #e5e7eb",
-          }}
-        />
-      </div>
+      {/* inline admin email box */}
+      {!session && showLoginBox && (
+        <div style={{ display: "inline-flex", gap: 8 }}>
+          <input
+            type="email"
+            placeholder="your@email.com"
+            value={loginEmail}
+            onChange={(e) => setLoginEmail(e.target.value)}
+            style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #ddd" }}
+          />
+          <button onClick={sendLoginLink}>Send Login Link</button>
+          <button onClick={() => setShowLoginBox(false)} style={{ marginLeft: 6 }}>
+            Cancel
+          </button>
+        </div>
+      )}
 
-      {/* Categories */}
-      <div style={{ textAlign: "center", marginBottom: 12 }}>
-        {["All", ...categories].map((c) => (
-          <button
-            key={c}
-            onClick={() => setCategory(c)}
+      {/* session badge */}
+      {session && (
+        <div style={{ marginTop: 8 }}>
+          <button onClick={signOut} style={{ marginRight: 8 }}>
+            Sign Out
+          </button>
+          <span
             style={{
-              margin: "0 6px 8px",
-              padding: "6px 10px",
-              borderRadius: 20,
-              border: "1px solid #ddd",
-              background: category === c ? "#1677ff" : "#fff",
-              color: category === c ? "#fff" : "#333",
+              padding: "4px 8px",
+              borderRadius: 6,
+              background: isAdmin ? "#e8f6ed" : "#f7e8e8",
+              color: isAdmin ? "#1f7a3f" : "#b11e1e",
+              marginRight: 8,
             }}
           >
-            {c}
-          </button>
-        ))}
-      </div>
+            {isAdmin ? "Admin: ON" : "Not admin"}
+          </span>
+          <span style={{ color: "#777", fontSize: 12 }}>
+            UID: {session?.user?.id?.slice(0, 8)}…
+          </span>
+        </div>
+      )}
+    </div>
+  )}
+</>
+
+     {/* Search (hidden on savedDetailed) */}
+{page === "catalog" && (
+  <div style={{ maxWidth: 1100, margin: "0 auto 10px", padding: "0 12px" }}>
+    <input
+      value={search}
+      onChange={(e) => setSearch(e.target.value)}
+      placeholder="Search products…"
+      style={{
+        width: "100%",
+        padding: "10px 12px",
+        borderRadius: 10,
+        border: "1px solid #e5e7eb",
+      }}
+    />
+  </div>
+)}
+         {/* Categories (hidden on savedDetailed) */}
+      {page === "catalog" && (
+  <div
+    style={{
+      display: "flex",
+      justifyContent: "center",
+      flexWrap: "wrap",
+      gap: 8,
+      marginBottom: 12,
+    }}
+  >
+    {["All", ...categories].map((c) => (
+      <button
+        key={c}
+        onClick={() => setCategory(c)}
+        className={`chip ${category === c ? "active" : ""}`}
+      >
+        {c}
+      </button>
+    ))}
+  </div>
+)}
 
       {/* PAGE: CATALOG */}
       {page === "catalog" && (
@@ -1334,9 +1667,9 @@ const exportPDF = async () => {
                     )}
                   </div>
 
-                  <div className="card-body">
-                    <h3>{m.name}</h3>
-                    {m.specs && <p style={{ color: "#666" }}>{m.specs}</p>}
+                  <div className="card-body" style={{ display: "flex", flexDirection: "column" }}>
+                    <h3 className="pname" title={m.name}>{m.name}</h3>
+                    {m.specs && <p className="specs">{m.specs}</p>}
                     <p style={{ fontWeight: 700 }}>₹{inr(m.mrp)}</p>
                     {(staffMode || isAdmin) && m.sell_price != null && (
                       <div
@@ -1365,14 +1698,19 @@ const exportPDF = async () => {
                     )}
 
                     {quoteMode && (
-                      <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
-                        <button onClick={() => dec(m)}>-</button>
-                        <div style={{ minWidth: 28, textAlign: "center" }}>
-                          {cart[m.id]?.qty || 0}
-                        </div>
-                        <button onClick={() => inc(m)}>+</button>
-                      </div>
-                    )}
+  <div className="addbar">
+    { (cart[m.id]?.qty || 0) > 0 ? (
+      <div className="qtywrap" role="group" aria-label="Quantity selector">
+        <button className="op" onClick={() => dec(m)} aria-label="Decrease">−</button>
+        <div className="num">{cart[m.id]?.qty || 0}</div>
+        <button className="op" onClick={() => inc(m)} aria-label="Increase">+</button>
+      </div>
+    ) : (
+      <button className="addbtn" onClick={() => inc(m)}>Add</button>
+    )}
+  </div>
+)}
+
                   </div>
                 </div>
               ))}
@@ -1649,6 +1987,227 @@ const exportPDF = async () => {
         </div>
       )}
 
+{/* PAGE: SAVED DETAILED */}
+{page === "savedDetailed" && (
+  <div
+    style={{
+      maxWidth: 1100,
+      margin: "0 auto 40px",
+      background: "#fff",
+      border: "1px solid #e5e7eb",
+      borderRadius: 12,
+      padding: 16,
+    }}
+  >
+
+    {/* Top bar */}
+<div
+  style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}
+>
+  <h2 style={{ margin: 0, flex: "0 0 auto" }}>
+    Saved Quotations — Detailed View
+  </h2>
+
+  {/* results badge */}
+  <span
+    style={{
+      flex: "0 0 auto",
+      fontSize: 12,
+      color: "#555",
+      background: "#f0f0f0",
+      border: "1px solid #e2e2e2",
+      borderRadius: 999,
+      padding: "3px 8px",
+      lineHeight: 1,
+    }}
+    title="Matching results (respects firm tab + search)"
+  >
+    {savedDetailedFiltered.length} result
+    {savedDetailedFiltered.length === 1 ? "" : "s"}
+  </span>
+
+  {/* search input (grows) */}
+  <div style={{ position: "relative", flex: "1 1 auto", maxWidth: 420 }}>
+    <input
+      value={savedSearch}
+      onChange={(e) => setSavedSearch(e.target.value)}
+      placeholder="Search saved quotes (no., date, customer, phone, items, amount…) "
+      style={{
+        width: "100%",
+        padding: "8px 32px 8px 10px", // room for clear button
+        borderRadius: 8,
+        border: "1px solid #e5e7eb",
+        background: "#fff",
+      }}
+    />
+    {savedSearch && (
+      <button
+        onClick={() => setSavedSearch("")}
+        aria-label="Clear search"
+        style={{
+          position: "absolute",
+          right: 8,
+          top: "50%",
+          transform: "translateY(-50%)",
+          width: 20,
+          height: 20,
+          borderRadius: "50%",
+          border: "none",
+          background: "#ccc",
+          color: "#fff",
+          fontSize: 14,
+          lineHeight: "20px",
+          textAlign: "center",
+          cursor: "pointer",
+          padding: 0,
+        }}
+        onMouseEnter={(e) => (e.currentTarget.style.background = "#b5b5b5")}
+        onMouseLeave={(e) => (e.currentTarget.style.background = "#ccc")}
+      >
+        ×
+      </button>
+    )}
+  </div>
+
+  {/* Back button stays inside this flex bar */}
+  <button
+    onClick={() => setPage("catalog")}
+    style={{
+      flex: "0 0 auto",
+      padding: "6px 10px",
+      borderRadius: 6,
+      border: "1px solid #e5e7eb",
+      background: "#f8f9fa",
+      cursor: "pointer",
+    }}
+  >
+    ← Back to Catalog
+  </button>
+</div>
+    {/* Firm filter tabs */}
+<div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+  {[
+    { label: "All", value: "All" },
+    { label: "HVF Agency", value: "HVF Agency" },
+    { label: "Victor Engineering", value: "Victor Engineering" },
+    { label: "Mahabir Hardware Stores", value: "Mahabir Hardware Stores" },
+  ].map((opt) => (
+    <button
+      key={opt.value}
+      onClick={() => setSavedFirmFilter(opt.value)}
+      style={{
+        padding: "6px 10px",
+        borderRadius: 20,
+        border: "1px solid #ddd",
+        background: savedFirmFilter === opt.value ? "#1677ff" : "#fff",
+        color: savedFirmFilter === opt.value ? "#fff" : "#333",
+        cursor: "pointer",
+      }}
+    >
+      {opt.label}
+    </button>
+  ))}
+</div>
+
+    {/* Table */}
+    <div style={{ overflowX: "auto" }}>
+      <table
+        style={{
+          width: "100%",
+          borderCollapse: "collapse",
+          border: "1px solid #eee",
+          fontSize: 14,
+        }}
+      >
+        <thead>
+          <tr style={{ background: "#f7f7f7" }}>
+            <th style={{ textAlign: "left", padding: 10, borderBottom: "1px solid #eee" }}>Firm</th>
+            <th style={{ textAlign: "left", padding: 10, borderBottom: "1px solid #eee" }}>Quotation No.</th>
+            <th style={{ textAlign: "left", padding: 10, borderBottom: "1px solid #eee" }}>Date Created</th>
+            <th style={{ textAlign: "left", padding: 10, borderBottom: "1px solid #eee" }}>Customer</th>
+            <th style={{ textAlign: "left", padding: 10, borderBottom: "1px solid #eee" }}>Address</th>
+            <th style={{ textAlign: "left", padding: 10, borderBottom: "1px solid #eee" }}>Phone</th>
+            <th style={{ textAlign: "left", padding: 10, borderBottom: "1px solid #eee" }}>Items (first 2–3)</th>
+            <th style={{ textAlign: "right", padding: 10, borderBottom: "1px solid #eee" }}>Total</th>
+            <th style={{ textAlign: "center", padding: 10, borderBottom: "1px solid #eee", width: 220 }}>Actions</th>
+          </tr>
+        </thead>
+
+        <tbody>
+          {(savedDetailedFiltered || []).map((q) => {
+            const firmName = inferFirmFromNumber(q.number) || "—";
+
+            // first few item names
+            const names = (q.quote_items || []).map((r) => r?.name || "").filter(Boolean);
+            const shown = names.slice(0, 3);
+            const extra = Math.max(0, names.length - shown.length);
+
+            // format date from created_at
+            let dateStr = "";
+            try {
+              if (q.created_at) {
+                const d = new Date(q.created_at);
+                const dd = String(d.getDate()).padStart(2, "0");
+                const mm = String(d.getMonth() + 1).padStart(2, "0");
+                const yyyy = d.getFullYear();
+                dateStr = `${dd}/${mm}/${yyyy}`;
+              }
+            } catch {}
+
+            return (
+              <tr key={q.id} style={{ borderBottom: "1px solid #f0f0f0" }}>
+                <td style={{ padding: 10 }}>{firmName}</td>
+                <td style={{ padding: 10, fontWeight: 600 }}>{q.number}</td>
+                <td style={{ padding: 10 }}>{dateStr}</td>
+                <td style={{ padding: 10 }}>{q.customer_name || "—"}</td>
+                <td style={{ padding: 10 }}>{q.address || "—"}</td>
+                <td style={{ padding: 10 }}>{q.phone || "—"}</td>
+                <td style={{ padding: 10 }}>
+                  {shown.join(", ")}
+                  {extra > 0 ? `, +${extra} more` : ""}
+                </td>
+                <td style={{ padding: 10, textAlign: "right", fontWeight: 700 }}>₹{inr(q.total || 0)}</td>
+                <td style={{ padding: 10, textAlign: "center" }}>
+                  <div style={{ display: "inline-flex", gap: 8, flexWrap: "wrap" }}>
+                    <button
+                      onClick={() => editSaved(q.number)}
+                      style={{ padding: "4px 8px", borderRadius: 6, border: "1px solid #e5e7eb", background: "#fff", cursor: "pointer" }}
+                      title="Edit this quote"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      onClick={async () => { await editSaved(q.number); await exportPDF(); }}
+                      style={{ padding: "4px 8px", borderRadius: 6, border: "1px solid #e5e7eb", background: "#f8f9fa", cursor: "pointer" }}
+                      title="Open PDF / Print"
+                    >
+                      PDF
+                    </button>
+                    <button
+                      onClick={() => deleteSavedQuote(q.number)}
+                      style={{ padding: "4px 8px", borderRadius: 6, border: "1px solid #f3d1d1", background: "#fff5f5", color: "#b11e1e", cursor: "pointer" }}
+                      title="Delete this quote"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
+          {(!savedDetailedFiltered || savedDetailedFiltered.length === 0) && (
+            <tr>
+              <td colSpan={9} style={{ padding: 20, textAlign: "center", color: "#777" }}>
+                No saved quotations found.
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  </div>
+)}
+
       {/* FLOATING bottom-right controls */}
       <div
         style={{
@@ -1661,19 +2220,37 @@ const exportPDF = async () => {
           zIndex: 20,
         }}
       >
-        {quoteMode && (
-          <button onClick={goToEditor}>View Quote ({cartCount})</button>
-        )}
-        {quoteMode && (
-          <button
-            onClick={() => {
-              loadSaved();
-              document.getElementById("saved-pop").style.display = "block";
-            }}
-          >
-            Saved Quotes
-          </button>
-        )}
+
+{quoteMode && (
+  <button
+    onClick={startNewQuote}
+    title="Start a fresh quotation"
+    className="btn primary"
+  >
+    + New Quote
+  </button>
+)}
+
+{quoteMode && (
+  <button
+    onClick={goToEditor}
+    className="btn"
+  >
+    View Quote ({cartCount})
+  </button>
+)}
+
+{quoteMode && (
+  <button
+    onClick={() => {
+      loadSaved();
+      document.getElementById("saved-pop").style.display = "block";
+    }}
+    className="btn"
+  >
+    Saved Quotes
+  </button>
+)}
       </div>
 
       {/* Saved quotes popup */}
@@ -1696,22 +2273,48 @@ const exportPDF = async () => {
         }}
       >
         <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            marginBottom: 6,
-          }}
-        >
-          <b>Saved Quotes</b>
-          <button
-            onClick={() =>
-              (document.getElementById("saved-pop").style.display = "none")
-            }
-          >
-            ✕
-          </button>
-        </div>
+  style={{
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 6,
+    gap: 8,
+  }}
+>
+  <b>Saved Quotes</b>
+
+  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+    <button
+      onClick={openSavedDetail}
+      title="Open a full-page list of all saved quotations"
+      style={{
+        padding: "4px 8px",
+        borderRadius: 6,
+        border: "1px solid #e5e7eb",
+        background: "#f8f9fa",
+        cursor: "pointer",
+      }}
+    >
+      Show detailed view
+    </button>
+
+    <button
+      onClick={() =>
+        (document.getElementById("saved-pop").style.display = "none")
+      }
+      style={{
+        padding: "4px 8px",
+        borderRadius: 6,
+        border: "1px solid #e5e7eb",
+        background: "#fff",
+        cursor: "pointer",
+      }}
+      aria-label="Close"
+    >
+      ✕
+    </button>
+  </div>
+</div>
         {saved.length === 0 ? (
           <div style={{ color: "#777" }}>No saved quotes yet.</div>
         ) : (

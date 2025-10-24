@@ -66,3 +66,11 @@ body { margin: 0; background: #f6f7f9; }
 .card-body p {
   margin: 4px 0;
 }
+
+/* Safety guard: never allow global dim/blur */
+html, body, #root {
+  opacity: 1 !important;
+  filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
