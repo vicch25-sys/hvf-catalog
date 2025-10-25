@@ -1510,7 +1510,7 @@ try {
       .chip { padding:6px 10px; border:1px solid var(--border); border-radius:20px; background:#fff; color:#333; }
       .chip.active { background:var(--primary); color:#fff; border-color:var(--primary); }
 
-      input, select { padding:6px 10px; border:1px solid var(--border); border-radius:6px; outline:none; }
+      input, select { padding:6px 10px; border:1px solid var(--border); border-radius:6px; outline:none; width:100%; max-width:100%; box-sizing:border-box; }
       input:focus, select:focus { box-shadow: var(--ring); border-color: var(--primary); }
 
       table { width:100%; border-collapse:collapse; font-size:14px; }
@@ -1705,7 +1705,26 @@ try {
     border-radius: 20px !important;
   }
 }
-    `}</style>
+
+
+/* Desktop: restore 3 columns */
+@media (min-width: 641px){
+  .addform-grid{
+    grid-template-columns: 1fr 1fr 1fr;
+  }
+}
+    
+
+/* Prevent any wide control (esp. file input) from pushing the form sideways */
+.addform-grid label{ display:block; min-width:0; }
+.addform-grid label > *{ max-width:100%; }
+.addform-grid input[type="file"]{ width:100%; }
+
+@media (max-width:640px){
+  html, body{ max-width:100%; overflow-x:hidden; }
+}
+
+`}</style>
 
       {/* top-right Login menu */}
 <div
@@ -1906,13 +1925,13 @@ try {
 
         <form onSubmit={onSave} style={{ marginTop: 12 }}>
           <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr 1fr",
-              gap: 10,
-              alignItems: "end",
-            }}
-          >
+  className="addform-grid"
+  style={{
+    display: "grid",
+    gap: 10,
+    alignItems: "end",
+  }}
+>
             <label>
               <div style={{ fontSize: 12, color: "#666" }}>Name *</div>
               <input name="name" value={form.name} onChange={onChange} required />
@@ -1977,7 +1996,7 @@ try {
               />
             </label>
 
-            <label style={{ gridColumn: "1 / span 3" }}>
+            <label style={{ gridColumn: "1 / -1" }}>
               <div style={{ fontSize: 12, color: "#666" }}>Specs / description</div>
               <input
                 name="specs"
@@ -1987,7 +2006,7 @@ try {
               />
             </label>
 
-            <div style={{ gridColumn: "1 / span 3", textAlign: "right" }}>
+            <div style={{ gridColumn: "1 / -1", textAlign: "right" }}>
               <button
                 type="submit"
                 className="btn primary"
