@@ -81,10 +81,6 @@ function numberMatchesFirm(firm, n) {
   return true;
 }
 
-function closeLoginMenu() {
-  const el = document.querySelector('details');
-  if (el && el.open) el.open = false;
-}
 
 
 
@@ -147,6 +143,8 @@ const [showLoginBox, setShowLoginBox] = useState(false);
 // --- login menu refs & auto-close ---
 const loginMenuRef = useRef(null);
 const loginIdleTimer = useRef(null);
+// categories strip ref (for auto-centering the active chip on mobile)
+const catStripRef = useRef(null);
 
 const closeLoginMenu = () => {
   if (loginIdleTimer.current) {
@@ -371,6 +369,35 @@ const magicLogin = async () => {
     }
     return arr;
   }, [items, category, search]);
+
+  // Center the active category chip on phones (on change, first load, and resize)
+const centerActiveChip = () => {
+  if (!catStripRef.current) return;
+  if (window.innerWidth > 640) return; // mobile only
+  const wrap = catStripRef.current;
+
+  // wait for render/paint so widths are correct
+  requestAnimationFrame(() => {
+    const active = wrap.querySelector(".chip.active");
+    if (!active) return;
+    const left =
+      active.offsetLeft - (wrap.clientWidth - active.clientWidth) / 2;
+    wrap.scrollTo({ left: Math.max(0, left), behavior: "smooth" });
+  });
+};
+
+// re-center when category changes AND when categories first populate
+useEffect(() => {
+  centerActiveChip();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [category, categories.length]);
+
+// also re-center on orientation/resize
+useEffect(() => {
+  const onResize = () => centerActiveChip();
+  window.addEventListener("resize", onResize);
+  return () => window.removeEventListener("resize", onResize);
+}, []);
 
   /* ---------- ADMIN: ADD PRODUCT ---------- */
   const onChange = (e) => {
@@ -1555,23 +1582,15 @@ try {
     padding-bottom: 10px;
   }
 }
-      /* product name: clamp to 2 lines */
+  /* product name: clamp to 2 lines */
 .card-body .pname{
   margin: 0 0 6px;
   font-size: 16px;
   font-weight: 700;
   line-height: 1.25;
+  min-height: calc(1.25em * 2); /* reserve exactly 2 lines */
   display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-  /* keep title block the same height on every card */
-  min-height: calc(1.25em * 2);             /* reserve exactly 2 lines */
-  display: -webkit-box;
-  -webkit-line-clamp: 2;                     /* clamp to 2 lines */
+  -webkit-line-clamp: 2;        /* clamp to 2 lines */
   -webkit-box-orient: vertical;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1636,7 +1655,58 @@ try {
   .qtywrap .op{ width:38px; height:42px; font-size:22px; }
   .qtywrap .num{ min-width:64px; height:32px; line-height:32px; }
 }
+
+/* ===== Categories: mobile strip vs desktop wrap ===== */
+
+/* Phones (single-row, swipeable; hide scrollbar) */
+@media (max-width: 640px){
+  .cat-strip{
+    display: flex !important;
+    flex-wrap: nowrap !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-x;
+    overscroll-behavior-x: contain;
+    padding-bottom: 6px;
+    scroll-snap-type: x proximity;
+    scroll-padding-inline: 12px;   /* allow first/last chip to center */
+    gap: 8px;
+  }
+  .cat-strip::-webkit-scrollbar{ display:none; }  /* iOS/Chrome */
+  .cat-strip{ scrollbar-width: none; }            /* Firefox */
+
+  .cat-strip .chip{
+    flex: 0 0 auto;
+    min-width: 160px;
+    max-width: 260px;
+    white-space: normal;   /* allow two lines */
+    line-height: 1.2;
+    text-align: center;
+    scroll-snap-align: center;   /* center each chip on stop */
+  }
+}
+
+/* Desktop & tablets (revert to centered wrap like before) */
+@media (min-width: 641px){
+  .cat-strip{
+    display: flex !important;
+    flex-wrap: wrap !important;
+    justify-content: center !important;
+    gap: 8px !important;
+    overflow: visible !important;
+    padding-bottom: 0 !important;
+    scroll-snap-type: none !important;
+  }
+  .cat-strip .chip{
+    min-width: auto !important;
+    max-width: none !important;
+    white-space: nowrap !important;
+    padding: 6px 10px !important;
+    border-radius: 20px !important;
+  }
+}
     `}</style>
+
       {/* top-right Login menu */}
 <div
   style={{ display: "flex", justifyContent: "flex-end", padding: "8px 16px" }}
@@ -1812,25 +1882,20 @@ try {
          {/* Categories (hidden on savedDetailed) */}
       {page === "catalog" && (
   <>
-    <div
-      style={{
-        display: "flex",
-        justifyContent: "center",
-        flexWrap: "wrap",
-        gap: 8,
-        marginBottom: 12,
-      }}
-    >
-      {["All", ...categories].map((c) => (
-        <button
-          key={c}
-          onClick={() => setCategory(c)}
-          className={`chip ${category === c ? "active" : ""}`}
-        >
-          {c}
-        </button>
-      ))}
-    </div>
+    <div className="cat-bar" style={{ margin: "0 auto 12px", padding: "0 12px", maxWidth: 1100 }}>
+  <div ref={catStripRef} className="cat-strip">
+    {["All", ...categories].map((c) => (
+      <button
+        key={c}
+        onClick={() => setCategory(c)}
+        className={`chip ${category === c ? "active" : ""}`}
+        aria-pressed={category === c}
+      >
+        {c}
+      </button>
+    ))}
+  </div>
+</div>
 
     {/* --- Admin-only: Add Product panel --- */}
     {isAdmin && (
