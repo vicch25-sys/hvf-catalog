@@ -266,6 +266,20 @@ const [page, setPage] = useState(() => __boot.page || "catalog"); // "catalog" |
 const ADMIN_EMAIL = "vic.ch25@icloud.com";
 const ADMIN_PIN = "9957";
 
+// --- passwordless sign-in via email link ---
+const sendMagicLink = async () => {
+  try {
+    const { error } = await supabase.auth.signInWithOtp({
+      email: ADMIN_EMAIL,
+      options: { emailRedirectTo: window.location.origin }
+    });
+    if (error) throw error;
+    alert("Magic link sent. Open it on this device and you’ll be signed in.");
+  } catch (e) {
+    alert(e?.message || "Could not send magic link");
+  }
+};
+
 const startAdminFlow = () => {
   setShowLoginBox(true);
   setAdminStep("email");
@@ -299,6 +313,20 @@ const signOut = async () => {
   try { await supabase.auth.signOut(); } catch {}
   localStorage.removeItem("adminLogin");
   setIsAdmin(false);
+};
+
+// Sign in with a magic link so Supabase gives us a real user session (auth.uid())
+const magicLogin = async () => {
+  const email = prompt("Enter your email to sign in:");
+  if (!email) return;
+
+  const { error } = await supabase.auth.signInWithOtp({
+    email: email.trim(),
+    options: { emailRedirectTo: window.location.origin }
+  });
+
+  if (error) return alert(error.message);
+  alert("Magic link sent. Open it from your email, then return to this tab.");
 };
 
   /* ---------- LOAD DATA ---------- */
@@ -351,11 +379,19 @@ const signOut = async () => {
     else setForm((f) => ({ ...f, [name]: value }));
   };
   const onSave = async (e) => {
-    e.preventDefault();
-    if (!isAdmin) return alert("Admins only.");
-    if (!form.name || !form.category || !form.mrp || !form.imageFile) {
-      return alert("Name, Category, MRP and Image are required.");
-    }
+  e.preventDefault();
+  if (!isAdmin) return alert("Admins only.");
+
+  // Must be signed in to Supabase (RLS needs auth.uid())
+  const { data: s } = await supabase.auth.getSession();
+  if (!s?.session?.user?.id) {
+    alert("Please use 'Sign in (email link)' first, then try again.");
+    return;
+  }
+
+  if (!form.name || !form.category || !form.mrp || !form.imageFile) {
+    return alert("Name, Category, MRP and Image are required.");
+  }
     setSaving(true);
     try {
       const ext = form.imageFile.name.split(".").pop().toLowerCase();
@@ -1635,6 +1671,14 @@ try {
       >
         {staffMode ? "Logout Staff View" : "Login as Staff (PIN)"}
       </button>
+
+<button
+  onClick={() => { sendMagicLink(); closeLoginMenu(); }}
+  className="btn"
+  style={{ width: "100%", marginBottom: "var(--space-2)" }}
+>
+  Sign in (email link)
+</button>
 
      <button
         onClick={() => { startAdminFlow(); closeLoginMenu(); }}
