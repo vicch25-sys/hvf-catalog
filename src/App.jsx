@@ -2006,7 +2006,7 @@ try {
               />
             </label>
 
-            <div style={{ gridColumn: "1 / -1", textAlign: "right" }}>
+<div style={{ gridColumn: "1 / -1", textAlign: "left" }}>
               <button
                 type="submit"
                 className="btn primary"
