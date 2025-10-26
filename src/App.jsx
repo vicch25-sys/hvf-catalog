@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useRef } from "react";
+import React, { useLayoutEffect, useEffect, useMemo, useState, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -122,6 +122,30 @@ const saveQuoteState = (s) => localStorage.setItem(LS_KEY, JSON.stringify(s));
 
 /* --- App --- */
 export default function App() {
+
+  // MOBILE: lock viewport scaling to stop iOS auto-zoom on input focus (run before paint)
+useLayoutEffect(() => {
+  const content = 'width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content';
+
+  // viewport
+  let meta = document.querySelector('meta[name="viewport"]');
+  if (!meta) {
+    meta = document.createElement('meta');
+    meta.setAttribute('name', 'viewport');
+    document.head.appendChild(meta);
+  }
+  meta.setAttribute('content', content);
+
+  // disable iOS phone-number auto-detection (prevents phone-number zoom/links)
+  let fmt = document.querySelector('meta[name="format-detection"]');
+  if (!fmt) {
+    fmt = document.createElement('meta');
+    fmt.setAttribute('name', 'format-detection');
+    document.head.appendChild(fmt);
+  }
+  fmt.setAttribute('content', 'telephone=no');
+}, []);
+
   /*** DATA ***/
   const [items, setItems] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -1470,7 +1494,7 @@ try {
   return (
   <div
       style={{
-        minHeight: "100vh",
+        minHeight: "100svh",
         background: "linear-gradient(to bottom right,#f8f9fa,#eef2f7)",
       }}
     >
@@ -1489,12 +1513,18 @@ try {
         --ring: 0 0 0 3px rgba(22,119,255,.18);
         --space-1: 6px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-5: 20px;
       }
-      body {
-        color: var(--text);
-        background: linear-gradient(180deg,var(--bg),#eef2f7);
-        font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
-                     Arial, "Noto Sans", "Liberation Sans", sans-serif;
+            html, body {
+        -webkit-text-size-adjust: 100%;
+        text-size-adjust: 100%;
       }
+      html, body { -webkit-text-size-adjust: 100%; }
+
+body {
+  color: var(--text);
+  background: linear-gradient(180deg,var(--bg),#eef2f7);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+               Arial, "Noto Sans", "Liberation Sans", sans-serif;
+}
 
       .container { max-width:1100px; margin:0 auto; }
       .paper { background:var(--paper); border:1px solid var(--border); border-radius:var(--radius); box-shadow:var(--shadow); }
@@ -1510,8 +1540,12 @@ try {
       .chip { padding:6px 10px; border:1px solid var(--border); border-radius:20px; background:#fff; color:#333; }
       .chip.active { background:var(--primary); color:#fff; border-color:var(--primary); }
 
-      input, select { padding:6px 10px; border:1px solid var(--border); border-radius:6px; outline:none; width:100%; max-width:100%; box-sizing:border-box; }
-      input:focus, select:focus { box-shadow: var(--ring); border-color: var(--primary); }
+      input, select, textarea { padding:6px 10px; border:1px solid var(--border); border-radius:6px; outline:none; width:100%; max-width:100%; box-sizing:border-box; }
+input:focus, select:focus, textarea:focus { box-shadow: var(--ring); border-color: var(--primary); }
+
+/* iOS Safari: prevent auto-zoom on focus (inputs <16px trigger zoom). */
+/* Prevent iOS Safari auto-zoom when focusing inputs */
+input, select, textarea { font-size: 16px !important; }
 
       table { width:100%; border-collapse:collapse; font-size:14px; }
       th, td { padding:10px; border-bottom:1px solid var(--border); }
@@ -2185,14 +2219,22 @@ try {
                 </label>
 
                 <label>
-                  <div style={{ fontSize: 12, color: "#666" }}>Phone</div>
-                  <input
-                    value={qHeader.phone}
-                    onChange={(e) =>
-                      setQHeader({ ...qHeader, phone: e.target.value })
-                    }
-                  />
-                </label>
+  <div style={{ fontSize: 12, color: "#666" }}>Phone</div>
+  <input
+    type="tel"
+    inputMode="numeric"
+    autoComplete="tel"
+    autoCapitalize="off"
+    autoCorrect="off"
+    maxLength={20}
+    pattern="[0-9+() -]*"
+    placeholder="e.g. 98765 43210"
+    value={qHeader.phone}
+    onChange={(e) =>
+      setQHeader({ ...qHeader, phone: e.target.value })
+    }
+  />
+</label>
 
                 <div style={{ gridColumn: "1 / span 2", marginTop: 8, fontSize: 14 }}>
                   Dear Sir/Madam,<br />
@@ -2561,7 +2603,16 @@ try {
                 <td style={{ padding: 10 }}>{dateStr}</td>
                 <td style={{ padding: 10 }}>{q.customer_name || "—"}</td>
                 <td style={{ padding: 10 }}>{q.address || "—"}</td>
-                <td style={{ padding: 10 }}>{q.phone || "—"}</td>
+                <td style={{ padding: 10 }}>
+  {q.phone ? (
+    <a
+      href={`tel:${(q.phone || "").replace(/[^0-9+]/g, "")}`}
+      style={{ color: "inherit", textDecoration: "underline" }}
+    >
+      {q.phone}
+    </a>
+  ) : "—"}
+</td>
                 <td style={{ padding: 10 }}>
                   {shown.join(", ")}
                   {extra > 0 ? `, +${extra} more` : ""}
