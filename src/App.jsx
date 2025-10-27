@@ -1350,11 +1350,23 @@ try {
   });
 
   // -------------------------------
-  // TOTAL LINE
-  // -------------------------------
-  const at = doc.lastAutoTable || null;
-  const totalsRightX = R - 10;
-  let totalsY = (at?.finalY ?? afterHeaderY) + 18;
+// TOTAL LINE (with HVF min anchor)
+// -------------------------------
+const at = doc.lastAutoTable || null;
+const totalsRightX = R - 10;
+let totalsY = (at?.finalY ?? afterHeaderY) + 18;
+
+// HVF only: make sure Terms begins ~60% down the page.
+// If the table is short, push the "Total" line (and Terms below it) down.
+// If the table is long (already below that), do nothing.
+if (firm === "HVF Agency") {
+  const minTermsTop = Math.round(ph * 0.60);  // 60% of page height
+  const defaultTy = totalsY + 28;             // where Terms would normally start
+  if (defaultTy < minTermsTop) {
+    const delta = minTermsTop - defaultTy;
+    totalsY += delta; // shift Total down so Terms starts at minTermsTop
+  }
+}
 
   if (firm === "Victor Engineering") {
     // Just the text (no extra separator line)
