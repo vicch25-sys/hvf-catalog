@@ -1061,23 +1061,24 @@ const exportPDF = async () => {
   const dateStr = todayStr();
   setQHeader((h) => ({ ...h, date: dateStr }));
 
-  // Reserve/ensure the number once for editor, PDF & DB (no fallbacks)
-  let number;
-  try {
-    number = await ensureFirmNumber(); // throws & alerts if RPC fails
-  } catch {
-    return; // abort PDF if reservation failed
-  }
+    // Internal quotes: no number and do NOT save to DB
+  let number = "";
+  if (firm !== "Internal") {
+    try {
+      number = await ensureFirmNumber(); // throws & alerts if RPC fails
+    } catch {
+      return; // abort PDF if reservation failed
+    }
 
-  // Always save (UPSERT). It’s safe and avoids duplicate-key errors.
-try {
-  const savedNum = await saveQuote(number);
-  if (!savedNum) return;
-} catch (e) {
-  console.error(e);
-  alert("Could not save before exporting. Aborting.");
-  return;
-}
+    try {
+      const savedNum = await saveQuote(number);
+      if (!savedNum) return;
+    } catch (e) {
+      console.error(e);
+      alert("Could not save before exporting. Aborting.");
+      return;
+    }
+  }
 
   const doc = new jsPDF({ unit: "pt", format: "a4" });
   const pw = doc.internal.pageSize.getWidth();
@@ -1092,7 +1093,52 @@ try {
   // -------------------------------
   let afterHeaderY;
 
-  if (firm === "HVF Agency") {
+  if (firm === "Internal") {
+    // Watermark (light, diagonal)
+    try {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(120);
+      doc.setTextColor(200);
+      doc.text("NOT VALID", pw / 2, ph / 2, { align: "center", angle: -35 });
+      doc.setTextColor(0, 0, 0);
+    } catch {}
+
+    // Simple title
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(16);
+    doc.text("QUOTATION", pw / 2, 86, { align: "center" });
+
+    // Right-top: Date + Total (no Ref)
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    doc.text(`Date: ${dateStr}`, R, 86, { align: "right" });
+
+    try {
+      await loadRupeeFont(doc);
+      doc.setFont("NotoSans", "bold");
+      doc.setFontSize(12);
+      const RUPEE = String.fromCharCode(0x20b9);
+      doc.text(`Total: ${RUPEE} ${inr(cartSubtotal)}`, R, 102, { align: "right" });
+    } catch {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(12);
+      doc.text(`Total: Rs ${inr(cartSubtotal)}`, R, 102, { align: "right" });
+    }
+
+    // Left block (To)
+    let y0 = 110;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(11);
+    doc.text("To,", L, y0); y0 += 18;
+
+    doc.setFont("helvetica", "bold");
+    doc.text(String(qHeader.customer_name || ""), L, y0); y0 += 16;
+    doc.text(String(qHeader.address || ""), L, y0);       y0 += 16;
+    doc.text(String(qHeader.phone || ""), L, y0);
+
+    // Table will start a bit lower
+    afterHeaderY = y0 + 38;
+  } else if (firm === "HVF Agency") {
     // HVF: logo + QUOTATION (unchanged)
     let logoBottom = 24;
     try {
@@ -1357,14 +1403,16 @@ try {
     },
   });
 
+    // -------------------------------
+  // TOTAL LINE
   // -------------------------------
-// TOTAL LINE (stick right under the table)
-// -------------------------------
-const at = doc.lastAutoTable || null;
-const totalsRightX = R - 10;
-const totalsY = (at?.finalY ?? afterHeaderY) + 18; // always right after table
+  const at = doc.lastAutoTable || null;
+  const totalsRightX = R - 10;
+  let totalsY = (at?.finalY ?? afterHeaderY) + 18;
 
-  if (firm === "Victor Engineering") {
+  if (firm === "Internal") {
+    // Already shown at top-right; skip bottom total line
+  } else if (firm === "Victor Engineering") {
     // Just the text (no extra separator line)
     doc.setFont("helvetica", "bold");
     doc.setFontSize(12);
@@ -1400,7 +1448,9 @@ if (firm === "HVF Agency") {
   if (ty < minTermsTop) ty = minTermsTop;
 }
 
-  if (firm === "Victor Engineering") {
+    if (firm === "Internal") {
+    // Internal: no Terms & Conditions or Bank section
+  } else if (firm === "Victor Engineering") {
     // Keep TERMS box, BANK as text only (no rectangle)
     const termsH = 110;
 
