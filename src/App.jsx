@@ -74,6 +74,8 @@ const inferFirmFromNumber = (num) => {
 };
 
 function numberMatchesFirm(firm, n) {
+  // Internal quotes must never have a number
+  if (firm === "Internal") return !n;
   if (!n) return false;
   if (firm === "HVF Agency") return /^APP\/H\d{3}$/.test(n);
   if (firm === "Victor Engineering") return /^APP\/VE\d{3}$/.test(n);
@@ -621,6 +623,12 @@ useEffect(() => {
   // Ensure we have a firm-correct number, but do NOT reserve a new one
 // if a valid number already exists in the editor state.
 const ensureFirmNumber = async () => {
+  // Internal quotes: never have a reference number
+  if (firm === "Internal") {
+    if (qHeader.number) setQHeader((h) => ({ ...h, number: "" }));
+    return "";
+  }
+
   const n = qHeader.number;
 
   // 1) If there is already a number and it matches this firm's format,
@@ -2252,24 +2260,26 @@ input, select, textarea { font-size: 16px !important; }
             {/* right: quotation meta (firm-aware) */}
             <div style={{ width: 240, textAlign: "right" }}>
               <div style={{ fontWeight: 700, marginBottom: 6 }}>
-                {firm === "Victor Engineering" ? "PERFORMA INVOICE" : "QUOTATION"}
-              </div>
+  {firm === "Victor Engineering" ? "PERFORMA INVOICE" : "QUOTATION"}
+</div>
 
-              <div>
-                {firm === "Mahabir Hardware Stores"
-                  ? "Quotation Number: "
-                  : firm === "Victor Engineering"
-                  ? "Ref No: "
-                  : "Ref: "}
-                {qHeader.number ||
-  (firm === "Mahabir Hardware Stores"
-    ? "MH1052"
-    : firm === "Victor Engineering"
-    ? "APP/VE001"
-    : "APP/H###")}
-              </div>
+{firm !== "Internal" && (
+  <div>
+    {firm === "Mahabir Hardware Stores"
+      ? "Quotation Number: "
+      : firm === "Victor Engineering"
+      ? "Ref No: "
+      : "Ref: "}
+    {qHeader.number ||
+      (firm === "Mahabir Hardware Stores"
+        ? "MH1052"
+        : firm === "Victor Engineering"
+        ? "APP/VE001"
+        : "APP/H###")}
+  </div>
+)}
 
-              <div>Date: {qHeader.date}</div>
+<div>Date: {qHeader.date}</div>
             </div>
           </div>
 
@@ -2295,8 +2305,9 @@ input, select, textarea { font-size: 16px !important; }
                 }}
               >
                 <option>HVF Agency</option>
-                <option>Victor Engineering</option>
-                <option>Mahabir Hardware Stores</option>
+<option>Victor Engineering</option>
+<option>Mahabir Hardware Stores</option>
+<option>Internal</option>
               </select>
             </label>
           </div>
