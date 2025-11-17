@@ -84,6 +84,34 @@ const todayStr = () => {
   return `${dd}/${mm}/${yyyy}`;
 };
 
+// ---- helpers for editable quotation date ----
+// Convert stored "dd/mm/yyyy" -> "yyyy-mm-dd" for <input type="date">
+const headerDateToInput = (d) => {
+  if (!d) return "";
+  const parts = d.split("/");
+  if (parts.length !== 3) return "";
+  const [dd, mm, yyyy] = parts;
+  return `${yyyy}-${mm}-${dd}`;
+};
+
+// Convert <input type="date" value "yyyy-mm-dd" -> "dd/mm/yyyy" for storage
+const inputDateToHeader = (iso) => {
+  if (!iso) return todayStr();
+  const parts = iso.split("-");
+  if (parts.length !== 3) return todayStr();
+  const [yyyy, mm, dd] = parts;
+  return `${dd}/${mm}/${yyyy}`;
+};
+
+// Today's date in "yyyy-mm-dd" format for max= on the date input
+const todayISO = () => {
+  const d = new Date();
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const yyyy = d.getFullYear();
+  return `${yyyy}-${mm}-${dd}`;
+};
+
 const inferFirmFromNumber = (num) => {
   if (num == null || String(num).trim() === "") return "Internal";
   if (/^INT\//i.test(String(num))) return "Internal";               // ← NEW
@@ -2474,11 +2502,18 @@ try {
 const exportPDF = async () => {
   if (cartList.length === 0) return alert("Nothing to print.");
 
-  // Always use today for editor + PDF
-  const dateStr = todayStr();
-  setQHeader((h) => ({ ...h, date: dateStr }));
+  // Use the currently selected date, or fallback to today if empty
+  const selectedDate =
+    qHeader.date && qHeader.date.trim() ? qHeader.date.trim() : todayStr();
 
-    // Save for ALL firms. For Internal we save without a number.
+  // Keep header.date in sync only if it was empty before
+  setQHeader((h) =>
+    h.date && h.date.trim() ? h : { ...h, date: selectedDate }
+  );
+
+  const dateStr = selectedDate;
+
+  // Save for ALL firms. For Internal we save without a number.
   let number = "";
   try {
     if (firm !== "Internal") {
@@ -4215,7 +4250,40 @@ button.mini.primary{
   </div>
 )}
 
-<div>Date: {qHeader.date}</div>
+<div
+  style={{
+    display: "flex",
+    justifyContent: "flex-end",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 4,
+  }}
+>
+  <span>Date:</span>
+  <input
+    type="date"
+    value={
+      qHeader.date
+        ? qHeader.date.split("/").reverse().join("-")
+        : ""
+    }
+    max={new Date().toISOString().slice(0, 10)} // cannot pick future dates
+    onChange={(e) => {
+      const iso = e.target.value; // "YYYY-MM-DD"
+      if (!iso) return;
+      const [yyyy, mm, dd] = iso.split("-");
+      const nice = `${dd}/${mm}/${yyyy}`; // back to DD/MM/YYYY
+      setQHeader((prev) => ({ ...prev, date: nice }));
+    }}
+    style={{
+      border: "1px solid #d1d5db",
+      borderRadius: 6,
+      padding: "3px 6px",
+      fontSize: 12,
+    }}
+  />
+</div>
+
             </div>
           </div>
 
