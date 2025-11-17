@@ -3074,8 +3074,20 @@ if (firm === "Internal") {
   } catch {}
 }
 
-// Done — open in new tab
-window.open(doc.output("bloburl"), "_blank");
+// Done — open in new tab (iPhone-friendly)
+const pdfBlobUrl = doc.output("bloburl");
+
+if (pdfWindow && !pdfWindow.closed) {
+  try {
+    pdfWindow.location.href = pdfBlobUrl;
+  } catch (e) {
+    // Fallback if Safari blocks or throws
+    window.open(pdfBlobUrl, "_blank");
+  }
+} else {
+  // Fallback if the pre-opened window could not be created
+  window.open(pdfBlobUrl, "_blank");
+}
 };
 
 // Helper: safely read delivered records from localStorage
