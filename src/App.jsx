@@ -2513,6 +2513,14 @@ const exportPDF = async () => {
 
   const dateStr = selectedDate;
 
+  // Pre-open blank window/tab for the PDF (needed for iOS Safari)
+  let pdfWindow = null;
+  try {
+    pdfWindow = window.open("", "_blank");
+  } catch (e) {
+    pdfWindow = null; // if blocked, we'll fall back later
+  }
+
   // Save for ALL firms. For Internal we save without a number.
   let number = "";
   try {
