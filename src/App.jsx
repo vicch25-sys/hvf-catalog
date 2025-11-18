@@ -2983,7 +2983,7 @@ if (firm === "HVF Agency") {
     );
 
         // BANK section — NO rectangle (tighter + wrapped to stay inside frame)
-    const bankTop = Math.min(ty + termsH + 6, frameBottom - 70); // keep bank details inside frame
+    const bankTop = Math.min(ty + termsH + 6, ph - margin - 90); // clamp inside page/frame bottom
 
     // Heading
     doc.setFont("times", "bold");
