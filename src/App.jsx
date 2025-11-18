@@ -2641,8 +2641,8 @@ doc.text(`Date: ${dateStr}`, R, 86, { align: "right" });
 
     // Outer frame
     const frameTop = 92;
-    const frameBottom = ph - 40;
-    const frameH = frameBottom - frameTop;
+    // Height of the outer frame: from 92pt down to page bottom minus 40pt margin
+    const frameH = ph - 40 - frameTop;
     doc.setLineWidth(LINE_W);
     doc.rect(L, frameTop, contentW, frameH);
 
