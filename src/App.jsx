@@ -2982,25 +2982,31 @@ if (firm === "HVF Agency") {
       ty + 34
     );
 
-    // BANK section — NO rectangle
-    const bankTop = ty + termsH + 10;
-    doc.setFont("times", "bold");
-    doc.setFontSize(11);
-    doc.text("BANK DETAILS", L + 10, bankTop + 16);
+    /    // BANK section — NO rectangle (tighter + wrapped to stay inside frame)
+    const bankTop = ty + termsH + 6; // slightly smaller gap under Terms box
 
-    doc.setFont("times", "normal");
+    // Heading
+    doc.setFont("times", "bold");
     doc.setFontSize(10);
-    doc.text(
-      [
-        "M/S VICTOR ENGINEERING",
-        "Axis Bank (Moran, 785670)",
-        "Current Account",
-        "A/C No: 921020019081364",
-        "IFSC: UTIB0003701",
-      ],
-      L + 10,
-      bankTop + 34
+    doc.text("BANK DETAILS", L + 10, bankTop + 14);
+
+    // Body (smaller font + wrapped within contentW so it doesn't stick out)
+    doc.setFont("times", "normal");
+    doc.setFontSize(9);
+
+    const bankLines = [
+      "M/S VICTOR ENGINEERING",
+      "Axis Bank (Moran, 785670)",
+      "Current Account",
+      "A/C No: 921020019081364",
+      "IFSC: UTIB0003701",
+    ];
+
+    const bankWrapped = doc.splitTextToSize(
+      bankLines.join("\n"),
+      contentW - 20       // keep safely inside left/right frame
     );
+    doc.text(bankWrapped, L + 10, bankTop + 28);
 
     // reset draw defaults
     doc.setDrawColor(0);
