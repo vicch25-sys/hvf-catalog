@@ -5417,11 +5417,8 @@ colSpan={savedView === "sanctioned" ? 12 : 9}
     <h3 style={{ marginTop: 0, marginBottom: 12 }}>Delivered Quotations</h3>
 
     {(() => {
-      // Prefer DB, fallback to LocalStorage helper
-      const base =
-        Array.isArray(deliveredRowsDB) && deliveredRowsDB.length
-          ? deliveredRowsDB
-          : (getDeliveredList ? getDeliveredList() : []);
+      // Always use Supabase-delivered rows (single source of truth)
+const base = Array.isArray(deliveredRowsDB) ? deliveredRowsDB : [];
 
       // Normalize keys so the renderer is consistent
       const rows = base.map((r) => {
