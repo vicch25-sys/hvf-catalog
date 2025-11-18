@@ -2982,7 +2982,7 @@ if (firm === "HVF Agency") {
       ty + 34
     );
 
-    /    // BANK section — NO rectangle (tighter + wrapped to stay inside frame)
+        // BANK section — NO rectangle (tighter + wrapped to stay inside frame)
     const bankTop = ty + termsH + 6; // slightly smaller gap under Terms box
 
     // Heading
