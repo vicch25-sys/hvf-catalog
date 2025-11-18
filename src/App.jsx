@@ -3135,7 +3135,19 @@ function unmarkDeliveredById(id) {
 
 // ---- Delivered (Supabase) helpers ----
 async function dbFetchDelivered() {
-  try {
+  // helper to push rows into state in one place
+  const applyRows = (rows) => {
+    const safe = Array.isArray(rows) ? rows : [];
+    setDeliveredRowsDB(safe);
+    setDeliveredIdsDB(safe.map((r) => r.id).filter(Boolean));
+    return safe;
+  };
+
+  // local fallback (same structure as we already save into hvf.deliveredList)
+  const localList = getDeliveredList();
+
+  // actual Supabase SELECT encapsulated so we can retry
+  const runSelect = async () => {
     const { data, error } = await supabase
       .from("delivered")
       .select(`
@@ -3179,12 +3191,42 @@ async function dbFetchDelivered() {
       };
     });
 
-    setDeliveredRowsDB(rows);
-    setDeliveredIdsDB(rows.map((r) => r.id).filter(Boolean));
     return rows;
+  };
+
+  try {
+    // 1st attempt to read from Supabase
+    let rows = await runSelect();
+
+    // If DB has nothing but localList has entries (first-time / offline),
+    // show local so the table is not empty.
+    if ((!rows || rows.length === 0) && localList.length > 0) {
+      return applyRows(localList);
+    }
+
+    return applyRows(rows);
   } catch (e) {
+    const msg = String(e?.message || "");
     console.error("dbFetchDelivered:", e);
-    return [];
+
+    // Safari's "Load failed"/network hiccup → retry once
+    if (
+      msg.includes("Load failed") ||
+      msg.includes("Failed to fetch") ||
+      msg.includes("network connection was lost")
+    ) {
+      try {
+        const retryRows = await runSelect();
+        if (retryRows && retryRows.length) {
+          return applyRows(retryRows);
+        }
+      } catch (e2) {
+        console.error("dbFetchDelivered retry failed:", e2);
+      }
+    }
+
+    // Final fallback: show whatever is in localStorage
+    return applyRows(localList);
   }
 }
 
