@@ -726,10 +726,12 @@ useEffect(() => {
 
 // When the app lands on the Saved Detailed page (e.g. after a refresh),
 // fetch the data and reset the firm filter to All.
+// Also load delivered rows from Supabase so all devices stay in sync.
 useEffect(() => {
   if (page === "savedDetailed") {
     setSavedFirmFilter("All");
     loadSavedDetailed();
+    dbFetchDelivered(); // fire-and-forget; it updates deliveredRowsDB state
   }
 }, [page]);
 
