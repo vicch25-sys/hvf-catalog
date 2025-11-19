@@ -3151,7 +3151,7 @@ function unmarkDeliveredById(id) {
 
 // ---- Delivered (Supabase) helpers ----
 async function dbFetchDelivered() {
-  // helper to push rows into state in one place
+  // push rows into state in one place
   const applyRows = (rows) => {
     const safe = Array.isArray(rows) ? rows : [];
     setDeliveredRowsDB(safe);
@@ -3162,82 +3162,56 @@ async function dbFetchDelivered() {
   // legacy/offline cache (used ONLY if Supabase is unreachable)
   const localList = getDeliveredList();
 
-  // actual Supabase SELECT encapsulated so we can retry
-  const runSelect = async () => {
-    const { data, error } = await supabase
+  try {
+    // 1) Fetch ONLY from delivered (no JOIN) — avoids FK/relationship name dependency
+    const { data: dRows, error: dErr } = await supabase
       .from("delivered")
-      .select(`
-        quote_id,
-        delivered_on,
-        items_delivered,
-        sanctioned_mode,
-        sanctioned_amount,
-        csm_amount,
-        rtnad_amount,
-        remarks,
-        quotes!delivered_quote_id_fkey (
-          id,
-          number,
-          firm,
-          customer_name,
-          phone,
-          total
-        )
-      `)
+      .select(
+        "quote_id, delivered_on, items_delivered, sanctioned_mode, sanctioned_amount, csm_amount, rtnad_amount, remarks"
+      )
       .order("delivered_on", { ascending: false });
 
-    if (error) throw error;
+    if (dErr) throw dErr;
 
-    const rows = (data || []).map((r) => {
-      const q = r.quotes || {};
+    const delivered = Array.isArray(dRows) ? dRows : [];
+    const quoteIds = [...new Set(delivered.map((r) => r.quote_id).filter(Boolean))];
+
+    // 2) Fetch the matching quote headers (so firm/number/customer are always available)
+    let qMap = new Map();
+    if (quoteIds.length) {
+      const { data: qRows, error: qErr } = await supabase
+        .from("quotes")
+        .select("id, number, firm, customer_name, phone, total")
+        .in("id", quoteIds);
+      if (qErr) throw qErr;
+      (qRows || []).forEach((q) => qMap.set(q.id, q));
+    }
+
+    // 3) Merge into the UI shape your table expects
+    const rows = delivered.map((r) => {
+      const q = qMap.get(r.quote_id) || {};
       return {
-        id: q.id || r.quote_id,
+        id: r.quote_id,
         number: q.number || "",
         firm: q.firm || "",
         customer_name: q.customer_name || "",
         phone: q.phone || "",
-        total: q.total || 0,
+        total: q.total ?? 0,
         delivered_date: r.delivered_on || null,
         items: r.items_delivered || [],
         sanctioned: r.sanctioned_mode || "",
-        sanctioned_amount: r.sanctioned_amount,
-        csm: r.csm_amount,
-        rtnad: r.rtnad_amount,
+        sanctioned_amount: r.sanctioned_amount ?? null,
+        csm: r.csm_amount ?? null,
+        rtnad: r.rtnad_amount ?? null,
         remarks: r.remarks || "",
       };
     });
 
-    return rows;
-  };
-
-  try {
-    // 1st attempt to read from Supabase
-    const rows = await runSelect();
-
-    // ✅ Supabase is now the single source of truth.
-    // Even if it returns 0 rows, we trust that and show an empty table.
-    return applyRows(rows || []);
+    // ✅ Supabase is the single source of truth (even if it returns 0)
+    return applyRows(rows);
   } catch (e) {
-    const msg = String(e?.message || "");
-    console.error("dbFetchDelivered:", e);
-
-    // Safari's "Load failed"/network hiccup → retry once
-    if (
-      msg.includes("Load failed") ||
-      msg.includes("Failed to fetch") ||
-      msg.includes("network connection was lost")
-    ) {
-      try {
-        const retryRows = await runSelect();
-        if (retryRows && retryRows.length) {
-          return applyRows(retryRows);
-        }
-      } catch (e2) {
-        console.error("dbFetchDelivered retry failed:", e2);
-      }
-    }
-
-    // ❗ Only if Supabase is unreachable, fall back to whatever is cached locally
+    console.error("dbFetchDelivered:", e?.message || e);
+    // Only if Supabase is unreachable, fall back to local cache
     return applyRows(localList);
   }
 }
