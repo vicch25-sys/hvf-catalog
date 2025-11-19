@@ -2387,113 +2387,127 @@ const saveSanction = async () => {
 async function saveDeliverLocal() {
   try {
     const row = deliverPop?.row;
-    if (!row) {
+    if (!row || !row.id) {
       alert("No row selected.");
       return;
     }
 
-    // normalize form fields
-    const dateISO =
-      (deliverForm?.date || new Date().toISOString().slice(0, 10));
+    // ---- normalize date
+    const dateISO = (deliverForm?.date || new Date().toISOString().slice(0, 10));
 
-    const items = Array.isArray(deliverForm?.items)
-      ? deliverForm.items
-          .filter((it) => (it?.name || "").trim() !== "")
-          .map((it) => ({
-            name: it.name,
-            delivered: !!it.delivered,
-          }))
-      : [];
+    // ---- normalize items (DB expects text[] of names)
+    let items = [];
+    if (Array.isArray(deliverForm?.items)) {
+      // support either [{name, delivered}] or plain strings
+      items = deliverForm.items
+        .map((it) => {
+          if (typeof it === "string") return it.trim();
+          const nm = (it?.name || "").trim();
+          return it?.delivered ? nm : ""; // only keep delivered=true
+        })
+        .filter(Boolean);
+    }
 
-    const payload = {
-      id: row.id,
-      number: row.number,
-      customer_name: row.customer_name,
-      phone: row.phone,
-      address: row.address,
-      total: row.total,
-            delivered_date: dateISO,
-      items,
-      remarks: (deliverForm.adjust ?? "").trim() || row.remarks || "",
-
-  // NEW: sanctioned amount (strip ₹ and commas)
-  sanctioned_amount:
-    deliverForm?.sanctioned !== undefined && deliverForm?.sanctioned !== ""
-      ? Number(String(deliverForm.sanctioned).replace(/[^0-9.]/g, "")) || 0
-      : (row.sanctioned_amount ?? null),
-
-      // keep what you edited in the dialog
-      csm_amount:
-        deliverForm?.csm !== undefined && deliverForm?.csm !== ""
-          ? Number(deliverForm.csm) || 0
-          : row.csm_amount ?? null,
-      rtnad_amount:
-        deliverForm?.rtnad !== undefined && deliverForm?.rtnad !== ""
-          ? Number(deliverForm.rtnad) || 0
-          : row.rtnad_amount ?? null,
+    // ---- tiny helper to coerce numbers safely
+    const toNumOrNull = (v) => {
+      if (v === undefined || v === null || v === "") return null;
+      const n = Number(String(v).replace(/[^0-9.]/g, ""));
+      return Number.isFinite(n) ? n : null;
     };
 
-    // 1) Save locally (Delivered list used by Delivered view)
-const KEY = "hvf.delivered";
-let list = [];
-try {
-  list = JSON.parse(localStorage.getItem(KEY) || "[]");
-  if (!Array.isArray(list)) list = [];
-} catch {
-  list = [];
-}
-const idx = list.findIndex((x) => x && x.id === payload.id);
-if (idx >= 0) list[idx] = payload;
-else list.unshift(payload);
-localStorage.setItem(KEY, JSON.stringify(list));
+    // amounts as edited in dialog (fallback to row’s values)
+    const sanctioned_amount = toNumOrNull(deliverForm?.sanctioned) ?? (row.sanctioned_amount ?? null);
+    const csm_amount       = toNumOrNull(deliverForm?.csm)        ?? (row.csm_amount ?? null);
+    const rtnad_amount     = toNumOrNull(deliverForm?.rtnad)      ?? (row.rtnad_amount ?? null);
 
-// Remember this id as delivered (so Sanctioned view hides it)
-try {
-  const IDS_KEY = "hvf.deliveredIds";
-  let ids = JSON.parse(localStorage.getItem(IDS_KEY) || "[]");
-  if (!Array.isArray(ids)) ids = [];
-  if (!ids.includes(payload.id)) ids.push(payload.id);
-  localStorage.setItem(IDS_KEY, JSON.stringify(ids));
-} catch {}
+    // remarks
+    const remarks = (deliverForm?.adjust ?? "").toString().trim() || (row.remarks ?? "");
 
-// Remove from current sanctioned table instantly (no reload)
-try {
-  setTableData((prev) => {
-    if (!Array.isArray(prev)) return prev;
-    return prev.filter((r) => r?.id !== payload.id);
-  });
-} catch {}
-
-    // 2) (Optional) Update backend: mark delivered + clear sanctioned
+    // ===================== NEW: write to Supabase `delivered` =====================
     try {
-      if (typeof supabase !== "undefined" && row.id) {
-        await supabase
-          .from("quotes")
-          .update({
-            delivered_date: dateISO,
-            delivered_flag: true,
-            // clear sanctioned fields so it disappears from sanctioned view
-            sanctioned_status: null,
-            sanctioned_mode: null,
-            sanctioned_date: null,
-            sanctioned_amount: null,
-            // persist any inline amounts you edited
-            csm_amount: payload.csm_amount,
-            rtnad_amount: payload.rtnad_amount,
-          })
-          .eq("id", row.id);
-      }
+      const upsertPayload = {
+        quote_id: row.id,                   // uuid (unique per delivered row)
+        delivered_on: dateISO,              // date
+        items_delivered: items,             // text[]
+        sanctioned_mode: (row?.sanctioned_mode || "full"), // text
+        sanctioned_amount,                  // numeric
+        csm_amount,                         // numeric
+        rtnad_amount,                       // numeric
+        remarks: remarks || null,           // text
+      };
+
+      const { error: dErr } = await supabase
+        .from("delivered")
+        .upsert(upsertPayload, { onConflict: "quote_id" }); // ensure idempotent per quote
+
+      if (dErr) throw dErr;
+    } catch (insErr) {
+      console.error("Delivered upsert failed:", insErr);
+      alert("Could not save to Delivered table: " + (insErr?.message || insErr));
+      return; // stop here if DB write failed
+    }
+    // ============================================================================
+
+    // keep your local snapshot (safe to retain for UX)
+    try {
+      const KEY = "hvf.delivered";
+      let list = JSON.parse(localStorage.getItem(KEY) || "[]");
+      if (!Array.isArray(list)) list = [];
+      const payload = {
+        id: row.id,
+        number: row.number,
+        customer_name: row.customer_name,
+        phone: row.phone,
+        address: row.address,
+        total: row.total,
+        delivered_date: dateISO,
+        items: Array.isArray(deliverForm?.items) ? deliverForm.items : [],
+        remarks,
+        sanctioned_amount,
+        csm_amount,
+        rtnad_amount,
+      };
+      const idx = list.findIndex((x) => x && x.id === payload.id);
+      if (idx >= 0) list[idx] = payload;
+      else list.unshift(payload);
+      localStorage.setItem(KEY, JSON.stringify(list));
+
+      // remember ids (so Sanctioned view hides it instantly)
+      const IDS_KEY = "hvf.deliveredIds";
+      let ids = JSON.parse(localStorage.getItem(IDS_KEY) || "[]");
+      if (!Array.isArray(ids)) ids = [];
+      if (!ids.includes(payload.id)) ids.push(payload.id);
+      localStorage.setItem(IDS_KEY, JSON.stringify(ids));
+    } catch {}
+
+    // also update header flags on quotes (nice-to-have)
+    try {
+      await supabase
+        .from("quotes")
+        .update({
+          delivered_date: dateISO,
+          delivered_flag: true,
+          sanctioned_status: null,
+          sanctioned_mode:   null,
+          sanctioned_date:   null,
+          sanctioned_amount: null,
+          csm_amount,
+          rtnad_amount,
+        })
+        .eq("id", row.id);
     } catch (e) {
-      // soft-fail: local list still works
-      console.warn("Supabase update failed:", e?.message);
+      console.warn("Soft warning: quotes update failed (delivered saved anyway):", e?.message);
     }
 
-    // 3) close dialog, refresh, and jump to Delivered view
+    // close dialog & switch to Delivered
     setDeliverPop({ open: false, row: null });
-    if (typeof loadSavedDetailed === "function") {
-      await loadSavedDetailed();
-    }
+    // If you have a fetch function for Delivered, call it here; otherwise the page reload will pick it up.
+    try {
+      if (typeof dbFetchDelivered === "function") await dbFetchDelivered();
+    } catch {}
     setSavedView("delivered");
+    try { localStorage.setItem("hvf.savedView", "delivered"); } catch {}
+
     alert("Saved to Delivered ✅");
   } catch (e) {
     alert(e?.message || "Could not save to Delivered.");
