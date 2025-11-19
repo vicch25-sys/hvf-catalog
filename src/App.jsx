@@ -3145,7 +3145,7 @@ async function dbFetchDelivered() {
     return safe;
   };
 
-  // local fallback (same structure as we already save into hvf.deliveredList)
+  // legacy/offline cache (used ONLY if Supabase is unreachable)
   const localList = getDeliveredList();
 
   // actual Supabase SELECT encapsulated so we can retry
@@ -3198,15 +3198,11 @@ async function dbFetchDelivered() {
 
   try {
     // 1st attempt to read from Supabase
-    let rows = await runSelect();
+    const rows = await runSelect();
 
-    // If DB has nothing but localList has entries (first-time / offline),
-    // show local so the table is not empty.
-    if ((!rows || rows.length === 0) && localList.length > 0) {
-      return applyRows(localList);
-    }
-
-    return applyRows(rows);
+    // ✅ Supabase is now the single source of truth.
+    // Even if it returns 0 rows, we trust that and show an empty table.
+    return applyRows(rows || []);
   } catch (e) {
     const msg = String(e?.message || "");
     console.error("dbFetchDelivered:", e);
@@ -3227,7 +3223,7 @@ async function dbFetchDelivered() {
       }
     }
 
-    // Final fallback: show whatever is in localStorage
+    // ❗ Only if Supabase is unreachable, fall back to whatever is cached locally
     return applyRows(localList);
   }
 }
