@@ -3254,7 +3254,7 @@ async function dbUpsertDelivered(quoteId, payload) {
   takeSnapshot(`deliver:${quoteId || (payload && payload.quote_id) || ""}`);
   const rec = {
     quote_id: quoteId,
-    delivered_on: payload?.date || new Date().toISOString().slice(0,10),
+    delivered_on: normalizeDate(payload?.date),
     items_delivered: payload?.items || payload?.items_delivered || [],
     sanctioned_mode: payload?.full ? "full" : (payload?.partial ? "partial" : null),
     sanctioned_amount: payload?.sanctioned_amount ?? payload?.amount ?? null,
