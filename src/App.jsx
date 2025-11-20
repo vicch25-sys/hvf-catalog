@@ -3149,6 +3149,46 @@ function unmarkDeliveredById(id) {
   } catch {}
 }
 
+// ---- Sanctioned (HVF-only) fetch from Supabase (cross-device) ----
+async function dbFetchSanctionedHVF() {
+  try {
+    const { data, error } = await supabase
+      .from("quotes")
+      .select(
+        "id, number, firm, customer_name, phone, subject, total, sanctioned_status, sanctioned_mode, sanctioned_date, sanctioned_amount, csm_amount, rtnad_amount, delivered_flag"
+      )
+      .eq("firm", "HVF Agency")
+      .not("sanctioned_status", "is", null)                // only sanctioned rows
+      .or("delivered_flag.is.false,delivered_flag.is.null")// exclude delivered
+      .order("sanctioned_date", { ascending: false, nullsFirst: false });
+
+    if (error) throw error;
+
+    const rows = (data || []).map((q) => ({
+      id: q.id,
+      number: q.number || "",
+      firm: q.firm || "HVF Agency",
+      customer_name: q.customer_name || "",
+      phone: q.phone || "",
+      subject: q.subject || "",
+      total: q.total ?? 0,
+      sanctioned: q.sanctioned_mode || q.sanctioned_status || "",
+      sanctioned_amount: q.sanctioned_amount ?? null,
+      csm_amount: q.csm_amount ?? null,
+      rtnad_amount: q.rtnad_amount ?? null,
+      sanctioned_date: q.sanctioned_date || null,
+    }));
+
+    // feed your existing table state
+    setTableData(rows);
+    try { setSavedCount(rows.length); } catch {}
+  } catch (e) {
+    console.error("dbFetchSanctionedHVF:", e?.message || e);
+    setTableData([]);
+    try { setSavedCount(0); } catch {}
+  }
+}
+
 // ---- Delivered (Supabase) helpers ----
 async function dbFetchDelivered() {
   // push rows into state in one place
