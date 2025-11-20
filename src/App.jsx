@@ -3152,40 +3152,74 @@ function unmarkDeliveredById(id) {
 // ---- Sanctioned (HVF-only) fetch from Supabase (cross-device) ----
 async function dbFetchSanctionedHVF() {
   try {
-    const { data, error } = await supabase
+    // 1) Get all sanctioned quotes for HVF Agency (no delivered_flag)
+    const { data: qRows, error: qErr } = await supabase
       .from("quotes")
       .select(
-        "id, number, firm, customer_name, phone, subject, total, sanctioned_status, sanctioned_mode, sanctioned_date, sanctioned_amount, csm_amount, rtnad_amount, delivered_flag"
+        "id, number, firm, customer_name, phone, subject, total, sanctioned_status, sanctioned_mode, sanctioned_date, sanctioned_amount, csm_amount, rtnad_amount"
       )
       .eq("firm", "HVF Agency")
-      .not("sanctioned_status", "is", null)                // only sanctioned rows
-      .or("delivered_flag.is.false,delivered_flag.is.null")// exclude delivered
+      .not("sanctioned_status", "is", null) // only sanctioned
       .order("sanctioned_date", { ascending: false, nullsFirst: false });
 
-    if (error) throw error;
+    if (qErr) throw qErr;
 
-    const rows = (data || []).map((q) => ({
-      id: q.id,
-      number: q.number || "",
-      firm: q.firm || "HVF Agency",
-      customer_name: q.customer_name || "",
-      phone: q.phone || "",
-      subject: q.subject || "",
-      total: q.total ?? 0,
-      sanctioned: q.sanctioned_mode || q.sanctioned_status || "",
-      sanctioned_amount: q.sanctioned_amount ?? null,
-      csm_amount: q.csm_amount ?? null,
-      rtnad_amount: q.rtnad_amount ?? null,
-      sanctioned_date: q.sanctioned_date || null,
-    }));
+    // 2) Fetch delivered ids and remove them on the client (avoids schema deps)
+    const { data: dRows, error: dErr } = await supabase
+      .from("delivered")
+      .select("quote_id");
+    if (dErr) throw dErr;
 
-    // feed your existing table state
-    setTableData(rows);
-    try { setSavedCount(rows.length); } catch {}
+    const deliveredIds = new Set((dRows || []).map((r) => r.quote_id));
+
+    const rows = (qRows || [])
+      .filter((q) => !deliveredIds.has(q.id))
+      .map((q) => ({
+        id: q.id,
+        number: q.number || "",
+        firm: q.firm || "HVF Agency",
+        customer_name: q.customer_name || "",
+        phone: q.phone || "",
+        subject: q.subject || "",
+        total: q.total ?? 0,
+        sanctioned: q.sanctioned_mode || q.sanctioned_status || "",
+        sanctioned_amount: q.sanctioned_amount ?? null,
+        csm_amount: q.csm_amount ?? null,
+        rtnad_amount: q.rtnad_amount ?? null,
+        sanctioned_date: q.sanctioned_date || null,
+      }));
+
+    // 3) Push into whichever state setter exists in your file (no ReferenceError)
+    if (typeof setTableData !== "undefined") {
+      setTableData(rows);
+    } else if (typeof setSavedData !== "undefined") {
+      setSavedData(rows);
+    } else if (typeof setSavedDetailed !== "undefined") {
+      setSavedDetailed(rows);
+    }
+
+    if (typeof setSavedCount !== "undefined") {
+      setSavedCount(rows.length);
+    }
+
+    // 4) Force firm to HVF in this view so filters don't hide rows
+    if (typeof setSavedFirm !== "undefined") {
+      try { setSavedFirm("HVF Agency"); } catch {}
+    }
+    try { localStorage.setItem("hvf.savedFirm", "HVF Agency"); } catch {}
   } catch (e) {
     console.error("dbFetchSanctionedHVF:", e?.message || e);
-    setTableData([]);
-    try { setSavedCount(0); } catch {}
+
+    if (typeof setTableData !== "undefined") {
+      setTableData([]);
+    } else if (typeof setSavedData !== "undefined") {
+      setSavedData([]);
+    } else if (typeof setSavedDetailed !== "undefined") {
+      setSavedDetailed([]);
+    }
+    if (typeof setSavedCount !== "undefined") {
+      setSavedCount(0);
+    }
   }
 }
 
