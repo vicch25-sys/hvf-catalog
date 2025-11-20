@@ -3216,7 +3216,39 @@ async function dbFetchDelivered() {
   }
 }
 
+
 // upsert one delivered record for a quote
+// --- helper: return YYYY-MM-DD from DD/MM/YYYY or other inputs ---
+function normalizeDate(input) {
+  try {
+    if (!input) return new Date().toISOString().slice(0, 10);
+    const s = String(input).trim();
+
+    // dd/mm/yyyy -> yyyy-mm-dd
+    const dmy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (dmy) {
+      const dd = dmy[1].padStart(2, "0");
+      const mm = dmy[2].padStart(2, "0");
+      const yyyy = dmy[3];
+      return `${yyyy}-${mm}-${dd}`;
+    }
+
+    // already yyyy-mm-dd
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+
+    // ISO strings yyyy-mm-ddTHH:MM:SSZ
+    if (s.includes("T")) return s.slice(0, 10);
+
+    // last resort: Date parse
+    const d = new Date(s);
+    if (!Number.isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+
+    return new Date().toISOString().slice(0, 10);
+  } catch {
+    return new Date().toISOString().slice(0, 10);
+  }
+}
+
 async function dbUpsertDelivered(quoteId, payload) {
   // snapshot BEFORE writing delivered record (for global Undo)
   takeSnapshot(`deliver:${quoteId || (payload && payload.quote_id) || ""}`);
