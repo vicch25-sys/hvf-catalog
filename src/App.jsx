@@ -3189,6 +3189,13 @@ async function dbFetchSanctionedHVF() {
   }
 }
 
+// Auto-load HVF sanctioned list whenever we open Saved → Sanctioned View
+useEffect(() => {
+  if (activePage === "saved" && savedView === "sanctioned") {
+    dbFetchSanctionedHVF();
+  }
+}, [activePage, savedView]);
+
 // ---- Delivered (Supabase) helpers ----
 async function dbFetchDelivered() {
   // push rows into state in one place
