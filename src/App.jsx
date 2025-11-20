@@ -3189,12 +3189,12 @@ async function dbFetchSanctionedHVF() {
   }
 }
 
-// Auto-load HVF sanctioned list whenever we open Saved → Sanctioned View
+// Auto-load HVF sanctioned list when Sanctioned View is active
 useEffect(() => {
-  if (activePage === "saved" && savedView === "sanctioned") {
+  if (savedView === "sanctioned") {
     dbFetchSanctionedHVF();
   }
-}, [activePage, savedView]);
+}, [savedView]);
 
 // ---- Delivered (Supabase) helpers ----
 async function dbFetchDelivered() {
