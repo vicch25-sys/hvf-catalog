@@ -2393,7 +2393,7 @@ async function saveDeliverLocal() {
     }
 
     // ---- normalize date
-    const dateISO = (deliverForm?.date || new Date().toISOString().slice(0, 10));
+    const dateISO = normalizeDate(deliverForm?.date);
 
     // ---- normalize items (DB expects text[] of names)
     let items = [];
