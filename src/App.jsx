@@ -3149,6 +3149,16 @@ function unmarkDeliveredById(id) {
     }
   } catch {}
 }
+// Sanctioned View: clear legacy local keys so no rows get hidden by stale filters
+function resetSanctionedLocal() {
+  try { localStorage.removeItem("hvf.delivered"); } catch {}
+  try { localStorage.removeItem("hvf_delivered"); } catch {}
+  try { localStorage.removeItem("hvf.deliveredIds"); } catch {}
+  try { localStorage.removeItem("hvf.recycle"); } catch {}
+  try { localStorage.removeItem("hvf.recycleBin"); } catch {}
+  try { localStorage.setItem("hvf.savedSearch", ""); } catch {}
+  try { localStorage.setItem("hvf.savedFirm", "HVF Agency"); } catch {}
+}
 
 // ---- Sanctioned (HVF-only) fetch from Supabase (cross-device) ----
 async function dbFetchSanctionedHVF() {
@@ -3244,9 +3254,12 @@ async function dbFetchSanctionedHVF() {
   }
 }
 
-// Auto-load HVF sanctioned list when Sanctioned View is active
+// Auto-load HVF sanctioned list when Sanctioned View is active (reset stale local filters)
 useEffect(() => {
   if (savedView === "sanctioned") {
+    resetSanctionedLocal();
+    if (typeof setSavedSearch !== "undefined") { try { setSavedSearch(""); } catch {} }
+    if (typeof setSavedFirm !== "undefined")  { try { setSavedFirm("HVF Agency"); } catch {} }
     dbFetchSanctionedHVF();
   }
 }, [savedView]);
