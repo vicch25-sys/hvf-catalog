@@ -1966,7 +1966,7 @@ const sanctionedDetailedFiltered = useMemo(() => {
   // use the dedicated dataset we fetch in dbFetchSanctionedHVF
   const list = Array.isArray(sanctionedRowsDB) ? sanctionedRowsDB : [];
 
-  // firm tabs behaviour: Sanctioned is HVF-only. "All" or "HVF Agency" show; other tabs -> empty.
+  // Sanctioned is HVF-only. "All" or "HVF Agency" show; other tabs -> empty.
   const byFirm =
     (savedFirmFilter === "All" || savedFirmFilter === "HVF Agency")
       ? list
@@ -1982,7 +1982,7 @@ const sanctionedDetailedFiltered = useMemo(() => {
     return cb - ca;
   });
 
-  // search (same as normal; this dataset doesn’t include quote_items)
+  // search (same as normal; items are already attached in the fetch)
   const q = (savedSearch || "").trim().toLowerCase();
   if (!q) return sorted;
 
@@ -1994,6 +1994,10 @@ const sanctionedDetailedFiltered = useMemo(() => {
       const dateStr = row?.created_at ? text(fmtDate(row.created_at)) : "";
       parts.push(dateStr);
       parts.push(text(row?.customer_name), text(row?.address), text(row?.phone));
+      const itemNames = Array.isArray(row?.quote_items)
+        ? row.quote_items.map((it) => text(it?.name)).join(" ")
+        : "";
+      parts.push(itemNames);
       const totalNum = Number(row?.total ?? 0);
       if (Number.isFinite(totalNum)) {
         parts.push(String(totalNum), text(inr(totalNum)), `₹${text(inr(totalNum))}`);
