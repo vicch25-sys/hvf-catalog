@@ -2099,7 +2099,6 @@ const loadSavedDetailed = async () => {
           phone,
           total,
           created_at,
-          delivered_date,
           sanctioned_status,
           sanctioned_mode,
           sanctioned_date,
@@ -2114,12 +2113,26 @@ const loadSavedDetailed = async () => {
     // attempt #1
     let { data, error } = await run();
     if (error) throw error;
-
-    // build preview
+    // fetch delivered_on for these quotes and attach as delivered_date
+    const ids = (data || []).map((q) => q.id);
+    let deliveredMap = {};
+    if (ids.length) {
+      const { data: dRows, error: dErr } = await supabase
+        .from("delivered")
+        .select("quote_id, delivered_on")
+        .in("quote_id", ids);
+      if (dErr) throw dErr;
+      deliveredMap = (dRows || []).reduce((acc, r) => {
+        acc[r.quote_id] = r.delivered_on || null;
+        return acc;
+      }, {});
+    }
+    // build preview + attach delivered_date from deliveredMap
     const enriched = (data || []).map((q) => {
       const names = (q.quote_items || []).map((it) => it?.name || "");
       return {
         ...q,
+        delivered_date: deliveredMap[q.id] || null,
         _itemsPreview: names.slice(0, 3),
         _itemsTotal: names.length,
       };
