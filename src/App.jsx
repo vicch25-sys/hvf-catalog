@@ -3216,6 +3216,7 @@ if (typeof setSavedCount !== "undefined") { try { setSavedCount(rows.length); } 
   if (typeof setTableData !== "undefined") { try { setTableData([]); } catch {} }
   if (typeof setSavedCount !== "undefined") { try { setSavedCount(0); } catch {} }
 }
+} // <-- CLOSES async function dbFetchSanctionedHVF
 
 // Auto-load HVF sanctioned list when Sanctioned View is active
 useEffect(() => {
