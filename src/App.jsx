@@ -2099,6 +2099,7 @@ const loadSavedDetailed = async () => {
           phone,
           total,
           created_at,
+          delivered_date,
           sanctioned_status,
           sanctioned_mode,
           sanctioned_date,
