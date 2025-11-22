@@ -3152,30 +3152,38 @@ function unmarkDeliveredById(id) {
 
 // ---- Sanctioned (HVF-only) fetch from Supabase (cross-device) ----
 async function dbFetchSanctionedHVF() {
-  try {
-    // 1) Pull all SANCTIONED quotes for HVF (include address + created_at)
+  // one-run function so we can retry on Safari's "Load failed"
+  const run = async () => {
+    // 1) Pull ALL HVF quotes (include address + created_at + sanction fields)
     const { data: qRows, error: qErr } = await supabase
       .from("quotes")
       .select(
         "id, number, firm, customer_name, phone, subject, address, total, created_at, sanctioned_status, sanctioned_mode, sanctioned_date, sanctioned_amount, csm_amount, rtnad_amount"
       )
       .eq("firm", "HVF Agency")
-      .not("sanctioned_status", "is", null) // only sanctioned
-      .order("sanctioned_date", { ascending: false, nullsFirst: false });
-
+      .order("created_at", { ascending: false });
     if (qErr) throw qErr;
 
-    // 2) Exclude already-delivered quotes (get ids once, client-side filter)
+    // 2) Exclude quotes that are already delivered (by delivered table)
     const { data: dRows, error: dErr } = await supabase
       .from("delivered")
       .select("quote_id");
     if (dErr) throw dErr;
     const deliveredIds = new Set((dRows || []).map((r) => r.quote_id));
 
-    const base = (qRows || []).filter((q) => !deliveredIds.has(q.id));
+    // 3) Detect "sanctioned" client-side (status OR mode OR amount OR date)
+    const base = (qRows || []).filter((q) => {
+      if (deliveredIds.has(q.id)) return false;
+      const hasStatus = q.sanctioned_status != null && String(q.sanctioned_status).trim() !== "";
+      const hasMode   = q.sanctioned_mode   != null && String(q.sanctioned_mode).trim() !== "";
+      const hasAmt    = q.sanctioned_amount != null && String(q.sanctioned_amount).trim() !== "";
+      const hasDate   = q.sanctioned_date   != null && String(q.sanctioned_date).trim() !== "";
+      return hasStatus || hasMode || hasAmt || hasDate;
+    });
+
     const ids = base.map((q) => q.id);
 
-    // 3) Fetch items for these quotes (so "Items" column works)
+    // 4) Fetch items for these quotes (so “Items” column works)
     let itemsByQuote = {};
     if (ids.length) {
       const { data: iRows, error: iErr } = await supabase
@@ -3183,40 +3191,58 @@ async function dbFetchSanctionedHVF() {
         .select("quote_id, name")
         .in("quote_id", ids);
       if (iErr) throw iErr;
-
       itemsByQuote = (iRows || []).reduce((acc, it) => {
         (acc[it.quote_id] ||= []).push({ name: it.name || "" });
         return acc;
       }, {});
     }
 
-    // 4) Merge: keep quote fields, attach quote_items array
-    const rows = base.map((q) => ({
-      ...q,
-      quote_items: itemsByQuote[q.id] || [],
-    }));
+    // 5) Merge and sort by sanctioned_date desc, then created_at desc
+    const rows = base
+      .map((q) => ({ ...q, quote_items: itemsByQuote[q.id] || [] }))
+      .sort((a, b) => {
+        const ta = a.sanctioned_date ? new Date(a.sanctioned_date).getTime() : 0;
+        const tb = b.sanctioned_date ? new Date(b.sanctioned_date).getTime() : 0;
+        if (tb !== ta) return tb - ta;
+        const ca = a.created_at ? new Date(a.created_at).getTime() : 0;
+        const cb = b.created_at ? new Date(b.created_at).getTime() : 0;
+        return cb - ca;
+      });
 
-    // 5) Save for current UI (table) AND dedicated dataset — keep UI/state in sync
-try { setSanctionedRowsDB(rows); } catch {}
-if (typeof setTableData !== "undefined") { try { setTableData(rows); } catch {} }
+    // 6) Save to both datasets so the table matches the pill; clear filters
+    try { setSanctionedRowsDB(rows); } catch {}
+    if (typeof setTableData !== "undefined") { try { setTableData(rows); } catch {} }
 
-// 5a) Ensure filters can’t hide rows (reset search; lock firm to HVF)
-if (typeof setSavedSearch !== "undefined") { try { setSavedSearch(""); } catch {} }
-try { localStorage.setItem("hvf.savedSearch", ""); } catch {}
+    if (typeof setSavedSearch !== "undefined") { try { setSavedSearch(""); } catch {} }
+    try { localStorage.setItem("hvf.savedSearch", ""); } catch {}
+    if (typeof setSavedFirm !== "undefined")  { try { setSavedFirm("HVF Agency"); } catch {} }
+    try { localStorage.setItem("hvf.savedFirm", "HVF Agency"); } catch {}
 
-if (typeof setSavedFirm !== "undefined")  { try { setSavedFirm("HVF Agency"); } catch {} }
-try { localStorage.setItem("hvf.savedFirm", "HVF Agency"); } catch {}
+    if (typeof setSavedCount !== "undefined") { try { setSavedCount(rows.length); } catch {} }
+  };
 
-// 5b) Update counters
-if (typeof setSavedCount !== "undefined") { try { setSavedCount(rows.length); } catch {} }
-
-} catch (e) {
-  console.error("dbFetchSanctionedHVF:", e?.message || e);
-  try { setSanctionedRowsDB([]); } catch {}
-  if (typeof setTableData !== "undefined") { try { setTableData([]); } catch {} }
-  if (typeof setSavedCount !== "undefined") { try { setSavedCount(0); } catch {} }
+  try {
+    await run();
+  } catch (e) {
+    const msg = String(e?.message || e);
+    console.error("dbFetchSanctionedHVF:", msg);
+    // Safari often throws "Load failed" / "Failed to fetch" on first try; retry once
+    if (
+      msg.includes("Load failed") ||
+      msg.includes("Failed to fetch") ||
+      msg.includes("network connection was lost")
+    ) {
+      try {
+        await new Promise((r) => setTimeout(r, 350));
+        await run();
+        return;
+      } catch (e2) {
+        console.error("dbFetchSanctionedHVF retry failed:", e2?.message || e2);
+      }
+    }
+    // On failure, keep whatever is currently shown; don't wipe rows to [].
+  }
 }
-} // <-- CLOSES async function dbFetchSanctionedHVF
 
 // Auto-load HVF sanctioned list when Sanctioned View is active
 useEffect(() => {
