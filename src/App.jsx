@@ -3160,6 +3160,32 @@ function resetSanctionedLocal() {
   try { localStorage.setItem("hvf.savedFirm", "HVF Agency"); } catch {}
 }
 
+// ---- Cache versioning: purge stale local keys once per version bump ----
+const HVF_CACHE_VERSION = "2025-11-22-1"; // bump when storage schema/keys change
+const HVF_CACHE_KEYS = [
+  "hvf.delivered",
+  "hvf_delivered",
+  "hvf.deliveredIds",
+  "hvf.recycle",
+  "hvf.recycleBin",
+  "hvf.savedSearch",
+  "hvf.savedFirm"
+];
+
+function ensureCacheVersion() {
+  try {
+    const cur = localStorage.getItem("hvf.cacheVersion");
+    if (cur !== HVF_CACHE_VERSION) {
+      HVF_CACHE_KEYS.forEach((k) => { try { localStorage.removeItem(k); } catch {} });
+      localStorage.setItem("hvf.cacheVersion", HVF_CACHE_VERSION);
+    }
+  } catch {}
+}
+// Run version check once on load
+useEffect(() => {
+  ensureCacheVersion();
+}, []);
+
 // ---- Sanctioned (HVF-only) fetch from Supabase (cross-device) ----
 async function dbFetchSanctionedHVF() {
   // one-run function so we can retry on Safari's "Load failed"
