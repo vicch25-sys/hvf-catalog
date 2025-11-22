@@ -3322,7 +3322,7 @@ async function dbFetchDelivered() {
     if (quoteIds.length) {
       const { data: qRows, error: qErr } = await supabase
         .from("quotes")
-        .select("id, number, firm, customer_name, phone, total")
+        .select("id, number, firm, customer_name, phone, address, total")
         .in("id", quoteIds);
       if (qErr) throw qErr;
       (qRows || []).forEach((q) => qMap.set(q.id, q));
@@ -3336,7 +3336,8 @@ async function dbFetchDelivered() {
         number: q.number || "",
         firm: q.firm || "",
         customer_name: q.customer_name || "",
-        phone: q.phone || "",
+address: q.address || "",
+phone: q.phone || "",
         total: q.total ?? 0,
         delivered_date: r.delivered_on || null,
         items: r.items_delivered || [],
