@@ -3149,11 +3149,11 @@ function unmarkDeliveredById(id) {
 // ---- Sanctioned (HVF-only) fetch from Supabase (cross-device) ----
 async function dbFetchSanctionedHVF() {
   try {
-    // 1) Pull all SANCTIONED quotes for HVF from Supabase (include created_at for sorting)
+    // 1) Pull all SANCTIONED quotes for HVF (include address + created_at)
     const { data: qRows, error: qErr } = await supabase
       .from("quotes")
       .select(
-        "id, number, firm, customer_name, phone, subject, total, created_at, sanctioned_status, sanctioned_mode, sanctioned_date, sanctioned_amount, csm_amount, rtnad_amount"
+        "id, number, firm, customer_name, phone, subject, address, total, created_at, sanctioned_status, sanctioned_mode, sanctioned_date, sanctioned_amount, csm_amount, rtnad_amount"
       )
       .eq("firm", "HVF Agency")
       .not("sanctioned_status", "is", null) // only sanctioned
@@ -3161,17 +3161,40 @@ async function dbFetchSanctionedHVF() {
 
     if (qErr) throw qErr;
 
-    // 2) Get delivered ids and filter them out client-side (avoids schema deps)
+    // 2) Exclude already-delivered quotes (get ids once, client-side filter)
     const { data: dRows, error: dErr } = await supabase
       .from("delivered")
       .select("quote_id");
     if (dErr) throw dErr;
-
     const deliveredIds = new Set((dRows || []).map((r) => r.quote_id));
-    const rows = (qRows || []).filter((q) => !deliveredIds.has(q.id));
 
-    // 3) Save to dedicated sanctioned dataset (added in Step 1A)
-    setSanctionedRowsDB(rows);
+    const base = (qRows || []).filter((q) => !deliveredIds.has(q.id));
+    const ids = base.map((q) => q.id);
+
+    // 3) Fetch items for these quotes (so "Items" column works)
+    let itemsByQuote = {};
+    if (ids.length) {
+      const { data: iRows, error: iErr } = await supabase
+        .from("quote_items")
+        .select("quote_id, name")
+        .in("quote_id", ids);
+      if (iErr) throw iErr;
+
+      itemsByQuote = (iRows || []).reduce((acc, it) => {
+        (acc[it.quote_id] ||= []).push({ name: it.name || "" });
+        return acc;
+      }, {});
+    }
+
+    // 4) Merge: keep quote fields, attach quote_items array
+    const rows = base.map((q) => ({
+      ...q,
+      quote_items: itemsByQuote[q.id] || [],
+    }));
+
+    // 5) Save for current UI (tableData) AND the new dedicated dataset
+    try { setSanctionedRowsDB(rows); } catch {}
+    if (typeof setTableData !== "undefined") { setTableData(rows); }
 
     // optional counters / firm memory
     if (typeof setSavedCount !== "undefined") { try { setSavedCount(rows.length); } catch {} }
@@ -3180,6 +3203,7 @@ async function dbFetchSanctionedHVF() {
   } catch (e) {
     console.error("dbFetchSanctionedHVF:", e?.message || e);
     try { setSanctionedRowsDB([]); } catch {}
+    if (typeof setTableData !== "undefined") { setTableData([]); }
     if (typeof setSavedCount !== "undefined") { try { setSavedCount(0); } catch {} }
   }
 }
