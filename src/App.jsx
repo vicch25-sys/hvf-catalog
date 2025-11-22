@@ -986,6 +986,7 @@ const [deliveredDetailed, setDeliveredDetailed] = useState([]);
 // Supabase-backed delivered lists
 const [deliveredRowsDB, setDeliveredRowsDB] = useState([]);
 const [deliveredIdsDB, setDeliveredIdsDB] = useState([]);
+const [sanctionedRowsDB, setSanctionedRowsDB] = useState([]);
 const [savedFirmFilter, setSavedFirmFilter] = useState(() => {
   try {
     const v = localStorage.getItem("hvf.savedFirm");
@@ -1960,33 +1961,28 @@ if (!q) return byStatus;
   });
 }, [savedDetailed, savedFirmFilter, savedSearch, onlySanctioned, savedView]);
 
-// ---- Separate dataset for the "Sanctioned View" (same firm tabs + search, but only sanctioned) ----
+// ---- Separate dataset for the "Sanctioned View" (from Supabase; cross-device) ----
 const sanctionedDetailedFiltered = useMemo(() => {
-  const list = Array.isArray(savedDetailed) ? savedDetailed : [];
+  // use the dedicated dataset we fetch in dbFetchSanctionedHVF
+  const list = Array.isArray(sanctionedRowsDB) ? sanctionedRowsDB : [];
 
-  // mirror firm-tab behavior of the normal view
+  // firm tabs behaviour: Sanctioned is HVF-only. "All" or "HVF Agency" show; other tabs -> empty.
   const byFirm =
-    savedFirmFilter === "All"
-      ? list.filter((q) => inferFirmFromNumber(q?.number) !== "Internal") // exclude Internal in All
-      : list.filter(
-          (q) => (inferFirmFromNumber(q?.number) || "") === savedFirmFilter
-        );
+    (savedFirmFilter === "All" || savedFirmFilter === "HVF Agency")
+      ? list
+      : [];
 
-// keep only sanctioned, then sort by sanctioned_date (newest first)
-const only = byFirm
-  .filter((q) => (q.sanctioned_status || "") === "sanctioned");
+  // sort by sanctioned_date (desc), then created_at (desc)
+  const sorted = [...byFirm].sort((a, b) => {
+    const ta = a.sanctioned_date ? new Date(a.sanctioned_date).getTime() : 0;
+    const tb = b.sanctioned_date ? new Date(b.sanctioned_date).getTime() : 0;
+    if (tb !== ta) return tb - ta;
+    const ca = a.created_at ? new Date(a.created_at).getTime() : 0;
+    const cb = b.created_at ? new Date(b.created_at).getTime() : 0;
+    return cb - ca;
+  });
 
-const sorted = [...only].sort((a, b) => {
-  const ta = a.sanctioned_date ? new Date(a.sanctioned_date).getTime() : 0;
-  const tb = b.sanctioned_date ? new Date(b.sanctioned_date).getTime() : 0;
-  if (tb !== ta) return tb - ta; // primary: sanctioned_date (newest first)
-
-  const ca = a.created_at ? new Date(a.created_at).getTime() : 0;
-  const cb = b.created_at ? new Date(b.created_at).getTime() : 0;
-  return cb - ca;               // secondary: created_at (newest first)
-});
-
-  // search (same as normal)
+  // search (same as normal; this dataset doesn’t include quote_items)
   const q = (savedSearch || "").trim().toLowerCase();
   if (!q) return sorted;
 
@@ -1998,10 +1994,6 @@ const sorted = [...only].sort((a, b) => {
       const dateStr = row?.created_at ? text(fmtDate(row.created_at)) : "";
       parts.push(dateStr);
       parts.push(text(row?.customer_name), text(row?.address), text(row?.phone));
-      const itemNames = Array.isArray(row?.quote_items)
-        ? row.quote_items.map((it) => text(it?.name)).join(" ")
-        : "";
-      parts.push(itemNames);
       const totalNum = Number(row?.total ?? 0);
       if (Number.isFinite(totalNum)) {
         parts.push(String(totalNum), text(inr(totalNum)), `₹${text(inr(totalNum))}`);
@@ -2011,7 +2003,7 @@ const sorted = [...only].sort((a, b) => {
       return true;
     }
   });
-}, [savedDetailed, savedFirmFilter, savedSearch]);
+}, [sanctionedRowsDB, savedFirmFilter, savedSearch]);
 
 // Compact stats for the Sanctioned View chip
 const sanctionedStats = useMemo(() => {
@@ -2503,9 +2495,14 @@ async function saveDeliverLocal() {
     setDeliverPop({ open: false, row: null });
     // If you have a fetch function for Delivered, call it here; otherwise the page reload will pick it up.
     try {
-      if (typeof dbFetchDelivered === "function") await dbFetchDelivered();
-    } catch {}
-    setSavedView("delivered");
+  if (typeof dbFetchDelivered === "function") await dbFetchDelivered();
+} catch {}
+
+try {
+  if (typeof dbFetchSanctionedHVF === "function") await dbFetchSanctionedHVF();
+} catch {}
+
+setSavedView("delivered");
     try { localStorage.setItem("hvf.savedView", "delivered"); } catch {}
 
     alert("Saved to Delivered ✅");
@@ -3152,11 +3149,11 @@ function unmarkDeliveredById(id) {
 // ---- Sanctioned (HVF-only) fetch from Supabase (cross-device) ----
 async function dbFetchSanctionedHVF() {
   try {
-    // 1) Get all sanctioned quotes for HVF Agency (no delivered_flag)
+    // 1) Pull all SANCTIONED quotes for HVF from Supabase (include created_at for sorting)
     const { data: qRows, error: qErr } = await supabase
       .from("quotes")
       .select(
-        "id, number, firm, customer_name, phone, subject, total, sanctioned_status, sanctioned_mode, sanctioned_date, sanctioned_amount, csm_amount, rtnad_amount"
+        "id, number, firm, customer_name, phone, subject, total, created_at, sanctioned_status, sanctioned_mode, sanctioned_date, sanctioned_amount, csm_amount, rtnad_amount"
       )
       .eq("firm", "HVF Agency")
       .not("sanctioned_status", "is", null) // only sanctioned
@@ -3164,62 +3161,26 @@ async function dbFetchSanctionedHVF() {
 
     if (qErr) throw qErr;
 
-    // 2) Fetch delivered ids and remove them on the client (avoids schema deps)
+    // 2) Get delivered ids and filter them out client-side (avoids schema deps)
     const { data: dRows, error: dErr } = await supabase
       .from("delivered")
       .select("quote_id");
     if (dErr) throw dErr;
 
     const deliveredIds = new Set((dRows || []).map((r) => r.quote_id));
+    const rows = (qRows || []).filter((q) => !deliveredIds.has(q.id));
 
-    const rows = (qRows || [])
-      .filter((q) => !deliveredIds.has(q.id))
-      .map((q) => ({
-        id: q.id,
-        number: q.number || "",
-        firm: q.firm || "HVF Agency",
-        customer_name: q.customer_name || "",
-        phone: q.phone || "",
-        subject: q.subject || "",
-        total: q.total ?? 0,
-        sanctioned: q.sanctioned_mode || q.sanctioned_status || "",
-        sanctioned_amount: q.sanctioned_amount ?? null,
-        csm_amount: q.csm_amount ?? null,
-        rtnad_amount: q.rtnad_amount ?? null,
-        sanctioned_date: q.sanctioned_date || null,
-      }));
+    // 3) Save to dedicated sanctioned dataset (added in Step 1A)
+    setSanctionedRowsDB(rows);
 
-    // 3) Push into whichever state setter exists in your file (no ReferenceError)
-    if (typeof setTableData !== "undefined") {
-      setTableData(rows);
-    } else if (typeof setSavedData !== "undefined") {
-      setSavedData(rows);
-    } else if (typeof setSavedDetailed !== "undefined") {
-      setSavedDetailed(rows);
-    }
-
-    if (typeof setSavedCount !== "undefined") {
-      setSavedCount(rows.length);
-    }
-
-    // 4) Force firm to HVF in this view so filters don't hide rows
-    if (typeof setSavedFirm !== "undefined") {
-      try { setSavedFirm("HVF Agency"); } catch {}
-    }
+    // optional counters / firm memory
+    if (typeof setSavedCount !== "undefined") { try { setSavedCount(rows.length); } catch {} }
+    if (typeof setSavedFirm !== "undefined")  { try { setSavedFirm("HVF Agency"); } catch {} }
     try { localStorage.setItem("hvf.savedFirm", "HVF Agency"); } catch {}
   } catch (e) {
     console.error("dbFetchSanctionedHVF:", e?.message || e);
-
-    if (typeof setTableData !== "undefined") {
-      setTableData([]);
-    } else if (typeof setSavedData !== "undefined") {
-      setSavedData([]);
-    } else if (typeof setSavedDetailed !== "undefined") {
-      setSavedDetailed([]);
-    }
-    if (typeof setSavedCount !== "undefined") {
-      setSavedCount(0);
-    }
+    try { setSanctionedRowsDB([]); } catch {}
+    if (typeof setSavedCount !== "undefined") { try { setSavedCount(0); } catch {} }
   }
 }
 
