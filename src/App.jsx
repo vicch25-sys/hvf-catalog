@@ -3196,20 +3196,25 @@ async function dbFetchSanctionedHVF() {
       quote_items: itemsByQuote[q.id] || [],
     }));
 
-    // 5) Save for current UI (tableData) AND the new dedicated dataset
-    try { setSanctionedRowsDB(rows); } catch {}
-    if (typeof setTableData !== "undefined") { setTableData(rows); }
+    // 5) Save for current UI (table) AND dedicated dataset — keep UI/state in sync
+try { setSanctionedRowsDB(rows); } catch {}
+if (typeof setTableData !== "undefined") { try { setTableData(rows); } catch {} }
 
-    // optional counters / firm memory
-    if (typeof setSavedCount !== "undefined") { try { setSavedCount(rows.length); } catch {} }
-    if (typeof setSavedFirm !== "undefined")  { try { setSavedFirm("HVF Agency"); } catch {} }
-    try { localStorage.setItem("hvf.savedFirm", "HVF Agency"); } catch {}
-  } catch (e) {
-    console.error("dbFetchSanctionedHVF:", e?.message || e);
-    try { setSanctionedRowsDB([]); } catch {}
-    if (typeof setTableData !== "undefined") { setTableData([]); }
-    if (typeof setSavedCount !== "undefined") { try { setSavedCount(0); } catch {} }
-  }
+// 5a) Ensure filters can’t hide rows (reset search; lock firm to HVF)
+if (typeof setSavedSearch !== "undefined") { try { setSavedSearch(""); } catch {} }
+try { localStorage.setItem("hvf.savedSearch", ""); } catch {}
+
+if (typeof setSavedFirm !== "undefined")  { try { setSavedFirm("HVF Agency"); } catch {} }
+try { localStorage.setItem("hvf.savedFirm", "HVF Agency"); } catch {}
+
+// 5b) Update counters
+if (typeof setSavedCount !== "undefined") { try { setSavedCount(rows.length); } catch {} }
+
+} catch (e) {
+  console.error("dbFetchSanctionedHVF:", e?.message || e);
+  try { setSanctionedRowsDB([]); } catch {}
+  if (typeof setTableData !== "undefined") { try { setTableData([]); } catch {} }
+  if (typeof setSavedCount !== "undefined") { try { setSavedCount(0); } catch {} }
 }
 
 // Auto-load HVF sanctioned list when Sanctioned View is active
