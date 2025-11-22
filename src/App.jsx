@@ -5340,7 +5340,7 @@ onClick={() => {
   type="button"
   onClick={(e) => openStatus(q, e)}
   disabled={isSanctioned}
-  hidden={isSanctioned || Boolean(q?.delivered_on || deliveredDateStr)}
+  hidden={isSanctioned || Boolean(q?.delivered_date || deliveredDateStr)}
   style={{
             padding: "4px 10px",
             borderRadius: 999,
@@ -5372,7 +5372,7 @@ onClick={() => {
               : ""}
           </span>
         )}
-{deliveredDateStr && (
+{(deliveredDateStr || q?.delivered_date) && (
   <span
     className="badge"
     style={{
@@ -5380,9 +5380,9 @@ onClick={() => {
       background: "#eaf7ea",   // subtle green background
       color: "#155724"         // readable green text
     }}
-    title={`Delivered • ${deliveredDateStr}`}
+    title={`Delivered • ${deliveredDateStr || (q?.delivered_date ? fmtDate(q.delivered_date) : "")}`}
   >
-    Delivered • {deliveredDateStr}
+    Delivered • {deliveredDateStr || (q?.delivered_date ? fmtDate(q.delivered_date) : "")}
   </span>
 )}
       </div>
