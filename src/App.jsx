@@ -2044,6 +2044,8 @@ const sanctionedStats = useMemo(() => {
 const tableData =
   savedView === "sanctioned" ? sanctionedDetailedFiltered : savedDetailedFiltered;
 
+// (moved up) Sanctioned view loading flag — must be declared before first use
+const [sanctionedLoading, setSanctionedLoading] = useState(false);
 const emptyMsg =
   savedView === "sanctioned"
     ? (sanctionedLoading ? "" : "No sanctioned quotations found")
@@ -3484,8 +3486,7 @@ async function safeUpdateQuote(id, patch) {
 const [undoStack, setUndoStack] = useState([]);
 const [recycleOpen, setRecycleOpen] = useState(false);
 
-// Sanctioned view loading flag (prevents empty-state flash)
-const [sanctionedLoading, setSanctionedLoading] = useState(false);
+
 
 // (kept for compatibility; not used by the new bin, harmless to keep)
 const [recycleItems, setRecycleItems] = useState([]);
