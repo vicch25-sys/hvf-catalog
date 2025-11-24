@@ -2046,7 +2046,7 @@ const tableData =
 
 const emptyMsg =
   savedView === "sanctioned"
-    ? "No sanctioned quotations found."
+    ? (sanctionedLoading ? "" : "No sanctioned quotations found")
     : "No saved quotations found.";
 
 // Fetch the list of saved quotes
@@ -3202,9 +3202,12 @@ useEffect(() => {
 
 // ---- Sanctioned (HVF-only) fetch from Supabase (cross-device) ----
 async function dbFetchSanctionedHVF() {
+  // make sure the loading flag goes on now and off in finally
+  try { setSanctionedLoading(true); } catch {}
+
   // one-run function so we can retry on Safari's "Load failed"
   const run = async () => {
-    // 1) Pull ALL HVF quotes (include address + created_at + sanction fields)
+    // 1) Pull ALL HVF quotes
     const { data: qRows, error: qErr } = await supabase
       .from("quotes")
       .select(
@@ -3214,14 +3217,14 @@ async function dbFetchSanctionedHVF() {
       .order("created_at", { ascending: false });
     if (qErr) throw qErr;
 
-    // 2) Exclude quotes that are already delivered (by delivered table)
+    // 2) Exclude already-delivered quotes
     const { data: dRows, error: dErr } = await supabase
       .from("delivered")
       .select("quote_id");
     if (dErr) throw dErr;
     const deliveredIds = new Set((dRows || []).map((r) => r.quote_id));
 
-    // 3) Detect "sanctioned" client-side (status OR mode OR amount OR date)
+    // 3) Detect “sanctioned” client-side (any signal)
     const base = (qRows || []).filter((q) => {
       if (deliveredIds.has(q.id)) return false;
       const hasStatus = q.sanctioned_status != null && String(q.sanctioned_status).trim() !== "";
@@ -3231,9 +3234,8 @@ async function dbFetchSanctionedHVF() {
       return hasStatus || hasMode || hasAmt || hasDate;
     });
 
+    // 4) Items for the “Items (first 2–3)” column
     const ids = base.map((q) => q.id);
-
-    // 4) Fetch items for these quotes (so “Items” column works)
     let itemsByQuote = {};
     if (ids.length) {
       const { data: iRows, error: iErr } = await supabase
@@ -3247,7 +3249,7 @@ async function dbFetchSanctionedHVF() {
       }, {});
     }
 
-    // 5) Merge and sort by sanctioned_date desc, then created_at desc
+    // 5) Merge + sort by sanctioned_date desc, then created_at desc
     const rows = base
       .map((q) => ({ ...q, quote_items: itemsByQuote[q.id] || [] }))
       .sort((a, b) => {
@@ -3259,15 +3261,13 @@ async function dbFetchSanctionedHVF() {
         return cb - ca;
       });
 
-    // 6) Save to both datasets so the table matches the pill; clear filters
+    // 6) Save to state; clear filters that could hide rows
     try { setSanctionedRowsDB(rows); } catch {}
     if (typeof setTableData !== "undefined") { try { setTableData(rows); } catch {} }
-
     if (typeof setSavedSearch !== "undefined") { try { setSavedSearch(""); } catch {} }
     try { localStorage.setItem("hvf.savedSearch", ""); } catch {}
     if (typeof setSavedFirm !== "undefined")  { try { setSavedFirm("HVF Agency"); } catch {} }
     try { localStorage.setItem("hvf.savedFirm", "HVF Agency"); } catch {}
-
     if (typeof setSavedCount !== "undefined") { try { setSavedCount(rows.length); } catch {} }
   };
 
@@ -3276,7 +3276,7 @@ async function dbFetchSanctionedHVF() {
   } catch (e) {
     const msg = String(e?.message || e);
     console.error("dbFetchSanctionedHVF:", msg);
-    // Safari often throws "Load failed" / "Failed to fetch" on first try; retry once
+    // Safari sometimes flaps; retry once
     if (
       msg.includes("Load failed") ||
       msg.includes("Failed to fetch") ||
@@ -3285,12 +3285,13 @@ async function dbFetchSanctionedHVF() {
       try {
         await new Promise((r) => setTimeout(r, 350));
         await run();
-        return;
       } catch (e2) {
         console.error("dbFetchSanctionedHVF retry failed:", e2?.message || e2);
       }
     }
-    // On failure, keep whatever is currently shown; don't wipe rows to [].
+    // keep whatever is currently shown on failure
+  } finally {
+    try { setSanctionedLoading(false); } catch {}
   }
 }
 
@@ -3482,6 +3483,9 @@ async function safeUpdateQuote(id, patch) {
 // simple stack; keep it small so it never grows unbounded
 const [undoStack, setUndoStack] = useState([]);
 const [recycleOpen, setRecycleOpen] = useState(false);
+
+// Sanctioned view loading flag (prevents empty-state flash)
+const [sanctionedLoading, setSanctionedLoading] = useState(false);
 
 // (kept for compatibility; not used by the new bin, harmless to keep)
 const [recycleItems, setRecycleItems] = useState([]);
