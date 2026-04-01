@@ -3057,7 +3057,7 @@ if (firm === "HVF Agency") {
     doc.setFontSize(10);
     doc.text(
       [
-        "This quotation is valid for six month from the date of issue.",
+        "This quotation is valid for one month from the date of issue.",
         "Delivery is subject to stock availability and may take up to 2 weeks.",
         "Goods once sold are non-returnable and non-exchangeable.",
         "",
@@ -5008,7 +5008,7 @@ button.mini.primary{
   <div style={{ overflowX: "auto" }}>
       <table
         style={{
-          width: "100%",
+          width: savedView === "sanctioned" ? "95%" : "100%",
           borderCollapse: "collapse",
           border: "1px solid #eee",
           fontSize: 14,
