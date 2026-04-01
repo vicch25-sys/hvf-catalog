@@ -3082,6 +3082,7 @@ if (firm === "HVF Agency") {
         "ICICI BANK (Moran Branch)",
         "A/C No - 199505500412",
         "IFSC Code - ICIC0001995",
+"Email: hvfagency123@gmail.com",
       ];
     } else {
       bankLines = [
