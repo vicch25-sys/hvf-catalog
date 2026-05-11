@@ -269,15 +269,35 @@ const [page, setPage] = useState(() => __boot.page || "catalog"); // "catalog" |
 
   /*** ADD/EDIT FORM (admin) ***/
   const [form, setForm] = useState({
-    name: "",
-    category: "",
-    mrp: "",
-    sell_price: "",
-    cost_price: "",
-    specs: "",
-    imageFile: null,
-  });
-  const [saving, setSaving] = useState(false);
+  name: "",
+  category: "",
+  mrp: "",
+  sell_price: "",
+  cost_price: "",
+  specs: "",
+  imageFile: null,
+});
+
+const [editingProductId, setEditingProductId] = useState(null);
+const [editingImageUrl, setEditingImageUrl] = useState("");
+
+const [editForm, setEditForm] = useState({
+  name: "",
+  category: "",
+  mrp: "",
+  sell_price: "",
+  cost_price: "",
+  specs: "",
+  imageFile: null,
+});
+
+const [saving, setSaving] = useState(false);
+
+const [catalogExportMode, setCatalogExportMode] = useState("PRICE"); // PRICE or DISPLAY
+const [catalogExportCategories, setCatalogExportCategories] = useState(["ALL"]);
+const [catalogIncludeSelling, setCatalogIncludeSelling] = useState(true);
+const [catalogIncludeCost, setCatalogIncludeCost] = useState(false);
+const [showCatalogExportPanel, setShowCatalogExportPanel] = useState(false);
 
   /* ---------- AUTH ---------- */
   useEffect(() => {
@@ -485,73 +505,577 @@ useEffect(() => {
     if (files) setForm((f) => ({ ...f, imageFile: files[0] || null }));
     else setForm((f) => ({ ...f, [name]: value }));
   };
-  const onSave = async (e) => {
+ const onSave = async (e) => {
   e.preventDefault();
   if (!isAdmin) return alert("Admins only.");
 
-  // Must be signed in to Supabase (RLS needs auth.uid())
   const { data: s } = await supabase.auth.getSession();
   if (!s?.session?.user?.id) {
     alert("Please use 'Sign in (email link)' first, then try again.");
     return;
   }
 
-  if (!form.name || !form.category || !form.mrp || !form.imageFile) {
-    return alert("Name, Category, MRP and Image are required.");
+  if (!form.name || !form.category || !form.mrp) {
+    return alert("Name, Category and MRP are required.");
   }
-    setSaving(true);
-    try {
+
+  if (!editingProductId && !form.imageFile) {
+    return alert("Image is required for new product.");
+  }
+
+  setSaving(true);
+
+  try {
+    let image_url = editingImageUrl || "";
+
+    if (form.imageFile) {
       const ext = form.imageFile.name.split(".").pop().toLowerCase();
       const safeBase = form.name
         .trim()
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, "-")
         .slice(0, 40);
+
       const filePath = `products/${Date.now()}-${safeBase}.${ext}`;
+
       const { error: upErr } = await supabase.storage
-  .from("images")
-  .upload(filePath, form.imageFile, {
-    cacheControl: "3600",
-    contentType: form.imageFile.type || "image/jpeg",
-  });
+        .from("images")
+        .upload(filePath, form.imageFile, {
+          cacheControl: "3600",
+          contentType: form.imageFile.type || "image/jpeg",
+        });
+
       if (upErr) throw new Error("UPLOAD: " + upErr.message);
+
       const { data: urlData, error: urlErr } = supabase.storage
         .from("images")
         .getPublicUrl(filePath);
-      if (urlErr) throw new Error("URL: " + urlErr.message);
-      const image_url = urlData.publicUrl;
 
-      const payload = {
-        name: form.name,
-        category: form.category,
-        mrp: Number(form.mrp),
-        sell_price: form.sell_price ? Number(form.sell_price) : null,
-        cost_price: form.cost_price ? Number(form.cost_price) : null,
-        specs: form.specs || "",
-        image_url,
-      };
+      if (urlErr) throw new Error("URL: " + urlErr.message);
+
+      image_url = urlData.publicUrl;
+    }
+
+    const payload = {
+      name: form.name,
+      category: form.category,
+      mrp: Number(form.mrp),
+      sell_price: form.sell_price ? Number(form.sell_price) : null,
+      cost_price: form.cost_price ? Number(form.cost_price) : null,
+      specs: form.specs || "",
+      image_url,
+    };
+
+    if (editingProductId) {
+      const { error: updErr } = await supabase
+        .from("machines")
+        .update(payload)
+        .eq("id", editingProductId);
+
+      if (updErr) throw new Error("UPDATE: " + updErr.message);
+    } else {
       const { error: insErr } = await supabase
         .from("machines")
         .insert(payload);
+
       if (insErr) throw new Error("INSERT: " + insErr.message);
-      setForm({
-        name: "",
-        category: "",
-        mrp: "",
-        sell_price: "",
-        cost_price: "",
-        specs: "",
-        imageFile: null,
+    }
+
+    setForm({
+      name: "",
+      category: "",
+      mrp: "",
+      sell_price: "",
+      cost_price: "",
+      specs: "",
+      imageFile: null,
+    });
+
+    setEditingProductId(null);
+    setEditingImageUrl("");
+
+    await loadMachines();
+
+    alert(editingProductId ? "Product updated ✅" : "Product added ✅");
+  } catch (err) {
+    console.error(err);
+    alert(err.message);
+  } finally {
+    setSaving(false);
+  }
+};
+
+const onEditSave = async (e) => {
+  e.preventDefault();
+  if (!isAdmin) return alert("Admins only.");
+  if (!editingProductId) return alert("No product selected for editing.");
+
+  if (!editForm.name || !editForm.category || !editForm.mrp) {
+    return alert("Name, Category and MRP are required.");
+  }
+
+  setSaving(true);
+
+  try {
+    let image_url = editingImageUrl || "";
+
+    if (editForm.imageFile) {
+      const ext = editForm.imageFile.name.split(".").pop().toLowerCase();
+      const safeBase = editForm.name
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .slice(0, 40);
+
+      const filePath = `products/${Date.now()}-${safeBase}.${ext}`;
+
+      const { error: upErr } = await supabase.storage
+        .from("images")
+        .upload(filePath, editForm.imageFile, {
+          cacheControl: "3600",
+          contentType: editForm.imageFile.type || "image/jpeg",
+        });
+
+      if (upErr) throw new Error("UPLOAD: " + upErr.message);
+
+      const { data: urlData } = supabase.storage
+        .from("images")
+        .getPublicUrl(filePath);
+
+      image_url = urlData.publicUrl;
+    }
+
+    const payload = {
+      name: editForm.name,
+      category: editForm.category,
+      mrp: Number(editForm.mrp),
+      sell_price: editForm.sell_price ? Number(editForm.sell_price) : null,
+      cost_price: editForm.cost_price ? Number(editForm.cost_price) : null,
+      specs: editForm.specs || "",
+      image_url,
+    };
+
+    const { error: updErr } = await supabase
+      .from("machines")
+      .update(payload)
+      .eq("id", editingProductId);
+
+    if (updErr) throw new Error("UPDATE: " + updErr.message);
+
+    setEditingProductId(null);
+    setEditingImageUrl("");
+    setEditForm({
+      name: "",
+      category: "",
+      mrp: "",
+      sell_price: "",
+      cost_price: "",
+      specs: "",
+      imageFile: null,
+    });
+
+    await loadMachines();
+
+    alert("Product updated ✅");
+  } catch (err) {
+    console.error(err);
+    alert(err.message);
+  } finally {
+    setSaving(false);
+  }
+};
+
+const onDeleteProduct = async () => {
+  if (!isAdmin) return alert("Admins only.");
+  if (!editingProductId) return alert("No product selected for deletion.");
+
+  const ok = window.confirm(
+    "Are you sure you want to delete this product? This cannot be undone."
+  );
+
+  if (!ok) return;
+
+  setSaving(true);
+
+  try {
+    const { error: delErr } = await supabase
+      .from("machines")
+      .delete()
+      .eq("id", editingProductId);
+
+    if (delErr) throw new Error("DELETE: " + delErr.message);
+
+    setEditingProductId(null);
+    setEditingImageUrl("");
+    setEditForm({
+      name: "",
+      category: "",
+      mrp: "",
+      sell_price: "",
+      cost_price: "",
+      specs: "",
+      imageFile: null,
+    });
+
+    await loadMachines();
+
+    alert("Product deleted ✅");
+  } catch (err) {
+    console.error(err);
+    alert(err.message);
+  } finally {
+    setSaving(false);
+  }
+};
+
+const exportCatalogPdf = async () => {
+ if (catalogExportMode === "DISPLAY") {
+  const doc = new jsPDF({ unit: "pt", format: "a4", orientation: "portrait" });
+
+  const selectedCategory = catalogExportCategories[0];
+
+  const exportItems =
+    selectedCategory === "ALL"
+      ? items
+      : items.filter((m) => m.category === selectedCategory);
+
+  if (!exportItems.length) {
+    alert("No products found.");
+    return;
+  }
+
+  const loadImage = async (url) => {
+    try {
+      if (!url) return null;
+      const res = await fetch(url);
+      const blob = await res.blob();
+
+      return await new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result);
+        reader.onerror = () => resolve(null);
+        reader.readAsDataURL(blob);
       });
-      await loadMachines();
-      alert("Product added ✅");
-    } catch (err) {
-      console.error(err);
-      alert(err.message);
-    } finally {
-      setSaving(false);
+    } catch {
+      return null;
     }
   };
+
+  const drawImage = (img, x, y, boxW, boxH) => {
+    try {
+      const props = doc.getImageProperties(img);
+      const ratio = props.width / props.height;
+
+      let w = boxW;
+      let h = w / ratio;
+
+      if (h > boxH) {
+        h = boxH;
+        w = h * ratio;
+      }
+
+      doc.addImage(img, "JPEG", x + (boxW - w) / 2, y + (boxH - h) / 2, w, h);
+    } catch {}
+  };
+
+  // Background
+  doc.setFillColor(245, 248, 245);
+  doc.rect(0, 0, 595, 842, "F");
+
+  // Header
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(24);
+  doc.setTextColor(26, 80, 45);
+  doc.text("HVF AGENCY", 297.5, 50, { align: "center" });
+
+  doc.setFontSize(13);
+  doc.setTextColor(40, 40, 40);
+  doc.text("PRODUCT CATALOG", 297.5, 70, { align: "center" });
+
+  doc.setFontSize(9);
+  doc.setTextColor(120, 120, 120);
+  doc.text(
+    selectedCategory === "ALL" ? "All Categories" : selectedCategory,
+    297.5,
+    85,
+    { align: "center" }
+  );
+
+  let x = 40;
+  let y = 110;
+
+  const cardW = 240;
+  const cardH = 280;
+  const gapX = 30;
+  const gapY = 30;
+
+  for (let i = 0; i < exportItems.length; i++) {
+    const m = exportItems[i];
+
+    if (y + cardH > 800) {
+      doc.addPage();
+
+      doc.setFillColor(245, 248, 245);
+      doc.rect(0, 0, 595, 842, "F");
+
+      x = 40;
+      y = 50;
+    }
+
+    // Card background
+    // Soft shadow
+doc.setFillColor(230, 235, 230);
+doc.roundedRect(x + 3, y + 4, cardW, cardH, 12, 12, "F");
+
+// Main card
+doc.setFillColor(255, 255, 255);
+doc.roundedRect(x, y, cardW, cardH, 12, 12, "F");
+
+// Border
+doc.setDrawColor(210, 215, 210);
+doc.roundedRect(x, y, cardW, cardH, 12, 12, "S");
+
+    // Image box
+    // Premium image background
+doc.setFillColor(252, 252, 252);
+doc.roundedRect(x + 12, y + 12, cardW - 24, 140, 8, 8, "F");
+
+// subtle inner border
+doc.setDrawColor(235, 235, 235);
+doc.roundedRect(x + 12, y + 12, cardW - 24, 140, 8, 8, "S");
+
+    if (m.image_url) {
+      const img = await loadImage(m.image_url);
+      if (img) drawImage(img, x + 12, y + 12, cardW - 24, 140);
+    }
+
+    // Name
+    doc.setFont("helvetica", "bold");
+doc.setFontSize(12);
+doc.setTextColor(30, 30, 30);
+    doc.text(
+      doc.splitTextToSize(m.name || "", cardW - 20),
+      x + 10,
+      y + 175
+    );
+
+    // Specs
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8.5);
+doc.setTextColor(110, 110, 110);
+    doc.text(
+      doc.splitTextToSize(m.specs || "", cardW - 20),
+      x + 10,
+      y + 200
+    );
+
+    // Price badge
+    if (catalogIncludeSelling) {
+      doc.setFillColor(26, 115, 65);
+      doc.roundedRect(x + 10, y + cardH - 40, 110, 24, 6, 6, "F");
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(9);
+      doc.setTextColor(255, 255, 255);
+      doc.text(
+        `₹ ${Number(m.sell_price || 0).toLocaleString("en-IN")}`,
+        x + 65,
+        y + cardH - 24,
+        { align: "center" }
+      );
+    }
+
+    // Category label
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7);
+    doc.setTextColor(120, 120, 120);
+    doc.text(
+      m.category || "",
+      x + cardW - 10,
+      y + cardH - 20,
+      { align: "right" }
+    );
+
+    x += cardW + gapX;
+
+    if (x + cardW > 560) {
+      x = 40;
+      y += cardH + gapY;
+    }
+  }
+
+  doc.save("HVF-Display-Catalog.pdf");
+  return;
+}
+
+
+  const doc = new jsPDF({ unit: "pt", format: "a4", orientation: "portrait" });
+
+  const selectedCategory = catalogExportCategories[0];
+
+  const exportItems =
+    selectedCategory === "ALL"
+      ? items
+      : items.filter((m) => m.category === selectedCategory);
+
+  if (!exportItems.length) {
+    alert("No products found for selected category.");
+    return;
+  }
+
+  const loadImage = async (url) => {
+    try {
+      if (!url) return null;
+      const res = await fetch(url);
+      const blob = await res.blob();
+
+      return await new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result);
+        reader.onerror = () => resolve(null);
+        reader.readAsDataURL(blob);
+      });
+    } catch {
+      return null;
+    }
+  };
+
+  const imageMap = {};
+  for (const item of exportItems) {
+    if (item.image_url) {
+      imageMap[item.id] = await loadImage(item.image_url);
+    }
+  }
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(17);
+  doc.text("HVF AGENCY", 297.5, 35, { align: "center" });
+
+  doc.setFontSize(11);
+  doc.text("PRODUCT PRICE LIST", 297.5, 53, { align: "center" });
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8);
+  doc.text(
+    selectedCategory === "ALL" ? "All Categories" : selectedCategory,
+    297.5,
+    68,
+    { align: "center" }
+  );
+
+  const grouped = exportItems.reduce((acc, item) => {
+    const cat = item.category || "Uncategorized";
+    if (!acc[cat]) acc[cat] = [];
+    acc[cat].push(item);
+    return acc;
+  }, {});
+
+  let startY = 85;
+
+  Object.entries(grouped).forEach(([cat, products]) => {
+    const head = [["Sl.", "Photo", "Product Name", "Specs / Description", "MRP"]];
+
+    if (catalogIncludeSelling) head[0].push("Selling");
+    if (catalogIncludeCost) head[0].push("Cost");
+
+    const body = products.map((m, idx) => {
+      const row = [
+        idx + 1,
+        "",
+        m.name || "",
+        m.specs || "",
+        Number(m.mrp || 0).toLocaleString("en-IN"),
+      ];
+
+      if (catalogIncludeSelling) {
+        row.push(Number(m.sell_price || 0).toLocaleString("en-IN"));
+      }
+
+      if (catalogIncludeCost) {
+        row.push(Number(m.cost_price || 0).toLocaleString("en-IN"));
+      }
+
+      return row;
+    });
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.text(cat.toUpperCase(), 35, startY);
+
+    autoTable(doc, {
+      startY: startY + 8,
+      head,
+      body,
+      theme: "grid",
+      margin: { left: 25, right: 25 },
+      styles: {
+        font: "helvetica",
+        fontSize: 7,
+        cellPadding: 3,
+        valign: "middle",
+        lineColor: [120, 120, 120],
+        lineWidth: 0.3,
+      },
+      headStyles: {
+        fillColor: [90, 30, 20],
+        textColor: [255, 255, 255],
+        fontStyle: "bold",
+        halign: "center",
+      },
+      alternateRowStyles: {
+        fillColor: [248, 232, 226],
+      },
+      columnStyles: {
+        0: { cellWidth: 24, halign: "center" },
+        1: { cellWidth: 50, halign: "center" },
+        2: { cellWidth: 95 },
+        3: { cellWidth: 180 },
+        4: { cellWidth: 55, halign: "right" },
+        5: { cellWidth: 55, halign: "right" },
+        6: { cellWidth: 55, halign: "right" },
+      },
+      didDrawCell: (data) => {
+        if (data.section === "body" && data.column.index === 1) {
+          const product = products[data.row.index];
+if (!product) return;
+
+const img = imageMap[product.id];
+
+if (img) {
+            try {
+              doc.addImage(
+                img,
+                "JPEG",
+                data.cell.x + 6,
+                data.cell.y + 5,
+                38,
+                38
+              );
+            } catch {}
+          }
+        }
+      },
+      didParseCell: (data) => {
+        if (data.section === "body") {
+          data.cell.styles.minCellHeight = 48;
+        }
+      },
+    });
+
+    startY = doc.lastAutoTable.finalY + 22;
+
+    if (startY > 760) {
+      doc.addPage();
+      startY = 40;
+    }
+  });
+
+  doc.save(
+    selectedCategory === "ALL"
+      ? "HVF-Product-Price-List.pdf"
+      : `HVF-${selectedCategory}-Price-List.pdf`
+  );
+};
 
 // === GST breakdown toggle (global; remembered across sessions) ===
 const [gstBreakdown, setGstBreakdown] = useState(() => {
@@ -4126,6 +4650,17 @@ button.mini.primary{
         UID: {session?.user?.id?.slice(0, 8)}…
       </span>
     )}
+
+{isAdmin && (
+  <button
+    type="button"
+    className="btn"
+    onClick={() => setShowCatalogExportPanel((v) => !v)}
+    style={{ marginLeft: 8, marginTop: 6 }}
+  >
+    📄 Export Catalog
+  </button>
+)}
   </div>
 )}
     </div>
@@ -4148,6 +4683,59 @@ button.mini.primary{
     />
   </div>
 )}
+
+{page === "catalog" && isAdmin && showCatalogExportPanel && ( 
+ <div className="paper section" style={{ maxWidth: 1100, margin: "0 auto 16px" }}>
+    <h3 style={{ marginBottom: 10 }}>📄 Export Catalog</h3>
+
+    <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+      <select
+        value={catalogExportMode}
+        onChange={(e) => setCatalogExportMode(e.target.value)}
+      >
+        <option value="PRICE">Price List</option>
+        <option value="DISPLAY">Display Catalog</option>
+      </select>
+
+      <select
+        value={catalogExportCategories[0]}
+        onChange={(e) => setCatalogExportCategories([e.target.value])}
+      >
+        <option value="ALL">All Categories</option>
+        {categories.map((c) => (
+          <option key={c} value={c}>{c}</option>
+        ))}
+      </select>
+
+      <label>
+        <input
+          type="checkbox"
+          checked={catalogIncludeSelling}
+          onChange={(e) => setCatalogIncludeSelling(e.target.checked)}
+        />
+        Selling Price
+      </label>
+
+      <label>
+        <input
+          type="checkbox"
+          checked={catalogIncludeCost}
+          onChange={(e) => setCatalogIncludeCost(e.target.checked)}
+        />
+        Cost Price
+      </label>
+
+      <button
+  className="btn primary"
+  type="button"
+  onClick={exportCatalogPdf}
+>
+  Export PDF
+</button>
+    </div>
+  </div>
+)}
+
          {/* Categories (hidden on savedDetailed) */}
       {page === "catalog" && (
   <>
@@ -4174,6 +4762,7 @@ button.mini.primary{
         </summary>
 
         <form onSubmit={onSave} style={{ marginTop: 12 }}>
+
           <div
   className="addform-grid"
   style={{
@@ -4242,7 +4831,7 @@ button.mini.primary{
                 type="file"
                 accept="image/*"
                 onChange={onChange}
-                required
+                required={!editingProductId}
               />
             </label>
 
@@ -4269,6 +4858,141 @@ button.mini.primary{
         </form>
       </details>
     )}
+{isAdmin && editingProductId && (
+  <details className="paper section" style={{ maxWidth: 1100, margin: "0 auto 16px" }} open>
+    <summary className="btn" style={{ cursor: "pointer", background: "#fff3cd" }}>
+      ✏️ Edit Product
+    </summary>
+
+    <div style={{ padding: 12 }}>
+<form onSubmit={onEditSave} style={{ marginTop: 12 }}>
+  <div className="addform-grid" style={{ display: "grid", gap: 10, alignItems: "end" }}>
+    <label>
+      <div style={{ fontSize: 12, color: "#666" }}>Name *</div>
+      <input
+        name="name"
+        value={editForm.name}
+        onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))}
+        required
+      />
+    </label>
+
+    <label>
+      <div style={{ fontSize: 12, color: "#666" }}>Category *</div>
+      <select
+        name="category"
+        value={editForm.category}
+        onChange={(e) => setEditForm((f) => ({ ...f, category: e.target.value }))}
+        required
+      >
+        <option value="">Select category</option>
+        {categories.map((c) => (
+          <option key={c} value={c}>{c}</option>
+        ))}
+      </select>
+    </label>
+
+    <label>
+      <div style={{ fontSize: 12, color: "#666" }}>MRP (₹) *</div>
+      <input
+        type="number"
+        name="mrp"
+        value={editForm.mrp}
+        onChange={(e) => setEditForm((f) => ({ ...f, mrp: e.target.value }))}
+        min="0"
+        required
+      />
+    </label>
+
+    <label>
+      <div style={{ fontSize: 12, color: "#666" }}>Selling Price (₹)</div>
+      <input
+        type="number"
+        name="sell_price"
+        value={editForm.sell_price}
+        onChange={(e) => setEditForm((f) => ({ ...f, sell_price: e.target.value }))}
+        min="0"
+      />
+    </label>
+
+    <label>
+      <div style={{ fontSize: 12, color: "#666" }}>Cost Price (₹)</div>
+      <input
+        type="number"
+        name="cost_price"
+        value={editForm.cost_price}
+        onChange={(e) => setEditForm((f) => ({ ...f, cost_price: e.target.value }))}
+        min="0"
+      />
+    </label>
+
+    <label>
+      <div style={{ fontSize: 12, color: "#666" }}>Replace Image</div>
+      <input
+        type="file"
+        accept="image/*"
+        onChange={(e) =>
+          setEditForm((f) => ({
+            ...f,
+            imageFile: e.target.files?.[0] || null,
+          }))
+        }
+      />
+    </label>
+
+    <label style={{ gridColumn: "1 / -1" }}>
+      <div style={{ fontSize: 12, color: "#666" }}>Specs / description</div>
+      <input
+        name="specs"
+        value={editForm.specs}
+        onChange={(e) => setEditForm((f) => ({ ...f, specs: e.target.value }))}
+        placeholder="Short specs shown on card"
+      />
+    </label>
+
+    <div style={{ gridColumn: "1 / -1", textAlign: "left", display: "flex", gap: 8 }}>
+      <button type="submit" className="btn primary" disabled={saving}>
+        {saving ? "Updating..." : "Update Product"}
+      </button>
+
+      <button
+        type="button"
+        className="btn"
+        onClick={() => {
+          setEditingProductId(null);
+          setEditingImageUrl("");
+          setEditForm({
+            name: "",
+            category: "",
+            mrp: "",
+            sell_price: "",
+            cost_price: "",
+            specs: "",
+            imageFile: null,
+          });
+        }}
+      >
+        Cancel Edit
+      </button>
+<button
+  type="button"
+  className="btn"
+  disabled={saving}
+  onClick={onDeleteProduct}
+  style={{
+    background: "#dc2626",
+    color: "#fff",
+    borderColor: "#dc2626",
+  }}
+>
+  Delete Product
+</button>
+    </div>
+  </div>
+</form>
+    </div>
+  </details>
+)}
   </>
 )}
 
@@ -4346,6 +5070,40 @@ button.mini.primary{
                     {m.category && (
                       <p style={{ color: "#777", fontSize: 12 }}>{m.category}</p>
                     )}
+
+{isAdmin && (
+  <button
+    onClick={() => {
+      setEditingProductId(m.id);
+      setEditingImageUrl(m.image_url || "");
+      setEditForm({
+  name: m.name || "",
+  category: m.category || "",
+  mrp: m.mrp || "",
+  sell_price: m.sell_price || "",
+  cost_price: m.cost_price || "",
+  specs: m.specs || "",
+  imageFile: null,
+});
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }}
+    style={{
+      marginTop: "6px",
+      marginBottom: "6px",
+      padding: "6px 10px",
+      fontSize: "12px",
+      background: "#222",
+      color: "#fff",
+      border: "none",
+      borderRadius: "6px",
+      cursor: "pointer",
+      alignSelf: "center",
+    }}
+  >
+    Edit
+  </button>
+)}
+
 
                     {quoteMode && (
   <div className="addbar">
