@@ -253,7 +253,63 @@ const __boot = (() => {
 })();
 
 const [quoteMode, setQuoteMode] = useState(() => !!__boot.quoteMode); // true = show qty steppers on catalog
-const [page, setPage] = useState(() => __boot.page || "catalog"); // "catalog" | "quoteEditor" | "savedDetailed"
+const [page, setPage] = useState(() => __boot.page || "catalog"); // "catalog" | "quoteEditor" | "savedDetailed" | "payroll"
+
+const [payrollTab, setPayrollTab] = useState("contractual"); // contractual | non_contractual
+const [payrollShowAll, setPayrollShowAll] = useState(false);
+const [payrollEmployees, setPayrollEmployees] = useState(() => {
+  try {
+    return JSON.parse(localStorage.getItem("hvf.payrollEmployees") || "[]");
+  } catch {
+    return [];
+  }
+});
+const [showEmployeeForm, setShowEmployeeForm] = useState(false);
+const [selectedPayrollEmployee, setSelectedPayrollEmployee] = useState(null);
+const [editingPayrollEmployeeId, setEditingPayrollEmployeeId] = useState(null);
+const [payrollMonth, setPayrollMonth] = useState("");
+const [createdPayrollWorksheet, setCreatedPayrollWorksheet] = useState(null);
+const [openedPayrollWorksheetId, setOpenedPayrollWorksheetId] = useState(null);
+const [payrollWorksheetEntries, setPayrollWorksheetEntries] = useState({});
+const [attendanceTab, setAttendanceTab] = useState("contractual");
+const [attendanceDate, setAttendanceDate] = useState(() => {
+  return new Date().toISOString().slice(0, 10);
+});
+
+const [attendanceEntries, setAttendanceEntries] = useState(() => {
+  try {
+    return JSON.parse(localStorage.getItem("hvf.attendanceEntries") || "{}");
+  } catch {
+    return {};
+  }
+});
+const [savedPayrollWorksheets, setSavedPayrollWorksheets] = useState(() => {
+  try {
+    return JSON.parse(localStorage.getItem("hvf.savedPayrollWorksheets") || "[]");
+  } catch {
+    return [];
+  }
+});
+const [employeeForm, setEmployeeForm] = useState({
+  type: "contractual",
+  name: "",
+  dob: "",
+  address: "",
+  joining_date: "",
+  base_salary: "",
+  phone: "",
+  designation: "",
+  branch: "",
+});
+
+const [attendanceHistory, setAttendanceHistory] = useState(() => {
+  try {
+    return JSON.parse(localStorage.getItem("hvf.attendanceHistory") || "[]");
+  } catch {
+    return [];
+  }
+});
+
   const enableQuoteMode = () => {
     if (quoteMode) {
       setQuoteMode(false);
@@ -1390,6 +1446,99 @@ const goToEditor = async () => {
 };
 
   const backToCatalog = () => setPage("catalog");
+
+const openPayrollPage = () => setPage("payroll");
+
+const buildAttendanceSummaryForEmployee = (empId, monthName) => {
+  const monthIndex = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+  ].indexOf(monthName);
+
+  if (monthIndex === -1) {
+    return { present: 0, leave: 0 };
+  }
+
+  let present = 0;
+  let leave = 0;
+
+  Object.entries(attendanceEntries).forEach(([key, status]) => {
+    const [datePart, savedEmpId] = key.split("_");
+
+    if (String(savedEmpId) !== String(empId)) return;
+
+    const d = new Date(datePart);
+    if (d.getMonth() !== monthIndex) return;
+
+    if (status === "present") present += 1;
+    if (status === "halfday") present += 0.5;
+    if (status === "absent") leave += 1;
+  });
+
+  return { present, leave };
+};
+
+const savePayrollEmployee = () => {
+  if (!employeeForm.name.trim()) {
+    alert("Please enter employee name.");
+    return;
+  }
+
+  if (!employeeForm.base_salary) {
+    alert("Please enter base salary.");
+    return;
+  }
+
+  let updatedEmployees = [];
+
+if (editingPayrollEmployeeId) {
+  updatedEmployees = payrollEmployees.map((emp) =>
+    emp.id === editingPayrollEmployeeId
+      ? {
+          ...emp,
+          ...employeeForm,
+          base_salary: Number(employeeForm.base_salary || 0),
+        }
+      : emp
+  );
+} else {
+  const newEmployee = {
+    id: Date.now(),
+    ...employeeForm,
+    base_salary: Number(employeeForm.base_salary || 0),
+  };
+
+  updatedEmployees = [...payrollEmployees, newEmployee];
+}
+
+  setPayrollEmployees(updatedEmployees);
+  localStorage.setItem("hvf.payrollEmployees", JSON.stringify(updatedEmployees));
+
+  setEmployeeForm({
+    type: payrollShowAll ? "contractual" : payrollTab,
+    name: "",
+    dob: "",
+    address: "",
+    joining_date: "",
+    base_salary: "",
+    phone: "",
+    designation: "",
+    branch: "",
+  });
+
+  setShowEmployeeForm(false);
+setEditingPayrollEmployeeId(null);
+};
 
 // Ensure a clean, non-empty quotation code (string) everywhere we use it.
 function normalizeQuoteCode(v) {
@@ -2641,18 +2790,30 @@ const loadSavedDetailed = async () => {
     if (error) throw error;
     // fetch delivered_on for these quotes and attach as delivered_date
     const ids = (data || []).map((q) => q.id);
-    let deliveredMap = {};
-    if (ids.length) {
-      const { data: dRows, error: dErr } = await supabase
-        .from("delivered")
-        .select("quote_id, delivered_on")
-        .in("quote_id", ids);
-      if (dErr) throw dErr;
-      deliveredMap = (dRows || []).reduce((acc, r) => {
-        acc[r.quote_id] = r.delivered_on || null;
-        return acc;
-      }, {});
-    }
+let deliveredMap = {};
+
+if (ids.length) {
+  const allDeliveredRows = [];
+  const batchSize = 50;
+
+  for (let i = 0; i < ids.length; i += batchSize) {
+    const batchIds = ids.slice(i, i + batchSize);
+
+    const { data: dRows, error: dErr } = await supabase
+      .from("delivered")
+      .select("quote_id, delivered_on")
+      .in("quote_id", batchIds);
+
+    if (dErr) throw dErr;
+
+    allDeliveredRows.push(...(dRows || []));
+  }
+
+  deliveredMap = allDeliveredRows.reduce((acc, r) => {
+    acc[r.quote_id] = r.delivered_on || null;
+    return acc;
+  }, {});
+}
     // build preview + attach delivered_date from deliveredMap
     const enriched = (data || []).map((q) => {
       const names = (q.quote_items || []).map((it) => it?.name || "");
@@ -4996,7 +5157,1896 @@ button.mini.primary{
   </>
 )}
 
-      {/* PAGE: CATALOG */}
+{page === "attendance" && (
+  <div style={{ maxWidth: 1160, margin: "0 auto 40px", padding: "0 12px" }}>
+    <div className="paper section" style={{ padding: 20 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+        <div>
+          <h1 style={{ margin: 0 }}>Record Attendance</h1>
+          <p style={{ color: "#666", marginTop: 6 }}>
+            Mark daily attendance for employees.
+          </p>
+        </div>
+
+<div style={{ marginTop: 14, display: "flex", gap: 8, flexWrap: "wrap" }}>
+  <button
+    type="button"
+    className={attendanceTab === "contractual" ? "btn primary" : "btn"}
+    onClick={() => setAttendanceTab("contractual")}
+  >
+    Contractual
+  </button>
+
+  <button
+    type="button"
+    className={attendanceTab === "non_contractual" ? "btn primary" : "btn"}
+    onClick={() => setAttendanceTab("non_contractual")}
+  >
+    Non-contractual
+  </button>
+
+  <button
+    type="button"
+    className="btn primary"
+    onClick={() => {
+      setPayrollTab(attendanceTab);
+      setPayrollShowAll(false);
+      setEditingPayrollEmployeeId(null);
+
+      setEmployeeForm({
+        type: attendanceTab,
+        name: "",
+        dob: "",
+        address: "",
+        joining_date: "",
+        base_salary: "",
+        phone: "",
+        designation: "",
+        branch: "",
+      });
+
+      setShowEmployeeForm(true);
+      setPage("payroll");
+    }}
+  >
+    + Add Employee
+  </button>
+
+  <button
+    type="button"
+    className="btn"
+    onClick={() => {
+      setPayrollTab(attendanceTab);
+      setPayrollShowAll(false);
+      setShowEmployeeForm(false);
+      setSelectedPayrollEmployee(null);
+      setPage("payroll");
+    }}
+  >
+    Manage Employees
+  </button>
+</div>
+
+<div
+  style={{
+    marginTop: 10,
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 8,
+    padding: "8px 12px",
+    borderRadius: 999,
+    background:
+      attendanceTab === "contractual"
+        ? "#dbeafe"
+        : "#fef3c7",
+    color:
+      attendanceTab === "contractual"
+        ? "#1d4ed8"
+        : "#b45309",
+    fontWeight: 700,
+    fontSize: 13,
+  }}
+>
+  {attendanceTab === "contractual"
+    ? "Contractual Attendance Mode"
+    : "Non-contractual Attendance Mode"}
+</div>
+
+<div style={{ marginTop: 8, fontSize: 13, color: "#374151" }}>
+  Date: <b>{attendanceDate}</b> • Employees: <b>{payrollEmployees.length}</b>
+
+{attendanceEntries[`${attendanceDate}_saved_at`] && (
+  <span style={{ marginLeft: 10, color: "#666" }}>
+    • Saved:
+    {" "}
+    {new Date(
+      attendanceEntries[`${attendanceDate}_saved_at`]
+    ).toLocaleString("en-IN", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    })}
+  </span>
+)}
+</div>
+
+<div style={{ marginTop: 6, fontSize: 12, color: "#6b7280" }}>
+  Changes recorded today:{" "}
+  <b>
+    {
+      attendanceHistory.filter((h) => h.date === attendanceDate).length
+    }
+  </b>
+</div>
+
+<div
+  style={{
+    display: "grid",
+    gridTemplateColumns: "repeat(3, minmax(120px, 1fr))",
+    gap: 10,
+    marginTop: 18,
+    width: "100%",
+    gridColumn: "1 / -1",
+  }}
+>
+  <div className="paper section" style={{ padding: 12 }}>
+    <div style={{ fontSize: 12, color: "#666" }}>Present</div>
+    <div style={{ fontSize: 22, fontWeight: 800, color: "#166534" }}>
+      {
+        payrollEmployees.filter((emp) => {
+          const key = `${attendanceDate}_${emp.id}`;
+          return (attendanceEntries[key] || "present") === "present";
+        }).length
+      }
+    </div>
+  </div>
+
+  <div className="paper section" style={{ padding: 12 }}>
+    <div style={{ fontSize: 12, color: "#666" }}>Absent</div>
+    <div style={{ fontSize: 22, fontWeight: 800, color: "#dc2626" }}>
+      {
+        payrollEmployees.filter((emp) => {
+          const key = `${attendanceDate}_${emp.id}`;
+          return attendanceEntries[key] === "absent";
+        }).length
+      }
+    </div>
+  </div>
+
+  <div className="paper section" style={{ padding: 12 }}>
+    <div style={{ fontSize: 12, color: "#666" }}>Half Day</div>
+    <div style={{ fontSize: 22, fontWeight: 800, color: "#b45309" }}>
+      {
+        payrollEmployees.filter((emp) => {
+          const key = `${attendanceDate}_${emp.id}`;
+          return attendanceEntries[key] === "halfday";
+        }).length
+      }
+    </div>
+  </div>
+</div>
+
+        <button className="btn" onClick={backToCatalog}>
+          ← Back to Catalog
+        </button>
+      </div>
+
+      <div className="paper section" style={{ marginTop: 18, padding: 16 }}>
+        <div style={{ fontWeight: 700, marginBottom: 8 }}>Attendance Date</div>
+
+        <input
+          type="date"
+          value={attendanceDate}
+          onChange={(e) => {
+  const selectedDate = e.target.value;
+  const today = new Date().toISOString().slice(0, 10);
+
+  if (selectedDate < today) {
+    const ok = window.confirm(
+      "You are selecting a previous date. Continue?"
+    );
+
+    if (!ok) return;
+  }
+
+  setAttendanceDate(selectedDate);
+}}
+          style={{
+            padding: 10,
+            borderRadius: 10,
+            border: "1px solid #d1d5db",
+            fontSize: 16,
+          }}
+        />
+      </div>
+
+      <div className="paper section" style={{ marginTop: 18, padding: 0, overflow: "hidden" }}>
+        {payrollEmployees.length === 0 ? (
+          <div style={{ padding: 20, color: "#777" }}>
+            No employees added yet.
+          </div>
+        ) : (
+          payrollEmployees
+  .filter((emp) => emp.type === attendanceTab)
+  .map((emp) => {
+            const attendanceKey = `${attendanceDate}_${emp.id}`;
+            const currentStatus = attendanceEntries[attendanceKey] || "present";
+
+            return (
+              <div
+                key={emp.id}
+                style={{
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: 12,
+  padding: 14,
+  borderTop: "1px solid #eee",
+  flexWrap: "wrap",
+  background:
+    currentStatus === "present"
+      ? "#f0fdf4"
+      : currentStatus === "absent"
+      ? "#fef2f2"
+      : "#fffbeb",
+}}
+              >
+                <div>
+                  <div style={{ fontWeight: 700 }}>{emp.name}</div>
+
+<div
+  style={{
+    marginTop: 4,
+    fontSize: 12,
+    fontWeight: 700,
+    color:
+      currentStatus === "present"
+        ? "#166534"
+        : currentStatus === "absent"
+        ? "#dc2626"
+        : "#b45309",
+  }}
+>
+  {currentStatus === "present"
+    ? "Present"
+    : currentStatus === "absent"
+    ? "Absent"
+    : "Half Day"}
+</div>
+
+<div style={{ fontSize: 13, color: "#666", marginTop: 4 }}>
+  {emp.branch || "-"}
+</div>
+                </div>
+
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {["present", "absent", "halfday"].map((status) => (
+                    <button
+                      key={status}
+                      type="button"
+                      onClick={() => {
+                        const previousStatus = attendanceEntries[attendanceKey] || "present";
+
+const updated = {
+  ...attendanceEntries,
+  [attendanceKey]: status,
+};
+
+setAttendanceEntries(updated);
+
+localStorage.setItem(
+  "hvf.attendanceEntries",
+  JSON.stringify(updated)
+);
+
+const historyItem = {
+  id: Date.now(),
+  date: attendanceDate,
+  employee_id: emp.id,
+  employee_name: emp.name,
+  previous_status: previousStatus,
+  new_status: status,
+  changed_at: new Date().toISOString(),
+  changed_by: "Admin/Manager",
+};
+
+const updatedHistory = [...attendanceHistory, historyItem];
+
+setAttendanceHistory(updatedHistory);
+
+localStorage.setItem(
+  "hvf.attendanceHistory",
+  JSON.stringify(updatedHistory)
+);
+
+                      }}
+                      style={{
+                        padding: "8px 12px",
+                        borderRadius: 10,
+                        border:
+                          currentStatus === status
+                            ? "2px solid #2563eb"
+                            : "1px solid #d1d5db",
+                        background:
+                          currentStatus === status ? "#eff6ff" : "#fff",
+                        fontWeight: 700,
+                        cursor: "pointer",
+                      }}
+                    >
+                      {status === "present"
+                        ? "Present"
+                        : status === "absent"
+                        ? "Absent"
+                        : "Half Day"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+
+<div
+  className="paper section"
+  style={{
+    marginTop: 18,
+    padding: 16,
+  }}
+>
+ <div
+  style={{
+    display: "flex",
+    justifyContent: "space-between",
+    gap: 12,
+    alignItems: "center",
+    flexWrap: "wrap",
+  }}
+>
+  <div>
+    <h3 style={{ marginTop: 0, marginBottom: 4 }}>
+      Monthly Attendance Register
+    </h3>
+
+   <div style={{ color: "#666", fontSize: 13 }}>
+  {attendanceTab === "contractual"
+    ? "Attendance period: 1st to last day of selected month"
+    : "Attendance period: 27th previous month to 26th selected month"}
+
+  <div style={{ marginTop: 4 }}>
+    Viewing:
+    {" "}
+    <b>
+      {new Date(attendanceDate).toLocaleString("en-IN", {
+        month: "long",
+        year: "numeric",
+      })}
+    </b>
+  </div>
+</div>
+  </div>
+
+<div
+  style={{
+    display: "flex",
+    gap: 10,
+    flexWrap: "wrap",
+    marginTop: 12,
+    marginBottom: 10,
+    fontSize: 12,
+    fontWeight: 700,
+  }}
+>
+  <div
+    style={{
+      padding: "6px 10px",
+      borderRadius: 999,
+      background: "#dcfce7",
+      color: "#166534",
+    }}
+  >
+    P = Present
+  </div>
+
+  <div
+    style={{
+      padding: "6px 10px",
+      borderRadius: 999,
+      background: "#fee2e2",
+      color: "#dc2626",
+    }}
+  >
+    A = Absent
+  </div>
+
+  <div
+    style={{
+      padding: "6px 10px",
+      borderRadius: 999,
+      background: "#fef3c7",
+      color: "#b45309",
+    }}
+  >
+    H = Half Day
+  </div>
+</div>
+
+  <input
+    type="month"
+    value={attendanceDate.slice(0, 7)}
+    onChange={(e) => {
+      const selectedMonth = e.target.value;
+
+      setAttendanceDate(`${selectedMonth}-01`);
+    }}
+    style={{
+      padding: 10,
+      borderRadius: 10,
+      border: "1px solid #d1d5db",
+      fontSize: 14,
+    }}
+  />
+
+<div style={{ marginTop: 14, overflowX: "auto" }}>
+  <table
+    style={{
+      width: "100%",
+      borderCollapse: "collapse",
+      minWidth: 700,
+      fontSize: 13,
+    }}
+  >
+    <thead>
+      <tr style={{ background: "#f3f4f6" }}>
+        <th style={{ padding: 8, textAlign: "left" }}>Employee</th>
+<th style={{ padding: 8, textAlign: "center" }}>P</th>
+<th style={{ padding: 8, textAlign: "center" }}>A</th>
+<th style={{ padding: 8, textAlign: "center" }}>H</th>
+<th style={{ padding: 8, textAlign: "center" }}>Payable</th>
+        {(() => {
+  const selectedYear = Number(attendanceDate.slice(0, 4));
+  const selectedMonth = Number(attendanceDate.slice(5, 7));
+  const daysInMonth = new Date(selectedYear, selectedMonth, 0).getDate();
+
+  const days =
+    attendanceTab === "non_contractual"
+      ? [
+          ...Array.from({ length: daysInMonth - 26 }, (_, i) => 27 + i),
+          ...Array.from({ length: 26 }, (_, i) => i + 1),
+        ]
+      : Array.from({ length: daysInMonth }, (_, i) => i + 1);
+
+  return days.map((dayNum, i) => (
+          <th key={i} style={{ padding: 8, textAlign: "center" }}>
+            {dayNum}
+          </th>
+          ));
+})()}
+      </tr>
+    </thead>
+
+    <tbody>
+      {payrollEmployees
+  .filter((emp) => emp.type === attendanceTab)
+  .map((emp) => (
+        <tr key={emp.id}>
+         <td style={{ padding: 8, fontWeight: 700 }}>
+  {emp.name}
+</td>
+
+<td style={{ padding: 8, textAlign: "center", fontWeight: 700, color: "#166534" }}>
+  {
+    Array.from({ length: 31 }, (_, i) => {
+      const day = String(i + 1).padStart(2, "0");
+      const month = attendanceDate.slice(0, 7);
+      const key = `${month}-${day}_${emp.id}`;
+      return attendanceEntries[key] === "present" ? 1 : 0;
+    }).reduce((a, b) => a + b, 0)
+  }
+</td>
+
+<td style={{ padding: 8, textAlign: "center", fontWeight: 700, color: "#dc2626" }}>
+  {
+    Array.from({ length: 31 }, (_, i) => {
+      const day = String(i + 1).padStart(2, "0");
+      const month = attendanceDate.slice(0, 7);
+      const key = `${month}-${day}_${emp.id}`;
+      return attendanceEntries[key] === "absent" ? 1 : 0;
+    }).reduce((a, b) => a + b, 0)
+  }
+</td>
+
+<td style={{ padding: 8, textAlign: "center", fontWeight: 700, color: "#b45309" }}>
+  {
+    Array.from({ length: 31 }, (_, i) => {
+      const day = String(i + 1).padStart(2, "0");
+      const month = attendanceDate.slice(0, 7);
+      const key = `${month}-${day}_${emp.id}`;
+      return attendanceEntries[key] === "halfday" ? 0.5 : 0;
+    }).reduce((a, b) => a + b, 0)
+  }
+</td>
+
+<td
+  style={{
+    padding: 8,
+    textAlign: "center",
+    fontWeight: 700,
+    color: "#2563eb",
+  }}
+>
+  {
+    (
+      Array.from({ length: 31 }, (_, i) => {
+        const day = String(i + 1).padStart(2, "0");
+        const month = attendanceDate.slice(0, 7);
+        const key = `${month}-${day}_${emp.id}`;
+
+        if (attendanceEntries[key] === "present") return 1;
+        if (attendanceEntries[key] === "halfday") return 0.5;
+
+        return 0;
+      }).reduce((a, b) => a + b, 0)
+    ).toFixed(1)
+  }
+</td>
+
+{Array.from({ length: 31 }, (_, i) => {
+            const day = String(i + 1).padStart(2, "0");
+            const month = attendanceDate.slice(0, 7);
+            const key = `${month}-${day}_${emp.id}`;
+            const status = attendanceEntries[key];
+
+            return (
+              <td
+                key={i}
+                style={{
+                  padding: 8,
+                  textAlign: "center",
+                  background:
+                    status === "present"
+                      ? "#dcfce7"
+                      : status === "absent"
+                      ? "#fee2e2"
+                      : status === "halfday"
+                      ? "#fef3c7"
+                      : "#fff",
+                }}
+              >
+                {status === "present"
+                  ? "P"
+                  : status === "absent"
+                  ? "A"
+                  : status === "halfday"
+                  ? "H"
+                  : ""}
+              </td>
+            );
+          })}
+        </tr>
+      ))}
+    </tbody>
+  </table>
+</div>
+
+</div>
+</div>
+
+
+<div style={{ marginTop: 18, textAlign: "right" }}>
+  <button
+    type="button"
+    className="btn primary"
+    onClick={() => {
+  const updated = {
+  ...attendanceEntries,
+  [`${attendanceDate}_saved_at`]: new Date().toISOString(),
+};
+
+setAttendanceEntries(updated);
+
+localStorage.setItem(
+  "hvf.attendanceEntries",
+  JSON.stringify(updated)
+);
+
+const historyItem = {
+  id: Date.now(),
+  type: "save",
+  date: attendanceDate,
+  changed_at: new Date().toISOString(),
+  changed_by: "Admin/Manager",
+};
+
+const updatedHistory = [...attendanceHistory, historyItem];
+
+setAttendanceHistory(updatedHistory);
+
+localStorage.setItem(
+  "hvf.attendanceHistory",
+  JSON.stringify(updatedHistory)
+);
+
+alert("Attendance saved ✅");
+}}
+  >
+    Save Attendance
+  </button>
+
+<button
+  type="button"
+  className="btn"
+  style={{
+    marginLeft: 10,
+    background: "#fee2e2",
+    color: "#b91c1c",
+    borderColor: "#fecaca",
+  }}
+  onClick={() => {
+
+if (!window.confirm("Clear attendance for this selected date?")) return;
+    const updated = { ...attendanceEntries };
+
+
+    Object.keys(updated).forEach((key) => {
+      if (key.startsWith(attendanceDate + "_")) {
+        delete updated[key];
+      }
+    });
+
+    setAttendanceEntries(updated);
+
+    localStorage.setItem(
+      "hvf.attendanceEntries",
+      JSON.stringify(updated)
+    );
+
+    alert("Attendance cleared for selected date.");
+  }}
+>
+  Clear Date
+</button>
+
+<button
+  type="button"
+  className="btn"
+  style={{
+    marginLeft: 10,
+  }}
+  onClick={() => {
+    const logs = attendanceHistory.filter(
+      (h) => h.date === attendanceDate
+    );
+
+    if (!logs.length) {
+      alert("No attendance history for this date.");
+      return;
+    }
+
+    alert(
+      logs
+        .map(
+          (h) =>
+            h.type === "save"
+  ? `Attendance saved by ${h.changed_by}`
+  : `${h.employee_name}: ${h.previous_status} → ${h.new_status}`
+        )
+        .join("\n")
+    );
+  }}
+>
+  View History
+</button>
+
+</div>
+
+    </div>
+  </div>
+)}
+
+
+
+
+{page === "payroll" && (
+  <div style={{ maxWidth: 1100, margin: "0 auto 40px", padding: "0 12px" }}>
+    <div className="paper section" style={{ padding: 20 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+        <div>
+          <h1 style={{ margin: 0 }}>Staff Attendance & Payroll</h1>
+          <p style={{ color: "#666", marginTop: 6 }}>
+            Manage contractual and non-contractual staff payroll records.
+          </p>
+        </div>
+
+        <button className="btn" onClick={backToCatalog}>
+          ← Back to Catalog
+        </button>
+      </div>
+
+      <div style={{ marginTop: 18, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+        <button
+          type="button"
+          className={payrollTab === "contractual" && !payrollShowAll ? "btn primary" : "btn"}
+          onClick={() => {
+            setPayrollTab("contractual");
+            setPayrollShowAll(false);
+          }}
+        >
+          Contractual
+        </button>
+
+        <button
+          type="button"
+          className={payrollTab === "non_contractual" && !payrollShowAll ? "btn primary" : "btn"}
+          onClick={() => {
+            setPayrollTab("non_contractual");
+            setPayrollShowAll(false);
+          }}
+        >
+          Non-contractual
+        </button>
+
+        <button
+  type="button"
+  className="btn"
+  onClick={() => setPayrollShowAll((v) => !v)}
+  style={{
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 8,
+    borderRadius: 10,
+    background: payrollShowAll ? "#f0fdf4" : "#fff",
+    border: payrollShowAll ? "1px solid #22c55e" : "1px solid #e5e7eb",
+    color: "#111827",
+  }}
+>
+  <span>{payrollShowAll ? "☑" : "☐"}</span>
+  <span>Show all together</span>
+</button>
+      </div>
+
+      <div style={{ marginTop: 18 }}>
+        <button
+          type="button"
+          className="btn primary"
+          onClick={() => {
+  setEditingPayrollEmployeeId(null);
+
+  setEmployeeForm({
+    type: payrollShowAll ? "contractual" : payrollTab,
+    name: "",
+    dob: "",
+    address: "",
+    joining_date: "",
+    base_salary: "",
+    phone: "",
+    designation: "",
+    branch: "",
+  });
+
+  setShowEmployeeForm(true);
+}}
+        >
+          + Add Employee
+        </button>
+      </div>
+
+{showEmployeeForm && (
+  <div
+    className="paper section"
+    style={{
+      marginTop: 18,
+      padding: 16,
+      border: "1px solid #e5e7eb",
+      background: "#f9fafb",
+    }}
+  >
+    <h3 style={{ marginTop: 0 }}>
+  {editingPayrollEmployeeId ? "Edit Employee" : "Add Employee"}
+</h3>
+
+    <div className="addform-grid">
+      <label>
+        <div style={{ fontSize: 12, color: "#666" }}>Employee Type</div>
+        <select
+          name="type"
+          value={employeeForm.type}
+          onChange={(e) =>
+            setEmployeeForm((f) => ({ ...f, type: e.target.value }))
+          }
+        >
+          <option value="contractual">Contractual</option>
+          <option value="non_contractual">Non-contractual</option>
+        </select>
+      </label>
+
+      <label>
+        <div style={{ fontSize: 12, color: "#666" }}>Name *</div>
+        <input
+          name="name"
+          value={employeeForm.name}
+          onChange={(e) =>
+            setEmployeeForm((f) => ({ ...f, name: e.target.value }))
+          }
+          placeholder="Employee name"
+        />
+      </label>
+
+      <label>
+        <div style={{ fontSize: 12, color: "#666" }}>Phone</div>
+        <input
+          name="phone"
+          value={employeeForm.phone}
+          onChange={(e) =>
+            setEmployeeForm((f) => ({ ...f, phone: e.target.value }))
+          }
+          placeholder="Phone number"
+        />
+      </label>
+
+      <label>
+        <div style={{ fontSize: 12, color: "#666" }}>Date of Birth</div>
+        <input
+          type="date"
+          name="dob"
+          value={employeeForm.dob}
+          onChange={(e) =>
+            setEmployeeForm((f) => ({ ...f, dob: e.target.value }))
+          }
+        />
+      </label>
+
+      <label>
+        <div style={{ fontSize: 12, color: "#666" }}>Joining Date</div>
+        <input
+          type="date"
+          name="joining_date"
+          value={employeeForm.joining_date}
+          onChange={(e) =>
+            setEmployeeForm((f) => ({ ...f, joining_date: e.target.value }))
+          }
+        />
+      </label>
+
+      <label>
+        <div style={{ fontSize: 12, color: "#666" }}>Base Salary *</div>
+        <input
+          type="number"
+          name="base_salary"
+          value={employeeForm.base_salary}
+          onChange={(e) =>
+            setEmployeeForm((f) => ({ ...f, base_salary: e.target.value }))
+          }
+          placeholder="Monthly salary"
+          min="0"
+        />
+      </label>
+
+      <label>
+        <div style={{ fontSize: 12, color: "#666" }}>Designation</div>
+        <input
+          name="designation"
+          value={employeeForm.designation}
+          onChange={(e) =>
+            setEmployeeForm((f) => ({ ...f, designation: e.target.value }))
+          }
+          placeholder="Salesman / Mechanic / Staff"
+        />
+      </label>
+
+      <label>
+        <div style={{ fontSize: 12, color: "#666" }}>Branch</div>
+        <input
+          name="branch"
+          value={employeeForm.branch}
+          onChange={(e) =>
+            setEmployeeForm((f) => ({ ...f, branch: e.target.value }))
+          }
+          placeholder="Moranhat / Guwahati / Tinsukia"
+        />
+      </label>
+
+      <label style={{ gridColumn: "1 / -1" }}>
+        <div style={{ fontSize: 12, color: "#666" }}>Address</div>
+        <input
+          name="address"
+          value={employeeForm.address}
+          onChange={(e) =>
+            setEmployeeForm((f) => ({ ...f, address: e.target.value }))
+          }
+          placeholder="Employee address"
+        />
+      </label>
+    </div>
+
+    <div style={{ marginTop: 14, display: "flex", gap: 8 }}>
+     <button type="button" className="btn primary" onClick={savePayrollEmployee}>
+  {editingPayrollEmployeeId ? "Update Employee" : "Save Employee"}
+</button>
+
+      <button
+  type="button"
+  className="btn"
+  onClick={() => {
+    setShowEmployeeForm(false);
+    setEditingPayrollEmployeeId(null);
+  }}
+>
+  Cancel
+</button>
+    </div>
+  </div>
+)}
+
+<div
+  className="paper section"
+  style={{
+    marginTop: 18,
+    padding: 16,
+    border: "1px solid #e5e7eb",
+    background: "#ffffff",
+  }}
+>
+  <div
+    style={{
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      gap: 12,
+      flexWrap: "wrap",
+    }}
+  >
+    <div>
+      <h3 style={{ margin: 0 }}>Payroll Worksheet</h3>
+      <p style={{ margin: "6px 0 0", color: "#666" }}>
+        Select month and create attendance/payroll worksheet.
+      </p>
+    </div>
+
+    <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+      <label style={{ display: "grid", gap: 4 }}>
+  <span style={{ fontSize: 12, color: "#666", fontWeight: 700 }}>
+    Payroll Month
+  </span>
+
+  <select
+    value={payrollMonth}
+    onChange={(e) => setPayrollMonth(e.target.value)}
+    style={{
+      minWidth: 180,
+      padding: "10px 12px",
+      borderRadius: 10,
+      border: "1px solid #d1d5db",
+      background: "#fff",
+    }}
+  >
+    <option value="">Select Month</option>
+    <option value="January">January</option>
+    <option value="February">February</option>
+    <option value="March">March</option>
+    <option value="April">April</option>
+    <option value="May">May</option>
+    <option value="June">June</option>
+    <option value="July">July</option>
+    <option value="August">August</option>
+    <option value="September">September</option>
+    <option value="October">October</option>
+    <option value="November">November</option>
+    <option value="December">December</option>
+  </select>
+</label>
+
+     <button
+  type="button"
+  className="btn primary"
+  onClick={() => {
+  if (!payrollMonth) {
+    alert("Please select a payroll month first.");
+    return;
+  }
+
+  setCreatedPayrollWorksheet({
+  month: payrollMonth,
+  created_at: new Date().toISOString(),
+});
+
+setOpenedPayrollWorksheetId(null);
+setPayrollWorksheetEntries({});
+}}
+>
+  Create Worksheet
+</button>
+
+    </div>
+  </div>
+</div>
+
+{savedPayrollWorksheets.length > 0 && (
+  <div
+    className="paper section"
+    style={{
+      marginTop: 18,
+      padding: 16,
+      border: "1px solid #e5e7eb",
+      background: "#fff",
+    }}
+  >
+    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+  <h3 style={{ marginTop: 0, marginBottom: 0 }}>Saved Worksheets</h3>
+
+  <span
+    style={{
+      padding: "6px 10px",
+      borderRadius: 999,
+      background: "#f3f4f6",
+      color: "#374151",
+      fontSize: 12,
+      fontWeight: 700,
+    }}
+  >
+    {savedPayrollWorksheets.length} saved
+  </span>
+</div>
+
+    <div style={{ display: "grid", gap: 8 }}>
+      {savedPayrollWorksheets.map((ws) => (
+        <div
+          key={ws.id}
+          style={{
+            padding: 10,
+            border: "1px solid #e5e7eb",
+            borderRadius: 10,
+            display: "flex",
+            justifyContent: "space-between",
+            gap: 10,
+            flexWrap: "wrap",
+          }}
+        >
+          <div>
+            <b>{ws.month}</b>
+            <div style={{ color: "#666", fontSize: 12 }}>
+              Saved on {new Date(ws.saved_at).toLocaleString("en-IN")}
+            </div>
+          </div>
+
+          <div style={{ display: "flex", gap: 8 }}>
+  <button
+    type="button"
+    className="btn"
+    onClick={() => {
+      setCreatedPayrollWorksheet({
+        month: ws.month,
+        created_at: ws.saved_at,
+      });
+
+      setPayrollMonth(ws.month);
+      setPayrollWorksheetEntries(ws.entries || {});
+	setOpenedPayrollWorksheetId(ws.id);
+    }}
+  >
+    Open
+  </button>
+
+  <button
+    type="button"
+    className="btn"
+    onClick={() => {
+      if (!window.confirm("Delete this saved worksheet?")) return;
+
+      const updated = savedPayrollWorksheets.filter((x) => x.id !== ws.id);
+      setSavedPayrollWorksheets(updated);
+      localStorage.setItem("hvf.savedPayrollWorksheets", JSON.stringify(updated));
+    }}
+    style={{ color: "#dc2626" }}
+  >
+    Delete
+  </button>
+</div>
+        </div>
+      ))}
+    </div>
+  </div>
+)}
+
+{createdPayrollWorksheet ? (
+  <div
+    className="paper section"
+    style={{
+      marginTop: 18,
+      padding: 18,
+      border: "2px solid #dbeafe",
+      background: "#f8fbff",
+    }}
+  >
+    <div
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        gap: 12,
+        flexWrap: "wrap",
+      }}
+    >
+      <div>
+        <h3 style={{ margin: 0 }}>
+          Payroll Worksheet — {createdPayrollWorksheet.month}
+        </h3>
+
+        <div style={{ color: "#666", marginTop: 4, fontSize: 14 }}>
+  Attendance & payroll preparation sheet
+</div>
+
+<div style={{ marginTop: 6, fontSize: 13, color: "#4b5563" }}>
+  Employees in worksheet:{" "}
+  <b>
+    {
+      payrollEmployees.filter((emp) =>
+        payrollShowAll ? true : emp.type === payrollTab
+      ).length
+    }
+  </b>
+</div>
+
+<div style={{ marginTop: 4, fontSize: 12, color: "#6b7280" }}>
+  Last saved:{" "}
+  {openedPayrollWorksheetId
+    ? new Date(
+        savedPayrollWorksheets.find((x) => x.id === openedPayrollWorksheetId)
+          ?.saved_at || createdPayrollWorksheet.created_at
+      ).toLocaleString("en-IN", {
+  day: "2-digit",
+  month: "short",
+  year: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+})
+    : "Not saved yet"}
+</div>
+
+<div style={{ marginTop: 8, color: "#374151", fontSize: 13 }}>
+  <b>Payroll Period:</b>{" "}
+  {payrollShowAll
+    ? "Contractual: 1st to month-end • Non-contractual: 27th previous month to 26th selected month"
+    : payrollTab === "contractual"
+    ? "1st to last day of selected month"
+    : "27th previous month to 26th selected month"}
+</div>
+      </div>
+
+     <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+  <div
+    style={{
+      padding: "8px 12px",
+      borderRadius: 999,
+      background: "#dbeafe",
+      color: "#1d4ed8",
+      fontWeight: 700,
+      fontSize: 13,
+    }}
+  >
+    Active Worksheet
+  </div>
+
+  <button
+    type="button"
+    className="btn primary"
+    onClick={() => {
+      let updated = [];
+
+if (openedPayrollWorksheetId) {
+  updated = savedPayrollWorksheets.map((x) =>
+    x.id === openedPayrollWorksheetId
+      ? {
+          ...x,
+          month: createdPayrollWorksheet.month,
+          entries: payrollWorksheetEntries,
+          saved_at: new Date().toISOString(),
+        }
+      : x
+  );
+
+  alert("Worksheet updated ✅");
+} else {
+const alreadyExists = savedPayrollWorksheets.some(
+  (x) => x.month === createdPayrollWorksheet.month
+);
+
+if (alreadyExists) {
+  alert("A worksheet for this month already exists. Open and update it instead.");
+  return;
+}
+
+  const newSavedWorksheet = {
+    id: Date.now(),
+    month: createdPayrollWorksheet.month,
+    entries: payrollWorksheetEntries,
+    saved_at: new Date().toISOString(),
+  };
+
+  updated = [...savedPayrollWorksheets, newSavedWorksheet];
+
+  alert("Worksheet saved ✅");
+}
+
+setSavedPayrollWorksheets(updated);
+
+localStorage.setItem(
+  "hvf.savedPayrollWorksheets",
+  JSON.stringify(updated)
+);
+    }}
+  >
+    {openedPayrollWorksheetId ? "Update Worksheet" : "Save Worksheet"}
+  </button>
+
+<button
+  type="button"
+  className="btn"
+  onClick={() => {
+    if (!createdPayrollWorksheet?.month) {
+      alert("Please create/select a worksheet month first.");
+      return;
+    }
+
+    const updatedEntries = { ...payrollWorksheetEntries };
+
+    payrollEmployees.forEach((emp) => {
+      const summary = buildAttendanceSummaryForEmployee(
+        emp.id,
+        createdPayrollWorksheet.month
+      );
+
+      updatedEntries[emp.id] = {
+        ...(updatedEntries[emp.id] || {}),
+        present: summary.present,
+        leave: summary.leave,
+      };
+    });
+
+    setPayrollWorksheetEntries(updatedEntries);
+    alert("Attendance loaded into worksheet ✅");
+  }}
+>
+  Load Attendance
+</button>
+
+<button
+  type="button"
+  className="btn"
+  onClick={() => {
+    if (!window.confirm("Clear the active worksheet from screen? Saved worksheets will not be deleted.")) return;
+
+    setCreatedPayrollWorksheet(null);
+    setOpenedPayrollWorksheetId(null);
+    setPayrollWorksheetEntries({});
+  }}
+>
+  Clear
+</button>
+
+</div>
+    </div>
+
+<div
+  style={{
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+    gap: 12,
+    marginTop: 18,
+    marginBottom: 18,
+  }}
+>
+  <div className="paper section" style={{ padding: 14 }}>
+    <div style={{ fontSize: 12, color: "#666" }}>Employees</div>
+    <div style={{ fontSize: 24, fontWeight: 800 }}>
+      {
+        payrollEmployees.filter((emp) =>
+          payrollShowAll ? true : emp.type === payrollTab
+        ).length
+      }
+    </div>
+  </div>
+
+  <div className="paper section" style={{ padding: 14 }}>
+    <div style={{ fontSize: 12, color: "#666" }}>Present Days</div>
+    <div style={{ fontSize: 24, fontWeight: 800, color: "#166534" }}>
+      {payrollEmployees
+        .filter((emp) =>
+          payrollShowAll ? true : emp.type === payrollTab
+        )
+        .reduce(
+          (sum, emp) =>
+            sum +
+            Number(payrollWorksheetEntries[emp.id]?.present || 0),
+          0
+        )}
+    </div>
+  </div>
+
+  <div className="paper section" style={{ padding: 14 }}>
+    <div style={{ fontSize: 12, color: "#666" }}>Leave Days</div>
+    <div style={{ fontSize: 24, fontWeight: 800, color: "#b45309" }}>
+      {payrollEmployees
+        .filter((emp) =>
+          payrollShowAll ? true : emp.type === payrollTab
+        )
+        .reduce(
+          (sum, emp) =>
+            sum +
+            Number(payrollWorksheetEntries[emp.id]?.leave || 0),
+          0
+        )}
+    </div>
+  </div>
+
+  <div className="paper section" style={{ padding: 14 }}>
+    <div style={{ fontSize: 12, color: "#666" }}>Bonus Days</div>
+    <div style={{ fontSize: 24, fontWeight: 800, color: "#1d4ed8" }}>
+      {payrollEmployees
+        .filter((emp) =>
+          payrollShowAll ? true : emp.type === payrollTab
+        )
+        .reduce(
+          (sum, emp) =>
+            sum +
+            Number(payrollWorksheetEntries[emp.id]?.bonus || 0),
+          0
+        )}
+    </div>
+  </div>
+
+<div className="paper section" style={{ padding: 14 }}>
+  <div style={{ fontSize: 12, color: "#666" }}>Absent Days</div>
+
+  <div style={{ fontSize: 24, fontWeight: 800, color: "#dc2626" }}>
+    {payrollEmployees
+      .filter((emp) =>
+        payrollShowAll ? true : emp.type === payrollTab
+      )
+      .reduce(
+        (sum, emp) =>
+          sum +
+          Math.max(
+            0,
+            30 -
+              Number(payrollWorksheetEntries[emp.id]?.present || 0) -
+              Number(payrollWorksheetEntries[emp.id]?.leave || 0)
+          ),
+        0
+      )}
+  </div>
+</div>
+
+<div className="paper section" style={{ padding: 14 }}>
+  <div style={{ fontSize: 12, color: "#666" }}>Total Payable Salary</div>
+
+  <div style={{ fontSize: 24, fontWeight: 800, color: "#047857" }}>
+    ₹
+    {payrollEmployees
+      .filter((emp) =>
+        payrollShowAll ? true : emp.type === payrollTab
+      )
+      .reduce((sum, emp) => {
+        const present = Number(
+          payrollWorksheetEntries[emp.id]?.present || 0
+        );
+
+        const bonus = Number(
+          payrollWorksheetEntries[emp.id]?.bonus || 0
+        );
+
+        const payableDays = present + bonus;
+
+        const payable =
+          emp.type === "non_contractual"
+            ? (Number(emp.base_salary || 0) / 30) * payableDays
+            : Number(emp.base_salary || 0);
+
+        return sum + payable;
+      }, 0)
+      .toLocaleString("en-IN")}
+  </div>
+</div>
+
+</div>
+
+    <div
+  style={{
+    marginTop: 16,
+    overflowX: "auto",
+    WebkitOverflowScrolling: "touch",
+    paddingBottom: 4,
+  }}
+>
+     <table
+  style={{
+    width: "100%",
+    borderCollapse: "collapse",
+    minWidth: 1100,
+  }}
+>
+        <thead>
+          <tr
+  style={{
+    background: "#eef4ff",
+    position: "sticky",
+    top: 0,
+    zIndex: 2,
+  }}
+>
+	
+<th style={{ padding: 10, textAlign: "center", width: 50 }}>No.</th>
+<th style={{ padding: 10, textAlign: "left" }}>Employee</th>
+<th style={{ padding: 10, textAlign: "left" }}>Type</th>
+<th style={{ padding: 10, textAlign: "left" }}>Branch</th>
+<th style={{ padding: 10, textAlign: "center" }}>Present</th>
+<th style={{ padding: 10, textAlign: "center" }}>Leave</th>
+<th style={{ padding: 10, textAlign: "center" }}>Absent</th>
+<th style={{ padding: 10, textAlign: "center" }}>Bonus Days</th>
+<th style={{ padding: 10, textAlign: "center" }}>Payable Days</th>
+<th style={{ padding: 10, textAlign: "right" }}>Per Day</th>
+<th style={{ padding: 10, textAlign: "right" }}>Salary</th>
+<th style={{ padding: 10, textAlign: "right" }}>Payable</th>
+</tr>
+</thead>
+
+<tbody>
+  {payrollEmployees
+    .filter((emp) => (payrollShowAll ? true : emp.type === payrollTab))
+    .map((emp, index) => (
+     
+<tr
+  key={emp.id}
+  onMouseEnter={(e) => {
+    e.currentTarget.style.background = "#f3f4f6";
+  }}
+  onMouseLeave={(e) => {
+    e.currentTarget.style.background =
+      index % 2 === 0 ? "#ffffff" : "#fafafa";
+  }}
+  onClick={(e) => {
+    document.querySelectorAll(".payroll-row-active").forEach((row) => {
+      row.classList.remove("payroll-row-active");
+      row.style.boxShadow = "";
+    });
+
+    e.currentTarget.classList.add("payroll-row-active");
+    e.currentTarget.style.boxShadow = "inset 4px 0 0 #2563eb";
+  }}
+  style={{
+    borderTop: "1px solid #e5e7eb",
+    background: index % 2 === 0 ? "#ffffff" : "#fafafa",
+    transition: "background 0.15s ease",
+    cursor: "pointer",
+  }}
+>
+        <td style={{ padding: 10, textAlign: "center", fontWeight: 700 }}>
+          {index + 1}
+        </td>
+
+        <td style={{ padding: 10 }}>
+          <b>{emp.name}</b>
+        </td>
+
+        <td style={{ padding: 10 }}>
+          {emp.type === "contractual" ? "Contractual" : "Non-contractual"}
+        </td>
+
+        <td style={{ padding: 10 }}>{emp.branch || "-"}</td>
+
+        <td style={{ padding: 10, textAlign: "center" }}>
+          <input
+            type="number"
+            min="0"
+            placeholder="0"
+            value={payrollWorksheetEntries[emp.id]?.present || ""}
+            onChange={(e) =>
+              setPayrollWorksheetEntries((prev) => ({
+                ...prev,
+                [emp.id]: {
+                  ...(prev[emp.id] || {}),
+                  present: e.target.value,
+                },
+              }))
+            }
+            style={{ width: 70, textAlign: "center" }}
+          />
+        </td>
+
+        <td style={{ padding: 10, textAlign: "center" }}>
+          <input
+            type="number"
+            min="0"
+            placeholder="0"
+            value={payrollWorksheetEntries[emp.id]?.leave || ""}
+            onChange={(e) =>
+              setPayrollWorksheetEntries((prev) => ({
+                ...prev,
+                [emp.id]: {
+                  ...(prev[emp.id] || {}),
+                  leave: e.target.value,
+                },
+              }))
+            }
+            style={{ width: 70, textAlign: "center" }}
+          />
+        </td>
+
+        <td style={{ padding: 10, textAlign: "center", fontWeight: 700 }}>
+          {Math.max(
+            0,
+            30 -
+              Number(payrollWorksheetEntries[emp.id]?.present || 0) -
+              Number(payrollWorksheetEntries[emp.id]?.leave || 0)
+          )}
+        </td>
+
+        <td style={{ padding: 10, textAlign: "center" }}>
+          {emp.type === "non_contractual" ? (
+            <input
+              type="number"
+              min="0"
+              placeholder="0"
+              value={payrollWorksheetEntries[emp.id]?.bonus || ""}
+              onChange={(e) =>
+                setPayrollWorksheetEntries((prev) => ({
+                  ...prev,
+                  [emp.id]: {
+                    ...(prev[emp.id] || {}),
+                    bonus: e.target.value,
+                  },
+                }))
+              }
+              style={{ width: 70, textAlign: "center" }}
+            />
+          ) : (
+            <span style={{ color: "#aaa" }}>—</span>
+          )}
+        </td>
+
+        <td style={{ padding: 10, textAlign: "center", fontWeight: 700 }}>
+          {Number(payrollWorksheetEntries[emp.id]?.present || 0) +
+            Number(payrollWorksheetEntries[emp.id]?.bonus || 0)}
+        </td>
+
+        <td style={{ padding: 10, textAlign: "right" }}>
+          ₹
+          {Math.round(Number(emp.base_salary || 0) / 30).toLocaleString(
+            "en-IN"
+          )}
+        </td>
+
+        <td style={{ padding: 10, textAlign: "right", fontWeight: 700 }}>
+          ₹{Number(emp.base_salary || 0).toLocaleString("en-IN")}
+        </td>
+
+        <td
+          style={{
+            padding: 10,
+            textAlign: "right",
+            fontWeight: 700,
+            color:
+              emp.type !== "non_contractual"
+                ? "#777"
+                : Math.round(
+                    (Number(emp.base_salary || 0) / 30) *
+                      (Number(payrollWorksheetEntries[emp.id]?.present || 0) +
+                        Number(payrollWorksheetEntries[emp.id]?.bonus || 0))
+                  ) <= 0
+                ? "#dc2626"
+                : Math.round(
+                    (Number(emp.base_salary || 0) / 30) *
+                      (Number(payrollWorksheetEntries[emp.id]?.present || 0) +
+                        Number(payrollWorksheetEntries[emp.id]?.bonus || 0))
+                  ) < Number(emp.base_salary || 0) / 2
+                ? "#b45309"
+                : "#166534",
+          }}
+        >
+          {emp.type === "non_contractual" ? (
+            <>
+              ₹
+              {Math.round(
+                (Number(emp.base_salary || 0) / 30) *
+                  (Number(payrollWorksheetEntries[emp.id]?.present || 0) +
+                    Number(payrollWorksheetEntries[emp.id]?.bonus || 0))
+              ).toLocaleString("en-IN")}
+            </>
+          ) : (
+            <span style={{ fontSize: 12 }}>To calculate later</span>
+          )}
+        </td>
+      </tr>
+    ))}
+
+
+        </tbody>
+      </table>
+<div
+  style={{
+    marginTop: 14,
+    padding: 12,
+    background: "#f0fdf4",
+    border: "1px solid #bbf7d0",
+    borderRadius: 12,
+    display: "flex",
+    justifyContent: "space-between",
+    gap: 12,
+    flexWrap: "wrap",
+  }}
+>
+  <div>
+  <b>Total Payable</b>
+
+  <div style={{ marginTop: 4, color: "#666", fontSize: 12 }}>
+    Present:{" "}
+    {payrollEmployees
+      .filter((emp) => payrollShowAll ? true : emp.type === payrollTab)
+      .reduce((sum, emp) => sum + Number(payrollWorksheetEntries[emp.id]?.present || 0), 0)}
+    {" "}days • Leave:{" "}
+    {payrollEmployees
+      .filter((emp) => payrollShowAll ? true : emp.type === payrollTab)
+      .reduce((sum, emp) => sum + Number(payrollWorksheetEntries[emp.id]?.leave || 0), 0)}
+    {" "}days • Bonus:{" "}
+    {payrollEmployees
+      .filter((emp) => payrollShowAll ? true : emp.type === payrollTab)
+      .reduce((sum, emp) => sum + Number(payrollWorksheetEntries[emp.id]?.bonus || 0), 0)}
+    {" "}days
+  </div>
+</div>
+
+  <b style={{ color: "#166534", fontSize: 18 }}>
+    ₹
+    {payrollEmployees
+      .filter((emp) => payrollShowAll ? true : emp.type === payrollTab)
+      .reduce((sum, emp) => {
+        if (emp.type !== "non_contractual") return sum;
+
+        const present = Number(payrollWorksheetEntries[emp.id]?.present || 0);
+        const bonus = Number(payrollWorksheetEntries[emp.id]?.bonus || 0);
+        const amount = (Number(emp.base_salary || 0) / 30) * (present + bonus);
+
+        return sum + amount;
+      }, 0)
+      .toLocaleString("en-IN")}
+  </b>
+</div>
+    </div>
+  </div>
+) : (
+  <div
+    className="paper section"
+    style={{
+      marginTop: 18,
+      padding: 24,
+      textAlign: "center",
+      color: "#666",
+      border: "1px dashed #d1d5db",
+      background: "#fafafa",
+    }}
+  >
+    No active worksheet selected.
+    <div style={{ marginTop: 6, fontSize: 13 }}>
+      Select a month and click “Create Worksheet”.
+    </div>
+  </div>
+)}
+
+{selectedPayrollEmployee && (
+  <div
+    className="paper section"
+    style={{
+      marginTop: 18,
+      padding: 16,
+      border: "1px solid #e5e7eb",
+      background: "#f9fafb",
+    }}
+  >
+    <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+      <div>
+        <h3 style={{ margin: 0 }}>{selectedPayrollEmployee.name}</h3>
+        <p style={{ margin: "6px 0 0", color: "#666" }}>
+          {selectedPayrollEmployee.type === "contractual"
+            ? "Contractual Employee"
+            : "Non-contractual Employee"}
+        </p>
+      </div>
+
+      <button className="btn" onClick={() => setSelectedPayrollEmployee(null)}>
+        Close
+      </button>
+    </div>
+
+    <div
+      style={{
+        marginTop: 14,
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+        gap: 10,
+      }}
+    >
+      <div><b>Phone:</b> {selectedPayrollEmployee.phone || "-"}</div>
+      <div><b>Designation:</b> {selectedPayrollEmployee.designation || "-"}</div>
+      <div><b>Branch:</b> {selectedPayrollEmployee.branch || "-"}</div>
+      <div><b>Base Salary:</b> ₹{Number(selectedPayrollEmployee.base_salary || 0).toLocaleString("en-IN")}</div>
+      <div><b>DOB:</b> {selectedPayrollEmployee.dob || "-"}</div>
+      <div><b>Joining:</b> {selectedPayrollEmployee.joining_date || "-"}</div>
+      <div style={{ gridColumn: "1 / -1" }}>
+        <b>Address:</b> {selectedPayrollEmployee.address || "-"}
+      </div>
+    </div>
+  </div>
+)}
+
+<div
+  style={{
+    marginTop: 18,
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+    gap: 10,
+  }}
+>
+  <div className="paper section" style={{ padding: 12 }}>
+    <div style={{ color: "#666", fontSize: 12 }}>Total Employees</div>
+    <div style={{ fontSize: 22, fontWeight: 800 }}>
+      {payrollEmployees.length}
+    </div>
+  </div>
+
+  <div className="paper section" style={{ padding: 12 }}>
+    <div style={{ color: "#666", fontSize: 12 }}>Contractual</div>
+    <div style={{ fontSize: 22, fontWeight: 800 }}>
+      {payrollEmployees.filter((e) => e.type === "contractual").length}
+    </div>
+  </div>
+
+  <div className="paper section" style={{ padding: 12 }}>
+    <div style={{ color: "#666", fontSize: 12 }}>Non-contractual</div>
+    <div style={{ fontSize: 22, fontWeight: 800 }}>
+      {payrollEmployees.filter((e) => e.type === "non_contractual").length}
+    </div>
+  </div>
+</div>
+
+      <div style={{ marginTop: 20 }}>
+  {payrollEmployees.length === 0 ? (
+    <p style={{ color: "#777" }}>No employees added yet.</p>
+  ) : (
+    <div style={{ display: "grid", gap: 10 }}>
+      {payrollEmployees
+        .filter((emp) =>
+          payrollShowAll ? true : emp.type === payrollTab
+        )
+        .map((emp) => (
+          <div
+            key={emp.id}
+            className="paper section"
+            style={{
+              padding: 12,
+              border: "1px solid #e5e7eb",
+              display: "flex",
+              justifyContent: "space-between",
+              gap: 12,
+              alignItems: "center",
+              flexWrap: "wrap",
+            }}
+          >
+
+
+<div style={{ display: "flex", gap: 14, alignItems: "center" }}>
+  <div
+    style={{
+      width: 42,
+      height: 42,
+      borderRadius: 12,
+      background: "#2563eb",
+      color: "#fff",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      fontWeight: 800,
+      fontSize: 14,
+    }}
+  >
+    {emp.id.toString().slice(-2)}
+  </div>
+
+  <div>
+    <b style={{ fontSize: 16 }}>{emp.name}</b>
+
+    <div style={{ color: "#666", fontSize: 13, marginTop: 2 }}>
+      {emp.designation || "Staff"} • {emp.branch || "Branch not set"}
+    </div>
+
+    <div style={{ color: "#777", fontSize: 12, marginTop: 2 }}>
+      {emp.type === "contractual" ? "Contractual" : "Non-contractual"}
+    </div>
+
+    <div style={{ color: "#888", fontSize: 12, marginTop: 4 }}>
+      Joined: {emp.joining_date || "Not entered"}
+    </div>
+  </div>
+</div>
+
+
+            <div style={{ textAlign: "right" }}>
+  <div style={{ fontWeight: 800, fontSize: 20 }}>
+    ₹{Number(emp.base_salary || 0).toLocaleString("en-IN")}
+  </div>
+
+  <div style={{ display: "flex", gap: 8, marginTop: 8, justifyContent: "flex-end" }}>
+  <button
+    type="button"
+    className="btn"
+    onClick={() => setSelectedPayrollEmployee(emp)}
+  >
+    View Details
+  </button>
+
+  <button
+    type="button"
+    className="btn"
+    onClick={() => {
+      setEditingPayrollEmployeeId(emp.id);
+      setEmployeeForm({
+        type: emp.type || "contractual",
+        name: emp.name || "",
+        dob: emp.dob || "",
+        address: emp.address || "",
+        joining_date: emp.joining_date || "",
+        base_salary: emp.base_salary || "",
+        phone: emp.phone || "",
+        designation: emp.designation || "",
+        branch: emp.branch || "",
+      });
+      setShowEmployeeForm(true);
+    }}
+  >
+    Edit
+  </button>
+
+<button
+  type="button"
+  className="btn"
+  onClick={() => {
+    if (!window.confirm(`Delete employee "${emp.name}"?`)) return;
+
+    const updatedEmployees = payrollEmployees.filter((x) => x.id !== emp.id);
+
+    setPayrollEmployees(updatedEmployees);
+	if (selectedPayrollEmployee?.id === emp.id) {
+  setSelectedPayrollEmployee(null);
+}
+    localStorage.setItem(
+      "hvf.payrollEmployees",
+      JSON.stringify(updatedEmployees)
+    );
+
+    if (selectedPayrollEmployee?.id === emp.id) {
+      setSelectedPayrollEmployee(null);
+    }
+  }}
+  style={{ color: "#dc2626" }}
+>
+  Delete
+</button>
+
+</div>
+
+</div>
+          </div>
+        ))}
+    </div>
+  )}
+</div>
+    </div>
+  </div>
+)}
+
+  
+    {/* PAGE: CATALOG */}
       {page === "catalog" && (
         <div style={{ maxWidth: 1100, margin: "0 auto 40px" }}>
           {loading ? (
@@ -7326,6 +9376,33 @@ delivered_date: (() => {
     zIndex: 20,
   }}
 >
+
+<button
+  className="btn primary"
+  onClick={() => setPage("attendance")}
+  style={{ marginBottom: 8 }}
+>
+  📋 Record Attendance
+</button>
+
+
+  {isAdmin && (
+    <button
+      type="button"
+      onClick={openPayrollPage}
+      className="btn"
+      style={{
+        background: "#1f7a3f",
+        color: "#fff",
+        border: "none",
+        fontWeight: 700,
+        marginBottom: 8,
+      }}
+    >
+      💼 Payroll
+    </button>
+  )}
+
   {quoteMode && (
     <button
       onClick={startNewQuote}
