@@ -9222,7 +9222,10 @@ const exportPDF = async () => {
 // quotation layout only when necessary.
 let quotationScale = 1;
 
-if (firm === "HVF Agency") {
+if (
+  firm === "HVF Agency" ||
+  firm === "Victor Engineering"
+) {
   // Approximate the vertical space needed by each item.
   // Items with specifications need slightly more height.
   const estimatedTableHeight =
@@ -9264,7 +9267,8 @@ if (firm === "HVF Agency") {
 
 // Convenient scaler used throughout the HVF PDF layout.
 const qs = (value) =>
-  firm === "HVF Agency"
+  firm === "HVF Agency" ||
+  firm === "Victor Engineering"
     ? value * quotationScale
     : value;
 
@@ -9432,16 +9436,26 @@ doc.text(`Date: ${dateStr}`, R, 86, { align: "right" });
   } else if (firm === "Victor Engineering") {
     // Victor Engineering — single outer frame + divider lines (no inner boxes)
     const LINE_W = 0.9;
-    const gap = 10; // vertical spacing between strips
-    const subH = 26;
-    const introH = 36;
+    const gap = qs(10); // vertical spacing between strips
+    const subH = qs(26);
+const introH = qs(36);
 
     // Title
     doc.setFont("times", "bold");
-    doc.setFontSize(22);
-    doc.text("Victor Engineering", pw / 2, 60, { align: "center" });
-    doc.setFontSize(14);
-    doc.text("PERFORMA INVOICE", pw / 2, 80, { align: "center" });
+    doc.setFontSize(qs(22));
+    doc.text(
+  "Victor Engineering",
+  pw / 2,
+  qs(60),
+  { align: "center" }
+);
+    doc.setFontSize(qs(14));
+    doc.text(
+  "PERFORMA INVOICE",
+  pw / 2,
+  qs(80),
+  { align: "center" }
+);
 
     // Outer frame
     const frameTop = 92;
@@ -9458,42 +9472,84 @@ doc.text(`Date: ${dateStr}`, R, 86, { align: "right" });
     doc.line(L, headerBottom, R, headerBottom);
     doc.line(splitX, frameTop, splitX, headerBottom);
 
-    // Left (To:)
-    doc.setFont("times", "normal");
-    doc.setFontSize(11);
-    doc.text("To,", L + 10, frameTop + 18);
-    doc.setFont("times", "bold");
-    doc.text(String(qHeader.customer_name || ""), L + 10, frameTop + 36);
-    doc.text(String(qHeader.address || ""), L + 10, frameTop + 52);
-    doc.text(String(qHeader.phone || ""), L + 10, frameTop + 68);
+   // Left (To:)
+doc.setFont("times", "normal");
+doc.setFontSize(qs(11));
+doc.text(
+  "To,",
+  L + 10,
+  frameTop + qs(18)
+);
 
-    // Right (Ref/Date/GSTIN)
-    doc.setFont("times", "normal");
-    const rx = splitX + 10;
-    doc.text(`Ref No : ${number}`, rx, frameTop + 20);
-    doc.text(`Date   : ${dateStr}`, rx, frameTop + 36);
+doc.setFont("times", "bold");
+doc.text(
+  String(qHeader.customer_name || ""),
+  L + 10,
+  frameTop + qs(36)
+);
+doc.text(
+  String(qHeader.address || ""),
+  L + 10,
+  frameTop + qs(52)
+);
+doc.text(
+  String(qHeader.phone || ""),
+  L + 10,
+  frameTop + qs(68)
+);
+
+   // Right (Ref/Date/GSTIN)
+doc.setFont("times", "normal");
+const rx = splitX + 10;
+
+doc.text(
+  `Ref No : ${number}`,
+  rx,
+  frameTop + qs(20)
+);
+
+doc.text(
+  `Date : ${dateStr}`,
+  rx,
+  frameTop + qs(36)
+);
+
 if (firm === "Victor Engineering") {
-  doc.text(`GSTIN  : 18BCYCP9744A1ZA`, rx, frameTop + 52);
+  doc.text(
+    `GSTIN : 18BXCP9744A1ZA`,
+    rx,
+    frameTop + qs(52)
+  );
 }
+    // Subject strip - single top line
+const subTop = headerBottom + gap;
+doc.line(L, subTop, R, subTop);
+doc.setFont("times", "normal");
 
-    // Subject strip — single top line
-    const subTop = headerBottom + gap;
-    doc.line(L, subTop, R, subTop);
-    doc.setFont("times", "normal");
-    doc.text("Sub :  Performa Invoice for Machinery", L + 10, subTop + 18);
+doc.text(
+  "Sub : Performa Invoice for Machinery",
+  L + 10,
+  subTop + qs(18)
+);
 
-    // Intro strip — single top line
-    const introTop = subTop + subH + gap;
-    doc.line(L, introTop, R, introTop);
-    doc.text("Dear Sir/Madam,", L + 10, introTop + 16);
-    doc.text(
-      "With reference to your enquiry we are pleased to offer you as under:",
-      L + 10,
-      introTop + 30
-    );
+// Intro strip - single top line
+const introTop = subTop + subH + gap;
+doc.line(L, introTop, R, introTop);
 
-    // Table starts after intro block
-    afterHeaderY = introTop + introH;
+doc.text(
+  "Dear Sir/Madam,",
+  L + 10,
+  introTop + qs(16)
+);
+
+doc.text(
+  "With reference to your enquiry we are pleased to offer you as under:",
+  L + 10,
+  introTop + qs(30)
+);
+
+// Table starts after intro block
+afterHeaderY = introTop + introH;
   } else {
     // Mahabir Hardware Stores
     doc.setFont("courier", "bold");
@@ -9638,11 +9694,13 @@ if (!gstBreakdown) {
     styles: {
   font: tableFont,
   fontSize:
-    firm === "HVF Agency"
+    firm === "HVF Agency" ||
+    firm === "Victor Engineering"
       ? qs(10)
       : 10,
   cellPadding:
-    firm === "HVF Agency"
+    firm === "HVF Agency" ||
+    firm === "Victor Engineering"
       ? qs(6)
       : 6,
   overflow: "linebreak",
@@ -9699,11 +9757,13 @@ if (!gstBreakdown) {
     styles: {
   font: tableFont,
   fontSize:
-    firm === "HVF Agency"
+    firm === "HVF Agency" ||
+    firm === "Victor Engineering"
       ? qs(10)
       : 10,
   cellPadding:
-    firm === "HVF Agency"
+    firm === "HVF Agency" ||
+    firm === "Victor Engineering"
       ? qs(6)
       : 6,
   overflow: "linebreak",
@@ -9734,15 +9794,25 @@ const at = doc.lastAutoTable || null;
 const totalsRightX = R - 10;
 let totalsY =
   (at?.finalY ?? afterHeaderY) +
-  (firm === "HVF Agency" ? qs(18) : 18);
+  (
+    firm === "HVF Agency" ||
+    firm === "Victor Engineering"
+      ? qs(18)
+      : 18
+  );
 
 if (firm === "Victor Engineering") {
-    // Just the text (no extra separator line)
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(12);
-    doc.text(`Total = Rs ${inr(cartSubtotal)}`, totalsRightX, totalsY, {
+  // Just the text (no extra separator line)
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(qs(12));
+  doc.text(
+    `Total: Rs ${inr(cartSubtotal)}`,
+    totalsRightX,
+    totalsY,
+    {
       align: "right",
-    });
+    }
+  );
   } else {
     // HVF & Mahabir keep ₹ style
     try {
@@ -9771,7 +9841,12 @@ if (firm === "Victor Engineering") {
 // -------------------------------
 let ty =
   totalsY +
-  (firm === "HVF Agency" ? qs(28) : 28);
+  (
+    firm === "HVF Agency" ||
+    firm === "Victor Engineering"
+      ? qs(28)
+      : 28
+  );
 
 // Keep the old 60% visual anchor only when
 // the quotation does not need adaptive shrinking.
@@ -9788,61 +9863,138 @@ if (
 
     if (firm === "Internal") {
     // Internal: no Terms & Conditions or Bank section
-  } else if (firm === "Victor Engineering") {
-    // Keep TERMS box, BANK as text only (no rectangle)
-    const termsH = 110;
+ } else if (firm === "Victor Engineering") {
+  // Victor Engineering — 3-column footer:
+  // Terms on left, Bank in middle, Stamp/Signature space on right
 
-    // TERMS rectangle (kept)
-    doc.setDrawColor(90);
-    doc.setLineWidth(0.9);
-    doc.rect(L, ty, contentW, termsH);
+  const footerGap = qs(12);
+  const footerTop = ty;
 
-    doc.setFont("times", "bold");
-    doc.setFontSize(11);
-    doc.text("Terms & Conditions", L + 10, ty + 16);
+  const usableFooterW =
+    contentW - footerGap * 2;
 
-    doc.setFont("times", "normal");
-    doc.setFontSize(10);
+  const termsW = usableFooterW * 0.46;
+  const bankW = usableFooterW * 0.31;
+  const signW =
+    usableFooterW - termsW - bankW;
+
+  const termsX = L;
+  const bankX =
+    termsX + termsW + footerGap;
+  const signX =
+    bankX + bankW + footerGap;
+
+  // --------------------------------
+  // LEFT — TERMS & CONDITIONS
+  // --------------------------------
+  doc.setFont("times", "bold");
+  doc.setFontSize(qs(10));
+
+  doc.text(
+    "Terms & Conditions",
+    termsX,
+    footerTop
+  );
+
+  doc.setFont("times", "normal");
+  doc.setFontSize(qs(8.5));
+
+  const termsLines = [
+    "1. Price will be including GST % as applicable.",
+    "2. This Performa Invoice is valid for 15 days only.",
+    "3. Delivery ex-stock/2 weeks.",
+    "4. Goods once sold cannot be taken back.",
+  ];
+
+  let termsY = footerTop + qs(15);
+
+  termsLines.forEach((line) => {
+    const wrapped = doc.splitTextToSize(
+      line,
+      termsW
+    );
+
     doc.text(
-      [
-        "Price will be including GST % as applicable.",
-        "This Performa Invoice is valid for 15 days only.",
-        "Delivery ex-stock/2 weeks.",
-        "Goods once sold cannot be taken back.",
-      ],
-      L + 10,
-      ty + 34
+      wrapped,
+      termsX,
+      termsY
     );
 
-        // BANK section — NO rectangle (tighter + wrapped to stay inside frame)
-    const bankTop = Math.min(ty + termsH + 6, ph - margin - 90); // clamp inside page/frame bottom
+    termsY +=
+      wrapped.length * qs(10);
+  });
 
-    // Heading
-    doc.setFont("times", "bold");
-    doc.setFontSize(10);
-    doc.text("BANK DETAILS", L + 10, bankTop + 14);
+  // --------------------------------
+  // MIDDLE — BANK DETAILS
+  // --------------------------------
+  doc.setFont("times", "bold");
+  doc.setFontSize(qs(10));
 
-    // Body (smaller font + wrapped within contentW so it doesn't stick out)
-    doc.setFont("times", "normal");
-    doc.setFontSize(9);
+  doc.text(
+    "BANK DETAILS",
+    bankX,
+    footerTop
+  );
 
-    const bankLines = [
-      "M/S VICTOR ENGINEERING",
-      "Axis Bank (Moran, 785670)",
-      "Current Account",
-      "A/C No: 921020019081364",
-      "IFSC: UTIB0003701",
-    ];
+  doc.setFont("times", "normal");
+  doc.setFontSize(qs(8.5));
 
-    const bankWrapped = doc.splitTextToSize(
-      bankLines.join("\n"),
-      contentW - 20       // keep safely inside left/right frame
+  const bankLines = [
+    "M/S VICTOR ENGINEERING",
+    "Axis Bank",
+    "Moran - 785670",
+    "Current Account",
+    "A/C No: 921020019081364",
+    "IFSC: UTIB0003701",
+  ];
+
+  let bankY =
+    footerTop + qs(15);
+
+  bankLines.forEach((line) => {
+    const wrapped = doc.splitTextToSize(
+      line,
+      bankW
     );
-    doc.text(bankWrapped, L + 10, bankTop + 28);
 
-    // reset draw defaults
-    doc.setDrawColor(0);
-    doc.setLineWidth(0.5);
+    doc.text(
+      wrapped,
+      bankX,
+      bankY
+    );
+
+    bankY +=
+      wrapped.length * qs(10);
+  });
+
+  // --------------------------------
+  // RIGHT — STAMP & SIGNATURE AREA
+  // --------------------------------
+  // Keep this area intentionally open.
+
+  doc.setFont("times", "bold");
+  doc.setFontSize(qs(9));
+
+  doc.text(
+    "For Victor Engineering",
+    signX + signW / 2,
+    footerTop,
+    { align: "center" }
+  );
+
+  doc.setFont("times", "normal");
+  doc.setFontSize(qs(8));
+
+  doc.text(
+    "Stamp & Signature",
+    signX + signW / 2,
+    footerTop + qs(78),
+    { align: "center" }
+  );
+
+  // reset draw defaults
+  doc.setDrawColor(0);
+  doc.setLineWidth(0.5);
   } else {
     // HVF & Mahabir: unchanged
     const tableFontLocal =
