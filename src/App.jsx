@@ -3488,6 +3488,73 @@ const gstCalc = useMemo(() => {
       return obj;
     });
 
+// --------------------------------------------------
+// QUOTE EDITOR — CATALOG AUTOCOMPLETE
+// --------------------------------------------------
+const [quoteSuggestionRowId, setQuoteSuggestionRowId] =
+  useState(null);
+
+const [quoteSuggestionIndex, setQuoteSuggestionIndex] =
+  useState(0);
+
+// Match anywhere inside machine name OR specifications.
+// Same matching behaviour as the main catalog search.
+const getQuoteProductMatches = (text) => {
+  const q = String(text || "")
+    .trim()
+    .toLowerCase();
+
+  if (!q) return [];
+
+  return items
+    .filter((m) => {
+      const name = String(m?.name || "").toLowerCase();
+      const specs = String(m?.specs || "").toLowerCase();
+
+      return (
+        name.includes(q) ||
+        specs.includes(q)
+      );
+    })
+    .slice(0, 10);
+};
+
+// Select a catalog machine and copy its details into
+// the currently edited quotation row.
+const selectQuoteProductForRow = (
+  rowId,
+  machine
+) => {
+  if (!machine) return;
+
+  setCart((c) => {
+    const current = c[rowId];
+
+    if (!current) return c;
+
+    const machineGST = Number(machine.gst);
+
+    return {
+      ...c,
+      [rowId]: {
+        ...current,
+        name: machine.name || "",
+        specs: machine.specs || "",
+        unit: Number(machine.mrp || 0),
+        gst: Number.isFinite(machineGST)
+          ? machineGST
+          : Number.isFinite(current.gst)
+          ? current.gst
+          : 18,
+        catalogId: machine.id,
+      },
+    };
+  });
+
+  setQuoteSuggestionRowId(null);
+  setQuoteSuggestionIndex(0);
+};
+
   // Create a new editable blank line item (not in catalog)
   const addBlankRow = () => {
     const id = `custom-${Date.now()}-${Math.random()
@@ -3679,8 +3746,21 @@ useEffect(() => {
    
 
 
-const startNewQuote = () => {
-  setCart({});
+const startNewQuote = async () => {
+  const firstRowId = `custom-${Date.now()}-${Math.random()
+    .toString(36)
+    .slice(2, 6)}`;
+
+  setCart({
+    [firstRowId]: {
+      id: firstRowId,
+      name: "",
+      specs: "",
+      unit: 0,
+      qty: 1,
+    },
+  });
+
   setQHeader({
     number: "",
     date: todayStr(),
@@ -3689,10 +3769,13 @@ const startNewQuote = () => {
     phone: "",
     subject: "",
   });
-setEditingQuoteId(null);
+
+  setEditingQuoteId(null);
   setSavedOnce(false);
   setQuoteMode(true);
-  setPage("catalog");
+
+  // Open the quotation editor immediately
+  setPage("quoteEditor");
 };
 
 const goToEditor = async () => {
@@ -20610,17 +20693,158 @@ balanceAfterAdvance:
   {cartList.map((r, i) => (
     <tr key={r.id}>
       <td>{i + 1}</td>
-      <td>
+      <td style={{ position: "relative" }}>
+  {(() => {
+    const matches =
+      quoteSuggestionRowId === r.id
+        ? getQuoteProductMatches(r.name)
+        : [];
+
+    return (
+      <>
         <input
           value={r.name}
-          onChange={(e) =>
+          autoComplete="off"
+          onFocus={() => {
+            if (String(r.name || "").trim()) {
+              setQuoteSuggestionRowId(r.id);
+              setQuoteSuggestionIndex(0);
+            }
+          }}
+          onChange={(e) => {
+            const value = e.target.value;
+
             setCart((c) => ({
               ...c,
-              [r.id]: { ...r, name: e.target.value },
-            }))
-          }
+              [r.id]: {
+                ...r,
+                name: value,
+                catalogId: undefined,
+              },
+            }));
+
+            setQuoteSuggestionRowId(r.id);
+            setQuoteSuggestionIndex(0);
+          }}
+          onKeyDown={(e) => {
+            if (!matches.length) return;
+
+            if (e.key === "ArrowDown") {
+              e.preventDefault();
+
+              setQuoteSuggestionIndex((current) =>
+                Math.min(current + 1, matches.length - 1)
+              );
+            } else if (e.key === "ArrowUp") {
+              e.preventDefault();
+
+              setQuoteSuggestionIndex((current) =>
+                Math.max(current - 1, 0)
+              );
+            } else if (e.key === "Enter") {
+              e.preventDefault();
+
+              const selected =
+                matches[
+                  Math.min(
+                    quoteSuggestionIndex,
+                    matches.length - 1
+                  )
+                ];
+
+              if (selected) {
+                selectQuoteProductForRow(
+                  r.id,
+                  selected
+                );
+              }
+            } else if (e.key === "Escape") {
+              setQuoteSuggestionRowId(null);
+              setQuoteSuggestionIndex(0);
+            }
+          }}
         />
-      </td>
+
+        {quoteSuggestionRowId === r.id &&
+          matches.length > 0 && (
+            <div
+              style={{
+                position: "absolute",
+                top: "100%",
+                left: 0,
+                right: 0,
+                zIndex: 9999,
+                maxHeight: 260,
+                overflowY: "auto",
+                background: "#fff",
+                border: "1px solid #d1d5db",
+                borderRadius: 6,
+                boxShadow:
+                  "0 8px 20px rgba(0,0,0,0.15)",
+              }}
+            >
+              {matches.map((machine, matchIndex) => {
+                const active =
+                  matchIndex === quoteSuggestionIndex;
+
+                return (
+                  <div
+                    key={machine.id}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+
+                      selectQuoteProductForRow(
+                        r.id,
+                        machine
+                      );
+                    }}
+                    onMouseEnter={() =>
+                      setQuoteSuggestionIndex(
+                        matchIndex
+                      )
+                    }
+                    style={{
+                      padding: "8px 10px",
+                      cursor: "pointer",
+                      background: active
+                        ? "#eef6ff"
+                        : "#fff",
+                      borderBottom:
+                        matchIndex ===
+                        matches.length - 1
+                          ? "none"
+                          : "1px solid #eee",
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontWeight: 600,
+                        fontSize: 13,
+                      }}
+                    >
+                      {machine.name}
+                    </div>
+
+                    {machine.specs && (
+                      <div
+                        style={{
+                          fontSize: 11,
+                          color: "#6b7280",
+                          marginTop: 2,
+                        }}
+                      >
+                        {machine.specs}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+      </>
+    );
+  })()}
+</td>
       <td>
         <input
           value={r.specs}
