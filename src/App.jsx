@@ -3592,13 +3592,21 @@ function exportPDFSmart() {
 
   /* ---------- QUOTE EDITOR HEADER ---------- */
   const [qHeader, setQHeader] = useState({
-    number: "",
-    date: todayStr(),
-    customer_name: "",
-    address: "",
-    phone: "",
-    subject: "",
-  });
+  number: "",
+  date: todayStr(),
+  customer_name: "",
+  address: "",
+  phone: "",
+  subject: "",
+
+  // Per-quotation Terms & Conditions.
+  // These defaults can be edited for an individual quotation.
+  terms: [
+    "This quotation is valid for one month from the date of issue.",
+    "Delivery is subject to stock availability and may take up to 2 weeks.",
+    "Goods once sold are non-returnable and non-exchangeable.",
+  ].join("\n"),
+});
 
 
 
@@ -3762,13 +3770,20 @@ const startNewQuote = async () => {
   });
 
   setQHeader({
-    number: "",
-    date: todayStr(),
-    customer_name: "",
-    address: "",
-    phone: "",
-    subject: "",
-  });
+  number: "",
+  date: todayStr(),
+  customer_name: "",
+  address: "",
+  phone: "",
+  subject: "",
+
+  // Every NEW quotation starts with the standard terms.
+  terms: [
+    "This quotation is valid for one month from the date of issue.",
+    "Delivery is subject to stock availability and may take up to 2 weeks.",
+    "Goods once sold are non-returnable and non-exchangeable.",
+  ].join("\n"),
+});
 
   setEditingQuoteId(null);
   setSavedOnce(false);
@@ -10090,33 +10105,89 @@ if (
     doc.text("Terms & Conditions:", L, ty, { underline: true });
 
     doc.setFont(tableFontLocal, "normal");
-    doc.setFontSize(
+doc.setFontSize(
   firm === "HVF Agency" ? qs(10) : 10
 );
-    doc.text(
-      [
+
+// HVF Agency uses the editable Terms & Conditions saved
+// inside this quotation.
+// Mahabir keeps its existing standard terms.
+const quotationTerms =
+  firm === "HVF Agency"
+    ? String(
+        qHeader.terms ||
+          [
+            "This quotation is valid for one month from the date of issue.",
+            "Delivery is subject to stock availability and may take up to 2 weeks.",
+            "Goods once sold are non-returnable and non-exchangeable.",
+          ].join("\n")
+      )
+    : [
         "This quotation is valid for one month from the date of issue.",
         "Delivery is subject to stock availability and may take up to 2 weeks.",
         "Goods once sold are non-returnable and non-exchangeable.",
-        "",
-        "Yours Faithfully",
-        firm === "Mahabir Hardware Stores" ? "Mahabir Hardware Stores" : "HVF Agency",
-        firm === "Mahabir Hardware Stores" ? "—" : "9957239143 / 9954425780",
-        firm === "Mahabir Hardware Stores" ? "GST: 18ACBPA2363D1Z9" : "GST: 18AFCPC4260P1ZB",
-        "",
-      ],
-      L,
-      ty + (firm === "HVF Agency" ? qs(16) : 16)
-    );
+      ].join("\n");
 
-    doc.setFont(tableFontLocal, "bold");
-    doc.text(
-  "BANK DETAILS",
+const termsStartY =
+  ty + (firm === "HVF Agency" ? qs(16) : 16);
+
+const termsLineHeight =
+  firm === "HVF Agency" ? qs(12) : 12;
+
+// Keep each entered line separate, while also wrapping
+// long lines automatically inside the printable width.
+const printableTermsLines = quotationTerms
+  .split("\n")
+  .flatMap((line) =>
+    line.trim()
+      ? doc.splitTextToSize(line, contentW)
+      : [""]
+  );
+
+doc.text(
+  printableTermsLines,
   L,
-  ty + (firm === "HVF Agency" ? qs(120) : 120)
+  termsStartY
 );
 
-    doc.setFont(tableFontLocal, "normal");
+// Place Yours Faithfully below however many terms lines
+// are actually present.
+const faithfulY =
+  termsStartY +
+  printableTermsLines.length * termsLineHeight +
+  (firm === "HVF Agency" ? qs(10) : 10);
+
+doc.text(
+  [
+    "Yours Faithfully",
+    firm === "Mahabir Hardware Stores"
+      ? "Mahabir Hardware Stores"
+      : "HVF Agency",
+    firm === "Mahabir Hardware Stores"
+      ? "—"
+      : "9957239143 / 9954425780",
+    firm === "Mahabir Hardware Stores"
+      ? "GST: 18ACBPA2363D1Z9"
+      : "GST: 18AFCPC4260P1ZB",
+  ],
+  L,
+  faithfulY
+);
+
+// Bank details move automatically according to the
+// amount of Terms & Conditions text above.
+const bankTitleY =
+  faithfulY +
+  (firm === "HVF Agency" ? qs(62) : 62);
+
+doc.setFont(tableFontLocal, "bold");
+doc.text(
+  "BANK DETAILS",
+  L,
+  bankTitleY
+);
+
+    bankTitleY + (firm === "HVF Agency" ? qs(16) : 16)
     let bankLines = [];
     if (firm === "HVF Agency") {
       bankLines = [
@@ -20672,8 +20743,18 @@ balanceAfterAdvance:
           </div>
 
           {/* rows */}
-          <div style={{ marginTop: 12 }}>
-            <table className="qtable">
+<div
+  style={{
+    marginTop: 12,
+    overflow: "visible",
+    position: "relative",
+    zIndex: 20,
+  }}
+>
+  <table
+    className="qtable"
+    style={{ overflow: "visible" }}
+  >
               <thead>
   <tr>
     <th style={{ width: 40 }}>Sl.</th>
@@ -20693,7 +20774,16 @@ balanceAfterAdvance:
   {cartList.map((r, i) => (
     <tr key={r.id}>
       <td>{i + 1}</td>
-      <td style={{ position: "relative" }}>
+      <td
+  style={{
+    position: "relative",
+    overflow: "visible",
+    zIndex:
+      quoteSuggestionRowId === r.id
+        ? 100000
+        : "auto",
+  }}
+>
   {(() => {
     const matches =
       quoteSuggestionRowId === r.id
@@ -20768,14 +20858,15 @@ balanceAfterAdvance:
         {quoteSuggestionRowId === r.id &&
           matches.length > 0 && (
             <div
-              style={{
-                position: "absolute",
-                top: "100%",
-                left: 0,
-                right: 0,
-                zIndex: 9999,
-                maxHeight: 260,
-                overflowY: "auto",
+  style={{
+    position: "absolute",
+    top: "calc(100% + 4px)",
+    left: 0,
+    width: 420,
+    minWidth: "100%",
+    zIndex: 999999,
+    maxHeight: 260,
+    overflowY: "auto",
                 background: "#fff",
                 border: "1px solid #d1d5db",
                 borderRadius: 6,
@@ -20991,27 +21082,83 @@ balanceAfterAdvance:
 </table>
 
 {/* Action bar under table */}
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                marginTop: 12,
-              }}
-            >
-              <button onClick={addBlankRow}>+ Add Row</button>
+<div
+  style={{
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 12,
+  }}
+>
+  <button onClick={addBlankRow}>+ Add Row</button>
 
-              <div style={{ display: "flex", gap: 24 }}>
-                <div>
-                  Subtotal <b>₹{inr(cartSubtotal)}</b>
-                </div>
-                <div>
-                  Grand Total <b>₹{inr(cartSubtotal)}</b>
-                </div>
-              </div>
-            </div>
+  <div style={{ display: "flex", gap: 24 }}>
+    <div>
+      Subtotal <b>₹{inr(cartSubtotal)}</b>
+    </div>
+    <div>
+      Grand Total <b>₹{inr(cartSubtotal)}</b>
+    </div>
+  </div>
+</div>
 
-            {/* Buttons */}
+{/* Editable Terms & Conditions */}
+{firm === "HVF Agency" && (
+  <div
+    style={{
+      marginTop: 18,
+      padding: 14,
+      border: "1px solid #e5e7eb",
+      borderRadius: 8,
+      background: "#fafafa",
+    }}
+  >
+    <div
+      style={{
+        fontWeight: 700,
+        marginBottom: 8,
+      }}
+    >
+      Terms & Conditions
+    </div>
+
+    <textarea
+      value={qHeader.terms || ""}
+      onChange={(e) =>
+        setQHeader((h) => ({
+          ...h,
+          terms: e.target.value,
+        }))
+      }
+      rows={4}
+      style={{
+        width: "100%",
+        boxSizing: "border-box",
+        resize: "vertical",
+        minHeight: 92,
+        padding: 10,
+        fontFamily: "inherit",
+        fontSize: 14,
+        lineHeight: 1.45,
+        border: "1px solid #d1d5db",
+        borderRadius: 6,
+        background: "#fff",
+      }}
+    />
+
+    <div
+      style={{
+        marginTop: 6,
+        fontSize: 12,
+        color: "#6b7280",
+      }}
+    >
+      These terms apply only to this quotation.
+    </div>
+  </div>
+)}
+
+{/* Buttons */}
             <div style={{ marginTop: 14, display: "flex", gap: 8 }}>
               <button
   onClick={async () => {
