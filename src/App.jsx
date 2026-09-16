@@ -20816,6 +20816,15 @@ balanceAfterAdvance:
             setQuoteSuggestionRowId(r.id);
             setQuoteSuggestionIndex(0);
           }}
+
+onBlur={() => {
+  // Delay slightly so clicking a suggestion still works
+  // before the dropdown is closed.
+  setTimeout(() => {
+    setQuoteSuggestionRowId(null);
+    setQuoteSuggestionIndex(0);
+  }, 120);
+}}
           onKeyDown={(e) => {
             if (!matches.length) return;
 
