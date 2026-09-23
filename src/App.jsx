@@ -85,6 +85,62 @@ const todayStr = () => {
   return `${dd}/${mm}/${yyyy}`;
 };
 
+const PROJECT_QUOTE_BUNDLES = [
+  {
+    id: "ultra-pro-max-full-package",
+    name: "Ultra Pro Max Full Package",
+    description: "The saved N70 Ultra Pro Max package, ready to customize for a customer.",
+    items: [
+      { name: "N70 Ultra Pro Max", specs: "15HP CG,  Elevator,Motor", qty: 1, unit: 230000 },
+      { name: "Delta Starter", specs: "", qty: 1, unit: 30000 },
+      { name: "Elevator Switch", specs: "", qty: 1, unit: 3000 },
+      { name: "10mm/2.5mmCable & Connector", specs: "", qty: 1, unit: 22000 },
+      { name: "Installation ", specs: "", qty: 1, unit: 6500 },
+    ],
+  },
+  {
+    id: "oil-mill-full-package",
+    name: "Oil Mill Full Package",
+    description: "Based on a recent complete oil-mill quotation; every line remains editable.",
+    items: [
+      { name: "Cold press Oil Mill - 100kg/hr", specs: "With 10HP CG Motor", qty: 1, unit: 265000 },
+      { name: "Oil Filter - VF20", specs: "Vacuum type, 15-20L/hr", qty: 1, unit: 120000 },
+      { name: "Oil/Liquid/Paste Filling Machine - 100ML - 1000ML", specs: "Pneumatic type, with foot switch", qty: 1, unit: 65000 },
+      { name: "Label Pasting Machine", specs: "Semi-Automatic, Round bottles, for Oil etc.", qty: 1, unit: 52000 },
+      { name: "Bottle Capping Machine", specs: "Semi-Automatic, for Oil etc.", qty: 1, unit: 48000 },
+      { name: "Conveyer Type Batch Coder", specs: "", qty: 1, unit: 65000 },
+      { name: "Compressor (Oil Free)", specs: "", qty: 1, unit: 43000 },
+    ],
+  },
+];
+
+const PROJECT_BUNDLE_STORAGE_KEY = "hvf.projectQuoteBundles";
+const readProjectBundleCache = () => {
+  try {
+    const cached = JSON.parse(localStorage.getItem(PROJECT_BUNDLE_STORAGE_KEY) || "[]");
+    if (!Array.isArray(cached)) return PROJECT_QUOTE_BUNDLES;
+    const savedById = new Map(cached.map((bundle) => [bundle.id, bundle]));
+    return PROJECT_QUOTE_BUNDLES.map((bundle) => {
+      const saved = savedById.get(bundle.id);
+      return saved && Array.isArray(saved.items)
+        ? { ...bundle, ...saved, items: saved.items }
+        : bundle;
+    });
+  } catch {
+    return PROJECT_QUOTE_BUNDLES;
+  }
+};
+
+const mergeProjectBundleRows = (current, rows) => {
+  const savedById = new Map((rows || []).map((bundle) => [bundle.id, bundle]));
+  return current.map((bundle) => {
+    const saved = savedById.get(bundle.id);
+    return saved && Array.isArray(saved.items)
+      ? { ...bundle, ...saved, items: saved.items }
+      : bundle;
+  });
+};
+
 // ---- helpers for editable quotation date ----
 // Convert stored "dd/mm/yyyy" -> "yyyy-mm-dd" for <input type="date">
 const headerDateToInput = (d) => {
@@ -2012,7 +2068,12 @@ const __boot = (() => {
 })();
 
 const [quoteMode, setQuoteMode] = useState(() => !!__boot.quoteMode); // true = show qty steppers on catalog
-const [page, setPage] = useState(() => __boot.page || "catalog"); // "catalog" | "quoteEditor" | "savedDetailed" | "payroll"
+const [page, setPage] = useState(() => __boot.page || "catalog"); // catalog | projects | quoteEditor | savedDetailed | payroll
+const [projectBundles, setProjectBundles] = useState(readProjectBundleCache);
+const [projectBundleDraft, setProjectBundleDraft] = useState(null);
+const [projectBundleSaveError, setProjectBundleSaveError] = useState("");
+const [projectBundleSaving, setProjectBundleSaving] = useState(false);
+const [openProjectMenuId, setOpenProjectMenuId] = useState(null);
 
 const [payrollTab, setPayrollTab] = useState("contractual"); // contractual | non_contractual
 const [payrollShowAll, setPayrollShowAll] = useState(false);
@@ -2529,6 +2590,12 @@ const [employeeForm, setEmployeeForm] = useState({
   designation: "",
   branch: "",
 });
+const employeeBranchOptions = [
+  ...new Set([
+    ...payrollEmployees.map((employee) => String(employee.branch || "").trim()),
+    String(employeeForm.branch || "").trim(),
+  ].filter(Boolean)),
+].sort((a, b) => a.localeCompare(b));
 
 const employeeImportInputRef = useRef(null);
 const [showEmployeeImport, setShowEmployeeImport] = useState(false);
@@ -2562,6 +2629,7 @@ const [attendanceHistory, setAttendanceHistory] = useState(() => {
   mrp: "",
   sell_price: "",
   cost_price: "",
+  is_hidden: false,
   specs: "",
   imageFile: null,
 });
@@ -2575,6 +2643,7 @@ const [editForm, setEditForm] = useState({
   mrp: "",
   sell_price: "",
   cost_price: "",
+  is_hidden: false,
   specs: "",
   imageFile: null,
 });
@@ -2716,38 +2785,64 @@ const magicLogin = async () => {
 };
 
   /* ---------- LOAD DATA ---------- */
+  const withSupabaseReadRetry = async (makeQuery, onRetry) => {
+    let lastError;
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const controller = new AbortController();
+      let timedOut = false;
+      const timeoutId = setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+      }, 12000);
+
+      try {
+        const { data, error } = await makeQuery(controller.signal);
+        if (error) throw error;
+        return data;
+      } catch (error) {
+        lastError = timedOut
+          ? new Error("Supabase request timed out after 12 seconds.")
+          : error;
+        const message = lastError?.message || String(lastError);
+        const isTransientFailure =
+          /network|load failed|failed to fetch|connection.*lost|abort|timed out/i.test(
+            message
+          );
+
+        if (attempt === 0 && isTransientFailure) {
+          onRetry?.();
+          await new Promise((resolve) => setTimeout(resolve, 700));
+          continue;
+        }
+
+        throw lastError;
+      } finally {
+        clearTimeout(timeoutId);
+      }
+    }
+
+    throw lastError || new Error("Supabase request failed.");
+  };
+
   const loadMachines = async () => {
     setLoading(true);
 
     try {
-      const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(
-          () =>
-            reject(
-              new Error(
-                "Supabase request timed out. Please check internet or Supabase connection."
-              )
-            ),
-          12000
-        )
+      const data = await withSupabaseReadRetry(
+        (signal) =>
+          supabase
+            .from("machines")
+            .select("*")
+            .order("created_at", { ascending: false })
+            .abortSignal(signal),
+        // Keep transient failures out of the red error slot; the loading state
+        // remains visible while the bounded retry runs.
+        () => setMsg("")
       );
 
-      const queryPromise = supabase
-        .from("machines")
-        .select("*")
-        .order("created_at", { ascending: false });
-
-      const { data, error } = await Promise.race([
-        queryPromise,
-        timeoutPromise,
-      ]);
-
-      if (error) {
-        setMsg("Supabase error: " + error.message);
-        setItems([]);
-      } else {
-        setItems(data || []);
-      }
+      setItems(data || []);
+      setMsg("");
     } catch (error) {
       console.error("Catalog loading failed:", error);
       setMsg(error.message || "Catalog loading failed.");
@@ -2759,19 +2854,21 @@ const magicLogin = async () => {
 
   const loadCategories = async () => {
     try {
-      const { data, error } = await supabase
-        .from("categories")
-        .select("name")
-        .order("name");
+      const data = await withSupabaseReadRetry(
+        (signal) =>
+          supabase
+            .from("categories")
+            .select("name")
+            .order("name")
+            .abortSignal(signal),
+        () => setCategories(["Service"])
+      );
 
-      if (error) {
-        console.error("Category loading failed:", error);
-        return;
-      }
-
-      setCategories((data || []).map((r) => r.name));
+      const savedCategories = (data || []).map((r) => r.name).filter(Boolean);
+      setCategories([...new Set([...savedCategories, "Service"])].sort());
     } catch (error) {
       console.error("Category loading failed:", error);
+      setCategories((current) => [...new Set([...current, "Service"])].sort());
     }
   };
 
@@ -2782,8 +2879,9 @@ const magicLogin = async () => {
 
   /* ---------- SEARCH / FILTER ---------- */
   const [search, setSearch] = useState("");
+  const [showHiddenProducts, setShowHiddenProducts] = useState(false);
   const filtered = useMemo(() => {
-    let arr = items;
+    let arr = items.filter((m) => !m.is_hidden || (isAdmin && showHiddenProducts));
     if (category !== "All") {
       arr = arr.filter(
         (m) => (m.category || "").toLowerCase() === category.toLowerCase()
@@ -2798,7 +2896,7 @@ const magicLogin = async () => {
       );
     }
     return arr;
-  }, [items, category, search]);
+  }, [items, category, search, isAdmin, showHiddenProducts]);
 
   // Center the active category chip on phones (on change, first load, and resize)
 const centerActiveChip = () => {
@@ -2849,7 +2947,7 @@ useEffect(() => {
     return alert("Name, Category and MRP are required.");
   }
 
-  if (!editingProductId && !form.imageFile) {
+  if (!editingProductId && !form.imageFile && !form.is_hidden) {
     return alert("Image is required for new product.");
   }
 
@@ -2892,6 +2990,7 @@ useEffect(() => {
       mrp: Number(form.mrp),
       sell_price: form.sell_price ? Number(form.sell_price) : null,
       cost_price: form.cost_price ? Number(form.cost_price) : null,
+      is_hidden: Boolean(form.is_hidden),
       specs: form.specs || "",
       image_url,
     };
@@ -2904,11 +3003,70 @@ useEffect(() => {
 
       if (updErr) throw new Error("UPDATE: " + updErr.message);
     } else {
-      const { error: insErr } = await supabase
-        .from("machines")
-        .insert(payload);
+      const insertMachine = async () => {
+        const { error } = await supabase.from("machines").insert(payload);
+        if (error) throw error;
+      };
 
-      if (insErr) throw new Error("INSERT: " + insErr.message);
+      try {
+        await insertMachine();
+      } catch (insertError) {
+        const insertMessage = insertError?.message || String(insertError);
+        const isNetworkFailure =
+          insertError instanceof TypeError ||
+          /load failed|failed to fetch|networkerror|network request failed/i.test(
+            insertMessage
+          );
+
+        if (!payload.is_hidden || !isNetworkFailure) {
+          throw new Error("INSERT: " + insertMessage);
+        }
+
+        // A lost response can mean the database committed the first insert.
+        // Check for this exact hidden item before retrying to avoid duplicates.
+        const isAlreadySaved = async () => {
+          let query = supabase
+            .from("machines")
+            .select("id")
+            .eq("name", payload.name)
+            .eq("category", payload.category)
+            .eq("mrp", payload.mrp)
+            .eq("is_hidden", true);
+
+          query = payload.sell_price == null
+            ? query.is("sell_price", null)
+            : query.eq("sell_price", payload.sell_price);
+
+          const { data, error } = await query.limit(1);
+          if (error) throw error;
+          return Boolean(data?.length);
+        };
+
+        const verifyAfterFailure = async (cause) => {
+          try {
+            return await isAlreadySaved();
+          } catch (verifyError) {
+            throw new Error(
+              `INSERT: ${cause?.message || String(cause)}. Could not verify whether it saved: ${verifyError?.message || String(verifyError)}. Please check the hidden products list before trying again.`
+            );
+          }
+        };
+
+        const savedAfterFirstFailure = await verifyAfterFailure(insertError);
+        if (!savedAfterFirstFailure) {
+          await new Promise((resolve) => setTimeout(resolve, 700));
+          try {
+            await insertMachine();
+          } catch (retryError) {
+            const savedAfterRetryFailure = await verifyAfterFailure(retryError);
+            if (!savedAfterRetryFailure) {
+              throw new Error(
+                `INSERT: The save request failed twice. ${retryError?.message || String(retryError)}. No matching hidden product was found; please retry after checking the connection.`
+              );
+            }
+          }
+        }
+      }
     }
 
     setForm({
@@ -2917,6 +3075,7 @@ useEffect(() => {
       mrp: "",
       sell_price: "",
       cost_price: "",
+      is_hidden: false,
       specs: "",
       imageFile: null,
     });
@@ -2981,6 +3140,7 @@ const onEditSave = async (e) => {
       mrp: Number(editForm.mrp),
       sell_price: editForm.sell_price ? Number(editForm.sell_price) : null,
       cost_price: editForm.cost_price ? Number(editForm.cost_price) : null,
+      is_hidden: Boolean(editForm.is_hidden),
       specs: editForm.specs || "",
       image_url,
     };
@@ -3000,6 +3160,7 @@ const onEditSave = async (e) => {
       mrp: "",
       sell_price: "",
       cost_price: "",
+      is_hidden: false,
       specs: "",
       imageFile: null,
     });
@@ -3043,6 +3204,7 @@ const onDeleteProduct = async () => {
       mrp: "",
       sell_price: "",
       cost_price: "",
+      is_hidden: false,
       specs: "",
       imageFile: null,
     });
@@ -3064,10 +3226,11 @@ const exportCatalogPdf = async () => {
 
   const selectedCategory = catalogExportCategories[0];
 
-  const exportItems =
+  const exportItems = (
     selectedCategory === "ALL"
       ? items
-      : items.filter((m) => m.category === selectedCategory);
+      : items.filter((m) => m.category === selectedCategory)
+  ).filter((m) => !m.is_hidden);
 
   if (!exportItems.length) {
     alert("No products found.");
@@ -3243,10 +3406,11 @@ doc.setTextColor(110, 110, 110);
 
   const selectedCategory = catalogExportCategories[0];
 
-  const exportItems =
+  const exportItems = (
     selectedCategory === "ALL"
       ? items
-      : items.filter((m) => m.category === selectedCategory);
+      : items.filter((m) => m.category === selectedCategory)
+  ).filter((m) => !m.is_hidden);
 
   if (!exportItems.length) {
     alert("No products found for selected category.");
@@ -3653,6 +3817,34 @@ useEffect(() => {
   saveQuoteState({ cart, qHeader, page, quoteMode, firm });
 }, [hydrated, cart, qHeader, page, quoteMode, firm]);
 
+useEffect(() => {
+  let active = true;
+  const loadSavedProjectBundles = async () => {
+    try {
+      const { data, error } = await supabase
+        .from("quote_project_bundles")
+        .select("id, name, description, items");
+      if (error) throw error;
+      if (!active || !Array.isArray(data) || data.length === 0) return;
+
+      setProjectBundles((current) => {
+        const merged = mergeProjectBundleRows(current, data);
+        try {
+          localStorage.setItem(PROJECT_BUNDLE_STORAGE_KEY, JSON.stringify(merged));
+        } catch (cacheError) {
+          console.warn("Project bundle cache could not be saved:", cacheError);
+        }
+        return merged;
+      });
+    } catch (error) {
+      console.error("Saved project bundles could not be loaded:", error);
+    }
+  };
+
+  loadSavedProjectBundles();
+  return () => { active = false; };
+}, []);
+
 // When the app lands on the Saved Detailed page (e.g. after a refresh),
 // fetch the data and reset the firm filter to All.
 // Also load delivered rows from Supabase so all devices stay in sync.
@@ -3793,6 +3985,206 @@ const startNewQuote = async () => {
   setPage("quoteEditor");
 };
 
+const startProjectQuote = (bundle) => {
+  const nextCart = Object.fromEntries(
+    bundle.items.map((item, index) => {
+      const id = `project-${bundle.id}-${Date.now()}-${index}`;
+      return [id, { ...item, id }];
+    })
+  );
+
+  setCart(nextCart);
+  setQHeader({
+    number: "",
+    date: todayStr(),
+    customer_name: "",
+    address: "",
+    phone: "",
+    subject: "",
+    terms: [
+      "This quotation is valid for one month from the date of issue.",
+      "Delivery is subject to stock availability and may take up to 2 weeks.",
+      "Goods once sold are non-returnable and non-exchangeable.",
+    ].join("\n"),
+  });
+  setEditingQuoteId(null);
+  setSavedOnce(false);
+  setQuoteMode(true);
+  setPage("quoteEditor");
+};
+
+const openProjectBundleEditor = (bundle) => {
+  if (!isAdmin || !session) {
+    alert("Sign in as an administrator to edit shared project bundles.");
+    setOpenProjectMenuId(null);
+    return;
+  }
+
+  const draftId = Date.now();
+  setProjectBundleSaveError("");
+  setOpenProjectMenuId(null);
+  setProjectBundleDraft({
+    id: bundle.id,
+    name: bundle.name,
+    description: bundle.description || "",
+    items: bundle.items.map((item, index) => {
+      const match = item.catalogId
+        ? items.find((product) => String(product.id) === String(item.catalogId))
+        : items.find(
+            (product) =>
+              String(product.name || "").trim().toLowerCase() ===
+              String(item.name || "").trim().toLowerCase()
+          );
+      return {
+        ...item,
+        _draftId: `${draftId}-${index}`,
+        catalogId: item.catalogId || match?.id || null,
+      };
+    }),
+  });
+};
+
+const isTransientProjectWriteError = (error) => {
+  const message = String(error?.message || error || "").toLowerCase();
+  return message.includes("load failed") ||
+    message.includes("failed to fetch") ||
+    message.includes("networkerror") ||
+    message.includes("network connection was lost");
+};
+
+// These writes replace rows by stable IDs, so one retry cannot create duplicates.
+const retryProjectWriteOnce = async (write) => {
+  try {
+    return await write();
+  } catch (firstError) {
+    if (!isTransientProjectWriteError(firstError)) throw firstError;
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    return write();
+  }
+};
+
+const saveProjectBundle = async () => {
+  if (!projectBundleDraft || projectBundleSaving) return;
+  if (!isAdmin || !session) {
+    setProjectBundleSaveError("Sign in as an administrator before saving bundle changes.");
+    return;
+  }
+
+  const name = String(projectBundleDraft.name || "").trim();
+  const description = String(projectBundleDraft.description || "").trim();
+  const itemsToSave = (projectBundleDraft.items || []).map((item) => {
+    const matchingProduct = item.catalogId
+      ? items.find((product) => String(product.id) === String(item.catalogId))
+      : items.find(
+          (product) =>
+            String(product.name || "").trim().toLowerCase() ===
+            String(item.name || "").trim().toLowerCase()
+        );
+    return {
+      catalogId: item.catalogId || matchingProduct?.id || null,
+      name: String(item.name || "").trim(),
+      specs: String(item.specs || "").trim(),
+      qty: Number(item.qty),
+      unit: Number(item.unit),
+    };
+  });
+
+  if (!name) {
+    setProjectBundleSaveError("Enter a name for this project bundle.");
+    return;
+  }
+  if (
+    itemsToSave.length === 0 ||
+    itemsToSave.some(
+      (item) => !item.name || !Number.isFinite(item.qty) || item.qty < 1 ||
+        !Number.isFinite(item.unit) || item.unit < 0
+    )
+  ) {
+    setProjectBundleSaveError("Each item needs a name, quantity of at least 1, and a valid price.");
+    return;
+  }
+
+  setProjectBundleSaving(true);
+  setProjectBundleSaveError("");
+  let savedLocallyOnly = false;
+  try {
+    const savedBundle = {
+      id: projectBundleDraft.id,
+      name,
+      description,
+      items: itemsToSave,
+      updated_at: new Date().toISOString(),
+    };
+    let storedRow = null;
+    try {
+      storedRow = await retryProjectWriteOnce(async () => {
+        const { data, error } = await supabase
+          .from("quote_project_bundles")
+          .upsert(savedBundle, { onConflict: "id" })
+          .select("id")
+          .maybeSingle();
+        if (error) throw error;
+        return data;
+      });
+    } catch (bundleError) {
+      if (/quote_project_bundles|schema cache|does not exist/i.test(bundleError?.message || "")) {
+        savedLocallyOnly = true;
+      } else {
+        throw bundleError;
+      }
+    }
+    if (!savedLocallyOnly && !storedRow) throw new Error("The bundle could not be confirmed as saved.");
+
+    const nextBundles = projectBundles.map((bundle) =>
+      bundle.id === savedBundle.id ? { ...bundle, ...savedBundle } : bundle
+    );
+    setProjectBundles(nextBundles);
+    try {
+      localStorage.setItem(PROJECT_BUNDLE_STORAGE_KEY, JSON.stringify(nextBundles));
+    } catch (cacheError) {
+      console.warn("Project bundle cache could not be saved:", cacheError);
+    }
+
+    for (const item of itemsToSave.filter((row) => row.catalogId)) {
+      const updatedProduct = await retryProjectWriteOnce(async () => {
+        const { data, error } = await supabase
+          .from("machines")
+          .update({ name: item.name, specs: item.specs, mrp: item.unit })
+          .eq("id", item.catalogId)
+          .select("id")
+          .maybeSingle();
+        if (error) throw error;
+        return data;
+      }).catch((productError) => {
+        throw new Error(`The bundle is saved, but ${item.name} could not be updated in the catalog: ${productError?.message || productError}`);
+      });
+      if (!updatedProduct) {
+        throw new Error(`The bundle is saved, but ${item.name} was not updated in the catalog. Check admin access and retry.`);
+      }
+      setItems((current) =>
+        current.map((product) =>
+          String(product.id) === String(item.catalogId)
+            ? { ...product, name: item.name, specs: item.specs, mrp: item.unit }
+            : product
+        )
+      );
+    }
+
+    setProjectBundleDraft(null);
+    setProjectBundleSaveError("");
+    alert(
+      savedLocallyOnly
+        ? "Project bundle saved in this browser. Matching catalog products were updated; apply the Supabase migration to sync this bundle across devices."
+        : "Project bundle saved. Matching catalog products were updated too."
+    );
+  } catch (error) {
+    console.error("Project bundle save failed:", error);
+    setProjectBundleSaveError(error?.message || "Could not save the project bundle.");
+  } finally {
+    setProjectBundleSaving(false);
+  }
+};
+
 const goToEditor = async () => {
   if (cartList.length === 0) {
     alert("Add at least 1 item to the quote.");
@@ -3900,16 +4292,20 @@ const getAttendanceRegisterRange = () => {
   const year = selectedDate.getFullYear();
   const month = selectedDate.getMonth();
 
+  // Preserve local calendar boundaries when formatting date-only keys.
+  const localDateKey = (date) =>
+    `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+
   if (attendanceTab === "contractual") {
     return {
-      from: new Date(year, month, 1).toISOString().slice(0, 10),
-      to: new Date(year, month + 1, 0).toISOString().slice(0, 10),
+      from: localDateKey(new Date(year, month, 1)),
+      to: localDateKey(new Date(year, month + 1, 0)),
     };
   }
 
   return {
-    from: new Date(year, month - 1, 27).toISOString().slice(0, 10),
-    to: new Date(year, month, 26).toISOString().slice(0, 10),
+    from: localDateKey(new Date(year, month - 1, 27)),
+    to: localDateKey(new Date(year, month, 26)),
   };
 };
 
@@ -11165,12 +11561,33 @@ button.mini.primary{
 />
   </div>
 
-  {page === "catalog" && (
+  {(page === "catalog" || page === "projects") && (
     <div style={{ textAlign: "center", marginBottom: 18 }}>
-      <h1 style={{ margin: 0 }}>HVF Machinery Catalog</h1>
+      <h1 style={{ margin: 0 }}>{page === "projects" ? "Quotation Projects" : "HVF Machinery Catalog"}</h1>
       <p style={{ color: "#777", marginTop: 6 }}>
         by HVF Agency, Moranhat, Assam
       </p>
+
+      {quoteMode && (
+        <div style={{ display: "inline-flex", gap: 8, marginTop: 8, padding: 4, borderRadius: 10, background: "#f1f5f9" }}>
+          <button
+            type="button"
+            className={page === "catalog" ? "btn primary" : "btn"}
+            onClick={() => setPage("catalog")}
+            aria-pressed={page === "catalog"}
+          >
+            Catalog
+          </button>
+          <button
+            type="button"
+            className={page === "projects" ? "btn primary" : "btn"}
+            onClick={() => setPage("projects")}
+            aria-pressed={page === "projects"}
+          >
+            Projects
+          </button>
+        </div>
+      )}
 
       {/* inline admin two-step box */}
 {showLoginBox && (
@@ -11419,14 +11836,37 @@ button.mini.primary{
             </label>
 
             <label>
-              <div style={{ fontSize: 12, color: "#666" }}>Image *</div>
+              <div style={{ fontSize: 12, color: "#666" }}>Image{form.is_hidden ? " (optional)" : " *"}</div>
               <input
                 type="file"
                 accept="image/*"
                 onChange={onChange}
-                required={!editingProductId}
+                required={!editingProductId && !form.is_hidden}
               />
             </label>
+
+            <label style={{ gridColumn: "1 / -1", display: "flex", alignItems: "center", gap: 8 }}>
+              <input
+                type="checkbox"
+                style={{ width: "auto", flex: "0 0 auto", margin: 0 }}
+                name="is_hidden"
+                checked={form.is_hidden}
+                onChange={(e) => setForm((f) => ({ ...f, is_hidden: e.target.checked }))}
+              />
+              <span>Hide from public catalog (keep available for quotations)</span>
+            </label>
+
+            {isAdmin && (
+              <label style={{ gridColumn: "1 / -1", display: "flex", alignItems: "center", gap: 8 }}>
+                <input
+                  type="checkbox"
+                  style={{ width: "auto", flex: "0 0 auto", margin: 0 }}
+                  checked={showHiddenProducts}
+                  onChange={(e) => setShowHiddenProducts(e.target.checked)}
+                />
+                <span>Show hidden products below (admin only)</span>
+              </label>
+            )}
 
             <label style={{ gridColumn: "1 / -1" }}>
               <div style={{ fontSize: 12, color: "#666" }}>Specs / description</div>
@@ -11533,6 +11973,16 @@ button.mini.primary{
       />
     </label>
 
+    <label style={{ gridColumn: "1 / -1", display: "flex", alignItems: "center", gap: 8 }}>
+      <input
+        type="checkbox"
+        style={{ width: "auto", flex: "0 0 auto", margin: 0 }}
+        checked={editForm.is_hidden}
+        onChange={(e) => setEditForm((f) => ({ ...f, is_hidden: e.target.checked }))}
+      />
+      <span>Hide from public catalog (keep available for quotations)</span>
+    </label>
+
     <label style={{ gridColumn: "1 / -1" }}>
       <div style={{ fontSize: 12, color: "#666" }}>Specs / description</div>
       <input
@@ -11560,6 +12010,7 @@ button.mini.primary{
             mrp: "",
             sell_price: "",
             cost_price: "",
+            is_hidden: false,
             specs: "",
             imageFile: null,
           });
@@ -14111,14 +14562,18 @@ status: "active",
 
       <label>
         <div style={{ fontSize: 12, color: "#666" }}>Branch</div>
-        <input
+        <select
           name="branch"
           value={employeeForm.branch}
           onChange={(e) =>
             setEmployeeForm((f) => ({ ...f, branch: e.target.value }))
           }
-          placeholder="Moranhat / Guwahati / Tinsukia"
-        />
+        >
+          <option value="">Select branch</option>
+          {employeeBranchOptions.map((branch) => (
+            <option key={branch} value={branch}>{branch}</option>
+          ))}
+        </select>
       </label>
 
 
@@ -20449,6 +20904,22 @@ balanceAfterAdvance:
                         onError={(e) => (e.currentTarget.style.display = "none")}
                       />
                     )}
+                    {!m.image_url && m.is_hidden && (
+                      <img
+                        src="/hvf-logo.png"
+                        alt="HVF Agency"
+                        loading="lazy"
+                        style={{
+                          maxWidth: "72%",
+                          maxHeight: "72%",
+                          width: "auto",
+                          height: "auto",
+                          objectFit: "contain",
+                          display: "block",
+                          backgroundColor: "#fff",
+                        }}
+                      />
+                    )}
                   </div>
 
                   <div className="card-body" style={{ display: "flex", flexDirection: "column" }}>
@@ -20495,6 +20966,7 @@ balanceAfterAdvance:
   mrp: m.mrp || "",
   sell_price: m.sell_price || "",
   cost_price: m.cost_price || "",
+  is_hidden: Boolean(m.is_hidden),
   specs: m.specs || "",
   imageFile: null,
 });
@@ -20542,6 +21014,187 @@ balanceAfterAdvance:
               {msg}
             </p>
           )}
+        </div>
+      )}
+
+      {/* PAGE: QUOTATION PROJECT BUNDLES */}
+      {page === "projects" && quoteMode && (
+        <main style={{ maxWidth: 1100, margin: "0 auto 40px", padding: "0 12px" }}>
+          <div style={{ marginBottom: 18 }}>
+            <p style={{ color: "#64748b", margin: 0 }}>
+              Start with a ready-made package, then adjust the quotation for your customer.
+            </p>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 340px), 1fr))", gap: 18 }}>
+            {projectBundles.map((bundle) => {
+              const total = bundle.items.reduce((sum, item) => sum + Number(item.qty || 0) * Number(item.unit || 0), 0);
+              return (
+                <article
+                  key={bundle.id}
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    border: "1px solid #dbe3ed",
+                    borderRadius: 16,
+                    background: "#fff",
+                    boxShadow: "0 8px 24px rgba(15, 23, 42, 0.06)",
+                    overflow: "hidden",
+                  }}
+                >
+                  <div style={{ padding: "20px 22px 16px", background: "linear-gradient(135deg, #f8fafc, #eef4fb)", borderBottom: "1px solid #e5eaf1" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+                      <div style={{ color: "#2563eb", fontSize: 12, fontWeight: 800, letterSpacing: ".08em", textTransform: "uppercase" }}>
+                        Ready-made quote
+                      </div>
+                      {isAdmin && (
+                        <div style={{ position: "relative", flex: "0 0 auto" }}>
+                          <button
+                            type="button"
+                            aria-label={`More options for ${bundle.name}`}
+                            aria-expanded={openProjectMenuId === bundle.id}
+                            onClick={() => setOpenProjectMenuId((current) => current === bundle.id ? null : bundle.id)}
+                            style={{ width: 34, height: 34, borderRadius: "50%", border: "1px solid #d5deea", background: "#fff", color: "#334155", fontSize: 22, lineHeight: 1, cursor: "pointer" }}
+                          >
+                            ⋯
+                          </button>
+                          {openProjectMenuId === bundle.id && (
+                            <div style={{ position: "absolute", zIndex: 20, top: 40, right: 0, minWidth: 150, padding: 5, border: "1px solid #dbe3ed", borderRadius: 10, background: "#fff", boxShadow: "0 10px 24px rgba(15,23,42,.14)" }}>
+                              <button
+                                type="button"
+                                onClick={() => openProjectBundleEditor(bundle)}
+                                style={{ width: "100%", padding: "9px 10px", textAlign: "left", border: 0, borderRadius: 7, background: "#fff", cursor: "pointer", color: "#1e293b", fontWeight: 650 }}
+                              >
+                                Edit bundle
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    <h2 style={{ margin: "8px 0 6px", color: "#172033", fontSize: 21 }}>{bundle.name}</h2>
+                    <p style={{ color: "#64748b", margin: 0, lineHeight: 1.5 }}>{bundle.description}</p>
+                  </div>
+                  <div style={{ padding: "16px 22px", flex: 1 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, marginBottom: 12 }}>
+                      <span style={{ color: "#64748b", fontSize: 13 }}>{bundle.items.length} items</span>
+                      <strong style={{ fontSize: 20, color: "#172033" }}>₹{inr(total)}</strong>
+                    </div>
+                    <ul style={{ margin: 0, paddingLeft: 19, color: "#475569", lineHeight: 1.8 }}>
+                      {bundle.items.map((item, index) => (
+                        <li key={`${bundle.id}-${index}`}>
+                          {item.name.trim()}
+                          {item.specs ? ` — ${item.specs}` : ""}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                  <div style={{ padding: "0 22px 20px" }}>
+                    <button
+                      type="button"
+                      className="btn primary"
+                      onClick={() => startProjectQuote(bundle)}
+                      style={{ width: "100%", padding: "11px 16px", fontWeight: 800 }}
+                    >
+                      Proceed to quotation
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </main>
+      )}
+
+      {projectBundleDraft && (
+        <div
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !projectBundleSaving) setProjectBundleDraft(null);
+          }}
+          style={{ position: "fixed", inset: 0, zIndex: 6000, display: "flex", alignItems: "center", justifyContent: "center", padding: 18, background: "rgba(15, 23, 42, .5)" }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="project-bundle-editor-title"
+            style={{ width: "min(100%, 980px)", maxHeight: "92vh", display: "flex", flexDirection: "column", borderRadius: 16, background: "#fff", boxShadow: "0 24px 70px rgba(15,23,42,.25)", overflow: "hidden" }}
+          >
+            <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "18px 22px", borderBottom: "1px solid #e5eaf1" }}>
+              <div>
+                <h2 id="project-bundle-editor-title" style={{ margin: 0, color: "#172033", fontSize: 21 }}>Edit project bundle</h2>
+                <p style={{ margin: "5px 0 0", color: "#64748b", fontSize: 13 }}>Changes are saved to this bundle; catalog-linked products are updated too.</p>
+              </div>
+              <button type="button" aria-label="Close editor" disabled={projectBundleSaving} onClick={() => setProjectBundleDraft(null)} style={{ width: 36, height: 36, borderRadius: "50%", border: "1px solid #dbe3ed", background: "#fff", cursor: "pointer", fontSize: 20 }}>×</button>
+            </header>
+
+            <div style={{ padding: "18px 22px", overflow: "auto" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "minmax(200px, 1fr) minmax(240px, 1.5fr)", gap: 12, marginBottom: 18 }}>
+                <label style={{ display: "grid", gap: 5, color: "#475569", fontSize: 13, fontWeight: 650 }}>
+                  Bundle name
+                  <input value={projectBundleDraft.name} onChange={(event) => setProjectBundleDraft((draft) => ({ ...draft, name: event.target.value }))} />
+                </label>
+                <label style={{ display: "grid", gap: 5, color: "#475569", fontSize: 13, fontWeight: 650 }}>
+                  Bundle description
+                  <input value={projectBundleDraft.description} onChange={(event) => setProjectBundleDraft((draft) => ({ ...draft, description: event.target.value }))} />
+                </label>
+              </div>
+
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", minWidth: 790, borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr style={{ color: "#64748b", fontSize: 12, textAlign: "left" }}>
+                      <th style={{ padding: "0 8px 8px 0" }}>Item name</th>
+                      <th style={{ padding: "0 8px 8px" }}>Description / specs</th>
+                      <th style={{ width: 90, padding: "0 8px 8px" }}>Qty</th>
+                      <th style={{ width: 150, padding: "0 8px 8px" }}>Unit price</th>
+                      <th style={{ width: 42 }}></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {projectBundleDraft.items.map((item, index) => (
+                      <tr key={item._draftId || `${projectBundleDraft.id}-${index}`}>
+                        <td style={{ padding: "5px 8px 5px 0" }}>
+                          <input aria-label={`Item ${index + 1} name`} value={item.name} onChange={(event) => setProjectBundleDraft((draft) => ({ ...draft, items: draft.items.map((row) => row._draftId === item._draftId ? { ...row, name: event.target.value } : row) }))} style={{ width: "100%", minWidth: 190 }} />
+                        </td>
+                        <td style={{ padding: 5 }}>
+                          <input aria-label={`Item ${index + 1} description`} value={item.specs || ""} onChange={(event) => setProjectBundleDraft((draft) => ({ ...draft, items: draft.items.map((row) => row._draftId === item._draftId ? { ...row, specs: event.target.value } : row) }))} style={{ width: "100%", minWidth: 220 }} />
+                        </td>
+                        <td style={{ padding: 5 }}>
+                          <input aria-label={`Item ${index + 1} quantity`} type="number" min="1" step="1" value={item.qty} onChange={(event) => setProjectBundleDraft((draft) => ({ ...draft, items: draft.items.map((row) => row._draftId === item._draftId ? { ...row, qty: event.target.value } : row) }))} style={{ width: "100%" }} />
+                        </td>
+                        <td style={{ padding: 5 }}>
+                          <input aria-label={`Item ${index + 1} unit price`} type="number" min="0" step="1" value={item.unit} onChange={(event) => setProjectBundleDraft((draft) => ({ ...draft, items: draft.items.map((row) => row._draftId === item._draftId ? { ...row, unit: event.target.value } : row) }))} style={{ width: "100%" }} />
+                        </td>
+                        <td style={{ padding: 5, textAlign: "center" }}>
+                          <button type="button" aria-label={`Remove ${item.name || `item ${index + 1}`}`} onClick={() => setProjectBundleDraft((draft) => ({ ...draft, items: draft.items.filter((row) => row._draftId !== item._draftId) }))} style={{ width: 30, height: 30, border: "1px solid #e2e8f0", borderRadius: 7, background: "#fff", color: "#b91c1c", cursor: "pointer" }}>×</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <button
+                type="button"
+                className="btn"
+                onClick={() => setProjectBundleDraft((draft) => ({
+                  ...draft,
+                  items: [...draft.items, { _draftId: `new-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, catalogId: null, name: "", specs: "", qty: 1, unit: 0 }],
+                }))}
+                style={{ marginTop: 12 }}
+              >
+                + Add item
+              </button>
+              {projectBundleSaveError && <p role="alert" style={{ margin: "14px 0 0", color: "#b42318", fontSize: 13 }}>{projectBundleSaveError}</p>}
+            </div>
+
+            <footer style={{ display: "flex", justifyContent: "flex-end", gap: 10, padding: "14px 22px", borderTop: "1px solid #e5eaf1", background: "#f8fafc" }}>
+              <button type="button" className="btn" disabled={projectBundleSaving} onClick={() => setProjectBundleDraft(null)}>Cancel</button>
+              <button type="button" className="btn primary" disabled={projectBundleSaving} onClick={saveProjectBundle}>
+                {projectBundleSaving ? "Saving…" : "Save bundle"}
+              </button>
+            </footer>
+          </section>
         </div>
       )}
 
