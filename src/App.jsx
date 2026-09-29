@@ -21204,6 +21204,7 @@ balanceAfterAdvance:
 
       {projectBundleDraft && (
         <div
+          className="project-bundle-editor-overlay"
           role="presentation"
           onMouseDown={(event) => {
             if (event.target === event.currentTarget && !projectBundleSaving) setProjectBundleDraft(null);
@@ -21214,9 +21215,10 @@ balanceAfterAdvance:
             role="dialog"
             aria-modal="true"
             aria-labelledby="project-bundle-editor-title"
+            className="project-bundle-editor-dialog"
             style={{ width: "min(100%, 980px)", maxHeight: "92vh", display: "flex", flexDirection: "column", borderRadius: 16, background: "#fff", boxShadow: "0 24px 70px rgba(15,23,42,.25)", overflow: "hidden" }}
           >
-            <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "18px 22px", borderBottom: "1px solid #e5eaf1" }}>
+            <header className="project-bundle-editor-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "18px 22px", borderBottom: "1px solid #e5eaf1" }}>
               <div>
                 <h2 id="project-bundle-editor-title" style={{ margin: 0, color: "#172033", fontSize: 21 }}>Edit project bundle</h2>
                 <p style={{ margin: "5px 0 0", color: "#64748b", fontSize: 13 }}>Changes are saved to this bundle; catalog-linked products are updated too.</p>
@@ -21224,8 +21226,8 @@ balanceAfterAdvance:
               <button type="button" aria-label="Close editor" disabled={projectBundleSaving} onClick={() => setProjectBundleDraft(null)} style={{ width: 36, height: 36, borderRadius: "50%", border: "1px solid #dbe3ed", background: "#fff", cursor: "pointer", fontSize: 20 }}>×</button>
             </header>
 
-            <div style={{ padding: "18px 22px", overflow: "auto" }}>
-              <div style={{ display: "grid", gridTemplateColumns: "minmax(200px, 1fr) minmax(240px, 1.5fr)", gap: 12, marginBottom: 18 }}>
+            <div className="project-bundle-editor-body" style={{ padding: "18px 22px", overflow: "auto" }}>
+              <div className="project-bundle-fields" style={{ display: "grid", gridTemplateColumns: "minmax(200px, 1fr) minmax(240px, 1.5fr)", gap: 12, marginBottom: 18 }}>
                 <label style={{ display: "grid", gap: 5, color: "#475569", fontSize: 13, fontWeight: 650 }}>
                   Bundle name
                   <input value={projectBundleDraft.name} onChange={(event) => setProjectBundleDraft((draft) => ({ ...draft, name: event.target.value }))} />
@@ -21236,8 +21238,8 @@ balanceAfterAdvance:
                 </label>
               </div>
 
-              <div style={{ overflowX: "auto" }}>
-                <table style={{ width: "100%", minWidth: 790, borderCollapse: "collapse" }}>
+              <div className="project-bundle-table-scroll" style={{ overflowX: "auto" }}>
+                <table className="project-bundle-editor-table" style={{ width: "100%", minWidth: 790, borderCollapse: "collapse" }}>
                   <thead>
                     <tr style={{ color: "#64748b", fontSize: 12, textAlign: "left" }}>
                       <th style={{ padding: "0 8px 8px 0" }}>Item name</th>
@@ -21250,19 +21252,19 @@ balanceAfterAdvance:
                   <tbody>
                     {projectBundleDraft.items.map((item, index) => (
                       <tr key={item._draftId || `${projectBundleDraft.id}-${index}`}>
-                        <td style={{ padding: "5px 8px 5px 0" }}>
+                        <td data-label="Item name" style={{ padding: "5px 8px 5px 0" }}>
                           <input aria-label={`Item ${index + 1} name`} value={item.name} onChange={(event) => setProjectBundleDraft((draft) => ({ ...draft, items: draft.items.map((row) => row._draftId === item._draftId ? { ...row, name: event.target.value } : row) }))} style={{ width: "100%", minWidth: 190 }} />
                         </td>
-                        <td style={{ padding: 5 }}>
+                        <td data-label="Description / specs" style={{ padding: 5 }}>
                           <input aria-label={`Item ${index + 1} description`} value={item.specs || ""} onChange={(event) => setProjectBundleDraft((draft) => ({ ...draft, items: draft.items.map((row) => row._draftId === item._draftId ? { ...row, specs: event.target.value } : row) }))} style={{ width: "100%", minWidth: 220 }} />
                         </td>
-                        <td style={{ padding: 5 }}>
+                        <td data-label="Qty" style={{ padding: 5 }}>
                           <input aria-label={`Item ${index + 1} quantity`} type="number" min="1" step="1" value={item.qty} onChange={(event) => setProjectBundleDraft((draft) => ({ ...draft, items: draft.items.map((row) => row._draftId === item._draftId ? { ...row, qty: event.target.value } : row) }))} style={{ width: "100%" }} />
                         </td>
-                        <td style={{ padding: 5 }}>
+                        <td data-label="Unit price" style={{ padding: 5 }}>
                           <input aria-label={`Item ${index + 1} unit price`} type="number" min="0" step="1" value={item.unit} onChange={(event) => setProjectBundleDraft((draft) => ({ ...draft, items: draft.items.map((row) => row._draftId === item._draftId ? { ...row, unit: event.target.value } : row) }))} style={{ width: "100%" }} />
                         </td>
-                        <td style={{ padding: 5, textAlign: "center" }}>
+                        <td data-label="Remove" style={{ padding: 5, textAlign: "center" }}>
                           <button type="button" aria-label={`Remove ${item.name || `item ${index + 1}`}`} onClick={() => setProjectBundleDraft((draft) => ({ ...draft, items: draft.items.filter((row) => row._draftId !== item._draftId) }))} style={{ width: 30, height: 30, border: "1px solid #e2e8f0", borderRadius: 7, background: "#fff", color: "#b91c1c", cursor: "pointer" }}>×</button>
                         </td>
                       </tr>
@@ -21285,7 +21287,7 @@ balanceAfterAdvance:
               {projectBundleSaveError && <p role="alert" style={{ margin: "14px 0 0", color: "#b42318", fontSize: 13 }}>{projectBundleSaveError}</p>}
             </div>
 
-            <footer style={{ display: "flex", justifyContent: "flex-end", gap: 10, padding: "14px 22px", borderTop: "1px solid #e5eaf1", background: "#f8fafc" }}>
+            <footer className="project-bundle-editor-footer" style={{ display: "flex", justifyContent: "flex-end", gap: 10, padding: "14px 22px", borderTop: "1px solid #e5eaf1", background: "#f8fafc" }}>
               <button type="button" className="btn" disabled={projectBundleSaving} onClick={() => setProjectBundleDraft(null)}>Cancel</button>
               <button type="button" className="btn primary" disabled={projectBundleSaving} onClick={saveProjectBundle}>
                 {projectBundleSaving ? "Saving…" : "Save bundle"}
@@ -21298,6 +21300,7 @@ balanceAfterAdvance:
       {/* PAGE: QUOTE EDITOR */}
       {page === "quoteEditor" && (
         <div
+          className="quote-editor-page"
           style={{
             maxWidth: 1100,
             margin: "0 auto 40px",
@@ -21325,10 +21328,11 @@ balanceAfterAdvance:
           </div>
 
           {/* header block */}
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 16 }}>
+          <div className="quote-editor-header" style={{ display: "flex", justifyContent: "space-between", gap: 16 }}>
             {/* left: customer fields */}
             <div style={{ flex: 1 }}>
               <div
+                className="quote-customer-fields"
                 style={{
                   display: "grid",
                   gridTemplateColumns: "1fr 1fr",
@@ -21382,7 +21386,7 @@ balanceAfterAdvance:
             </div>
 
             {/* right: quotation meta (firm-aware) */}
-            <div style={{ width: 240, textAlign: "right" }}>
+            <div className="quote-meta" style={{ width: 240, textAlign: "right" }}>
               <div style={{ fontWeight: 700, marginBottom: 6 }}>
   {firm === "Victor Engineering" ? "PERFORMA INVOICE" : "QUOTATION"}
 </div>
@@ -21458,6 +21462,7 @@ balanceAfterAdvance:
 
           {/* Firm selector */}
           <div
+            className="quote-firm-controls"
             style={{
               display: "flex",
               gap: 12,
@@ -21494,6 +21499,7 @@ balanceAfterAdvance:
 
           {/* rows */}
 <div
+  className="quote-lines-scroll"
   style={{
     marginTop: 12,
     overflow: "visible",
@@ -21502,7 +21508,7 @@ balanceAfterAdvance:
   }}
 >
   <table
-    className="qtable"
+    className={`qtable quote-editor-table${gstBreakdown ? " has-gst" : ""}`}
     style={{ overflow: "visible" }}
   >
               <thead>
@@ -21523,8 +21529,8 @@ balanceAfterAdvance:
               <tbody>
   {cartList.map((r, i) => (
     <tr key={r.id}>
-      <td>{i + 1}</td>
-      <td
+      <td className="quote-line-number">{i + 1}</td>
+      <td data-label="Product"
   style={{
     position: "relative",
     overflow: "visible",
@@ -21617,6 +21623,7 @@ onBlur={() => {
         {quoteSuggestionRowId === r.id &&
           matches.length > 0 && (
             <div
+  className="quote-product-suggestions"
   style={{
     position: "absolute",
     top: "calc(100% + 4px)",
@@ -21695,7 +21702,7 @@ onBlur={() => {
     );
   })()}
 </td>
-      <td>
+      <td data-label="Specs / description">
         <input
           value={r.specs}
           onChange={(e) =>
@@ -21709,7 +21716,7 @@ onBlur={() => {
 
       {/* ✅ NEW: GST % cell, only when GST breakdown is ON */}
       {gstBreakdown && (
-        <td>
+        <td data-label="GST %">
           <GSTRateCell
             id={r.id}
             value={Number.isFinite(r.gst) ? r.gst : 18}
@@ -21723,7 +21730,7 @@ onBlur={() => {
         </td>
       )}
 
-      <td>
+      <td data-label="Qty">
         <input
           type="number"
           value={r.qty}
@@ -21736,7 +21743,7 @@ onBlur={() => {
           }
         />
       </td>
-      <td>
+      <td data-label="Unit price">
   {/* Existing input box stays the same */}
   <input
     type="number"
@@ -21761,7 +21768,7 @@ onBlur={() => {
     </div>
   )}
 </td>
-      <td style={{ textAlign: "right", fontWeight: 700 }}>
+      <td data-label="Line total" style={{ textAlign: "right", fontWeight: 700 }}>
   {/* Existing total: Qty × Unit (inclusive) */}
   ₹{inr((r.qty || 0) * (r.unit || 0))}
 
@@ -21778,7 +21785,7 @@ onBlur={() => {
 </td>
 
       {/* Action cell: small circular remove button */}
-      <td style={{ textAlign: "center" }}>
+      <td data-label="Remove item" style={{ textAlign: "center" }}>
         <button
           onClick={() => removeRow(r.id)}
           title="Remove row"
@@ -21842,6 +21849,7 @@ onBlur={() => {
 
 {/* Action bar under table */}
 <div
+  className="quote-item-actions"
   style={{
     display: "flex",
     alignItems: "center",
@@ -21918,7 +21926,7 @@ onBlur={() => {
 )}
 
 {/* Buttons */}
-            <div style={{ marginTop: 14, display: "flex", gap: 8 }}>
+            <div className="quote-save-actions" style={{ marginTop: 14, display: "flex", gap: 8 }}>
               <button
   onClick={async () => {
     const n = await saveQuote();
@@ -22155,7 +22163,7 @@ onBlur={() => {
 
    {/* Table (hidden in Delivered view) */}
 {savedView !== "delivered" && (
-  <div style={{ overflowX: "auto" }}>
+  <div className="saved-quotes-table-scroll" style={{ overflowX: "auto" }}>
       <table
         className={`saved-quotes-table${savedView === "sanctioned" ? " is-sanctioned" : ""}`}
         style={{
@@ -22906,7 +22914,7 @@ delivered_date: (() => {
       }
 
       return (
-        <div style={{ overflowX: "visible" }}>
+        <div className="delivered-quotes-table-scroll" style={{ overflowX: "visible" }}>
   <table
     className="delivered-quotes-table"
     style={{
