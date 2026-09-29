@@ -2,6 +2,55 @@
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; }
 body { margin: 0; background: #f6f7f9; }
+.global-nav-controls {
+  position: fixed;
+  left: 14px;
+  top: 12px;
+  z-index: 10001;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.global-nav-icon {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  padding: 10px;
+  color: #334155;
+  background: rgba(255, 255, 255, 0.32);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 50%;
+  opacity: 0.24;
+  cursor: pointer;
+  transition: opacity 180ms ease, color 180ms ease, background 180ms ease,
+    border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+}
+.global-nav-icon svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.global-nav-icon:hover,
+.global-nav-icon:focus-visible {
+  opacity: 1;
+  color: #1677ff;
+  background: #fff;
+  border-color: rgba(22, 119, 255, 0.35);
+  box-shadow: 0 0 0 4px rgba(22, 119, 255, 0.12), 0 4px 16px rgba(15, 23, 42, 0.14);
+  transform: translateY(-1px);
+}
+.global-nav-icon:focus-visible {
+  outline: 2px solid #1677ff;
+  outline-offset: 3px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .global-nav-icon { transition: none; }
+}
 /* === HVF catalog grid === */
 .catalog-grid {
   display: grid;
@@ -73,4 +122,227 @@ html, body, #root {
   filter: none !important;
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
+}
+
+
+/* Give saved-quote details enough room while staying clear of the fixed quick-action rail. */
+.saved-quotes-page,
+.saved-delivered-page {
+  min-width: 0;
+}
+.saved-quotes-table,
+.delivered-quotes-table {
+  width: 100%;
+  table-layout: fixed;
+}
+.saved-quotes-table th,
+.saved-quotes-table td,
+.delivered-quotes-table th,
+.delivered-quotes-table td {
+  box-sizing: border-box;
+  padding: 6px 8px !important;
+  overflow-wrap: anywhere;
+  word-break: normal;
+  vertical-align: top;
+}
+.saved-quotes-table:not(.is-sanctioned) th:nth-child(2),
+.saved-quotes-table:not(.is-sanctioned) td:nth-child(2),
+.saved-quotes-table:not(.is-sanctioned) th:nth-child(3),
+.saved-quotes-table:not(.is-sanctioned) td:nth-child(3),
+.saved-quotes-table:not(.is-sanctioned) th:nth-child(6),
+.saved-quotes-table:not(.is-sanctioned) td:nth-child(6),
+.saved-quotes-table:not(.is-sanctioned) th:nth-child(8),
+.saved-quotes-table:not(.is-sanctioned) td:nth-child(8),
+.saved-quotes-table.is-sanctioned th:nth-child(1),
+.saved-quotes-table.is-sanctioned td:nth-child(1),
+.saved-quotes-table.is-sanctioned th:nth-child(2),
+.saved-quotes-table.is-sanctioned td:nth-child(2),
+.saved-quotes-table.is-sanctioned th:nth-child(3),
+.saved-quotes-table.is-sanctioned td:nth-child(3),
+.saved-quotes-table.is-sanctioned th:nth-child(6),
+.saved-quotes-table.is-sanctioned td:nth-child(6),
+.saved-quotes-table.is-sanctioned th:nth-child(8),
+.saved-quotes-table.is-sanctioned td:nth-child(8),
+.saved-quotes-table.is-sanctioned th:nth-child(9),
+.saved-quotes-table.is-sanctioned td:nth-child(9),
+.saved-quotes-table.is-sanctioned th:nth-child(10),
+.saved-quotes-table.is-sanctioned td:nth-child(10),
+.saved-quotes-table.is-sanctioned th:nth-child(11),
+.saved-quotes-table.is-sanctioned td:nth-child(11),
+.delivered-quotes-table th:nth-child(1),
+.delivered-quotes-table td:nth-child(1),
+.delivered-quotes-table th:nth-child(2),
+.delivered-quotes-table td:nth-child(2),
+.delivered-quotes-table th:nth-child(5),
+.delivered-quotes-table td:nth-child(5),
+.delivered-quotes-table th:nth-child(7),
+.delivered-quotes-table td:nth-child(7),
+.delivered-quotes-table th:nth-child(9),
+.delivered-quotes-table td:nth-child(9),
+.delivered-quotes-table th:nth-child(10),
+.delivered-quotes-table td:nth-child(10) {
+  white-space: nowrap;
+  overflow-wrap: normal;
+  word-break: keep-all;
+}
+.saved-quotes-table .saved-action-cell {
+  overflow-wrap: normal;
+  min-width: 0;
+}
+.saved-quotes-table .saved-action-cell > div {
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 5px !important;
+}
+.saved-quotes-table .saved-action-cell button {
+  padding: 3px 5px !important;
+  font-size: 11px !important;
+  line-height: 1.2;
+}
+.saved-quotes-table .saved-action-cell .badge {
+  white-space: nowrap;
+  font-size: 11px !important;
+}
+.delivered-quotes-table td {
+  white-space: normal !important;
+}
+.delivered-quotes-table th:nth-child(1),
+.delivered-quotes-table td:nth-child(1),
+.delivered-quotes-table th:nth-child(2),
+.delivered-quotes-table td:nth-child(2),
+.delivered-quotes-table th:nth-child(5),
+.delivered-quotes-table td:nth-child(5),
+.delivered-quotes-table th:nth-child(7),
+.delivered-quotes-table td:nth-child(7),
+.delivered-quotes-table th:nth-child(9),
+.delivered-quotes-table td:nth-child(9),
+.delivered-quotes-table th:nth-child(10),
+.delivered-quotes-table td:nth-child(10) {
+  white-space: nowrap !important;
+  overflow-wrap: normal;
+  word-break: keep-all;
+}
+.delivered-quotes-table td:last-child button {
+  max-width: 100%;
+  padding: 3px 5px !important;
+  font-size: 11px;
+  white-space: normal;
+}
+
+@media (max-width: 1200px) {
+  .saved-quotes-page,
+  .saved-delivered-page {
+    width: calc(100vw - 120px) !important;
+    max-width: none !important;
+    margin: 12px 60px 24px !important;
+  }
+}
+
+/* Compact quick actions expand toward the pointer while keeping the page balanced. */
+.floating-quick-actions {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 10002;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+.floating-quick-actions .quick-action-button {
+  box-sizing: border-box;
+  width: 44px !important;
+  min-width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 0 !important;
+  overflow: hidden;
+  border-radius: 50%;
+  opacity: 0.76;
+  filter: saturate(0.86);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.1);
+  transform-origin: right center;
+  transition: width 190ms ease, height 190ms ease, border-radius 190ms ease,
+    opacity 190ms ease, filter 190ms ease, transform 190ms ease,
+    box-shadow 190ms ease;
+}
+.floating-quick-actions .quick-action-icon {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  flex: 0 0 20px;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+.floating-quick-actions .quick-action-icon svg {
+  width: 19px;
+  height: 19px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.floating-quick-actions .quick-action-label {
+  display: inline-block;
+  max-width: 0;
+  overflow: hidden;
+  opacity: 0;
+  white-space: nowrap;
+  font-size: 13px;
+  transition: max-width 180ms ease, opacity 130ms ease;
+}
+.floating-quick-actions .quick-action-button:hover,
+.floating-quick-actions .quick-action-button:focus-visible {
+  position: relative;
+  width: 184px !important;
+  height: 44px;
+  flex-basis: 44px;
+  justify-content: flex-start;
+  padding: 0 12px !important;
+  opacity: 1;
+  filter: saturate(1);
+  border-radius: 999px;
+  transform: scale(1.04);
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.18);
+}
+.floating-quick-actions .quick-action-button:hover .quick-action-label,
+.floating-quick-actions .quick-action-button:focus-visible .quick-action-label {
+  max-width: 145px;
+  opacity: 1;
+}
+.floating-quick-actions .quick-action-button:hover .quick-action-icon,
+.floating-quick-actions .quick-action-button:focus-visible .quick-action-icon {
+  position: static;
+  flex: 0 0 20px;
+  transform: none;
+}
+.floating-quick-actions .quick-action-button-neutral {
+  color: #334155;
+  background: rgba(255, 255, 255, 0.94) !important;
+  border: 1px solid #dbe2ea !important;
+}
+.floating-quick-actions .quick-action-button-neutral:hover,
+.floating-quick-actions .quick-action-button-neutral:focus-visible {
+  background: #fff !important;
+}
+.product-price-history-trigger:hover,
+.product-price-history-trigger:focus-visible {
+  color: #1677ff !important;
+  transform: scale(1.22);
+  box-shadow: 0 0 0 3px rgba(22, 119, 255, 0.12);
+}
+@media (prefers-reduced-motion: reduce) {
+  .floating-quick-actions .quick-action-button,
+  .floating-quick-actions .quick-action-label {
+    transition: none;
+  }
 }

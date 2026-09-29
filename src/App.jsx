@@ -2069,6 +2069,11 @@ const __boot = (() => {
 
 const [quoteMode, setQuoteMode] = useState(() => !!__boot.quoteMode); // true = show qty steppers on catalog
 const [page, setPage] = useState(() => __boot.page || "catalog"); // catalog | projects | quoteEditor | savedDetailed | payroll
+useEffect(() => {
+  // Treat each in-app destination as a fresh page view, not a continuation
+  // of the previous page's scroll position.
+  window.scrollTo(0, 0);
+}, [page]);
 const [projectBundles, setProjectBundles] = useState(readProjectBundleCache);
 const [projectBundleDraft, setProjectBundleDraft] = useState(null);
 const [projectBundleSaveError, setProjectBundleSaveError] = useState("");
@@ -2636,6 +2641,10 @@ const [attendanceHistory, setAttendanceHistory] = useState(() => {
 
 const [editingProductId, setEditingProductId] = useState(null);
 const [editingImageUrl, setEditingImageUrl] = useState("");
+const [priceHistoryProduct, setPriceHistoryProduct] = useState(null);
+const [priceHistoryRows, setPriceHistoryRows] = useState([]);
+const [priceHistoryLoading, setPriceHistoryLoading] = useState(false);
+const [priceHistoryError, setPriceHistoryError] = useState("");
 
 const [editForm, setEditForm] = useState({
   name: "",
@@ -2649,6 +2658,26 @@ const [editForm, setEditForm] = useState({
 });
 
 const [saving, setSaving] = useState(false);
+
+const openMachinePriceHistory = async (machine) => {
+  setPriceHistoryProduct({ id: machine.id, name: machine.name });
+  setPriceHistoryRows([]);
+  setPriceHistoryError("");
+  setPriceHistoryLoading(true);
+  try {
+    const { data, error } = await supabase
+      .from("machine_price_history")
+      .select("id, changed_at, product_name, old_prices, new_prices, changed_fields, previous_values_known")
+      .eq("machine_id", String(machine.id))
+      .order("changed_at", { ascending: false });
+    if (error) throw error;
+    setPriceHistoryRows(data || []);
+  } catch (error) {
+    setPriceHistoryError(error?.message || "Could not load price history.");
+  } finally {
+    setPriceHistoryLoading(false);
+  }
+};
 
 const [catalogExportMode, setCatalogExportMode] = useState("PRICE"); // PRICE or DISPLAY
 const [catalogExportCategories, setCatalogExportCategories] = useState(["ALL"]);
@@ -3134,12 +3163,15 @@ const onEditSave = async (e) => {
       image_url = urlData.publicUrl;
     }
 
+    const nextCostPrice = editForm.cost_price === "" ? null : Number(editForm.cost_price);
+    const nextSellPrice = editForm.sell_price === "" ? null : Number(editForm.sell_price);
+
     const payload = {
       name: editForm.name,
       category: editForm.category,
       mrp: Number(editForm.mrp),
-      sell_price: editForm.sell_price ? Number(editForm.sell_price) : null,
-      cost_price: editForm.cost_price ? Number(editForm.cost_price) : null,
+      sell_price: nextSellPrice,
+      cost_price: nextCostPrice,
       is_hidden: Boolean(editForm.is_hidden),
       specs: editForm.specs || "",
       image_url,
@@ -4149,7 +4181,11 @@ const saveProjectBundle = async () => {
       const updatedProduct = await retryProjectWriteOnce(async () => {
         const { data, error } = await supabase
           .from("machines")
-          .update({ name: item.name, specs: item.specs, mrp: item.unit })
+          .update({
+            name: item.name,
+            specs: item.specs,
+            mrp: item.unit,
+          })
           .eq("id", item.catalogId)
           .select("id")
           .maybeSingle();
@@ -8102,6 +8138,7 @@ const header = {
   /* ---------- LOAD SAVED LIST / EDIT / PDF ---------- */
 const [saved, setSaved] = useState([]);
 const [savedDetailed, setSavedDetailed] = useState([]);
+const [savedDetailedLoading, setSavedDetailedLoading] = useState(false);
 const [deliveredDetailed, setDeliveredDetailed] = useState([]);
 // Supabase-backed delivered lists
 const [deliveredRowsDB, setDeliveredRowsDB] = useState([]);
@@ -9168,8 +9205,8 @@ const tableData =
 const [sanctionedLoading, setSanctionedLoading] = useState(false);
 const emptyMsg =
   savedView === "sanctioned"
-    ? (sanctionedLoading ? "" : "No sanctioned quotations found")
-    : "No saved quotations found.";
+    ? (sanctionedLoading || savedDetailedLoading ? "Loading saved quotations…" : "No sanctioned quotations found")
+    : (savedDetailedLoading ? "Loading saved quotations…" : "No saved quotations found.");
 
 // Fetch the list of saved quotes
 const loadSaved = async () => {
@@ -9209,6 +9246,7 @@ let __loadingSavedDetailed = false;
 const loadSavedDetailed = async () => {
   if (__loadingSavedDetailed) return false;          // ignore duplicate triggers
   __loadingSavedDetailed = true;
+  setSavedDetailedLoading(true);
   try {
     const run = async () => {
       return await supabase
@@ -9235,44 +9273,54 @@ const loadSavedDetailed = async () => {
     // attempt #1
     let { data, error } = await run();
     if (error) throw error;
-    // fetch delivered_on for these quotes and attach as delivered_date
-    const ids = (data || []).map((q) => q.id);
-let deliveredMap = {};
-
-if (ids.length) {
-  const allDeliveredRows = [];
-  const batchSize = 50;
-
-  for (let i = 0; i < ids.length; i += batchSize) {
-    const batchIds = ids.slice(i, i + batchSize);
-
-    const { data: dRows, error: dErr } = await supabase
-      .from("delivered")
-      .select("quote_id, delivered_on")
-      .in("quote_id", batchIds);
-
-    if (dErr) throw dErr;
-
-    allDeliveredRows.push(...(dRows || []));
-  }
-
-  deliveredMap = allDeliveredRows.reduce((acc, r) => {
-    acc[r.quote_id] = r.delivered_on || null;
-    return acc;
-  }, {});
-}
-    // build preview + attach delivered_date from deliveredMap
     const enriched = (data || []).map((q) => {
       const names = (q.quote_items || []).map((it) => it?.name || "");
       return {
         ...q,
-        delivered_date: deliveredMap[q.id] || null,
+        delivered_date: null,
         _itemsPreview: names.slice(0, 3),
         _itemsTotal: names.length,
       };
     });
-
+    // Show quotes as soon as their primary query is ready. Delivery details
+    // are supplemental and must not delay the whole list.
     setSavedDetailed(enriched);
+    setSavedDetailedLoading(false);
+
+    const ids = (data || []).map((q) => q.id);
+    if (ids.length) {
+      const batches = [];
+      const batchSize = 50;
+      for (let i = 0; i < ids.length; i += batchSize) {
+        batches.push(ids.slice(i, i + batchSize));
+      }
+
+      try {
+        const deliveredResults = await Promise.all(
+          batches.map((batchIds) =>
+            supabase
+              .from("delivered")
+              .select("quote_id, delivered_on")
+              .in("quote_id", batchIds)
+          )
+        );
+        const allDeliveredRows = [];
+        for (const result of deliveredResults) {
+          if (result.error) throw result.error;
+          allDeliveredRows.push(...(result.data || []));
+        }
+        const deliveredMap = allDeliveredRows.reduce((acc, row) => {
+          acc[row.quote_id] = row.delivered_on || null;
+          return acc;
+        }, {});
+        setSavedDetailed((current) => current.map((quote) => ({
+          ...quote,
+          delivered_date: deliveredMap[quote.id] || null,
+        })));
+      } catch (deliveredError) {
+        console.warn("Saved quotes loaded, but delivery dates could not be refreshed:", deliveredError);
+      }
+    }
     return true;
   } catch (err) {
     // Safari occasionally throws "TypeError: Load failed" / "network connection was lost"
@@ -9330,17 +9378,16 @@ if (ids.length) {
     return false;
   } finally {
     __loadingSavedDetailed = false;
+    setSavedDetailedLoading(false);
   }
 };
 
 // Open the full-screen detailed view
-const goToSavedDetailed = async () => {
-  await loadSavedDetailed();
+const goToSavedDetailed = () => {
   setPage("savedDetailed");
 };
 
-const openSavedDetail = async () => {
-  await loadSavedDetailed();
+const openSavedDetail = () => {
   setPage("savedDetailed");
 };
 
@@ -11483,6 +11530,36 @@ button.mini.primary{
 
 `}</style>
 
+
+      <div className="global-nav-controls">
+        <button
+          type="button"
+          className="global-nav-icon"
+          onClick={() => {
+            window.scrollTo(0, 0);
+            setPage("catalog");
+          }}
+          aria-label="Go to catalog home"
+          title="Catalog home"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="m3 10 9-7 9 7M5.5 9v11h13V9M9.5 20v-6h5v6" />
+          </svg>
+        </button>
+        {canUndo && (
+          <button
+            type="button"
+            className="global-nav-icon"
+            onClick={onUndo}
+            aria-label="Undo last action"
+            title="Undo last action"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M9 14 4 9l5-5M4 9h9a7 7 0 0 1 0 14h-2" />
+            </svg>
+          </button>
+        )}
+      </div>
 
 
       {/* top-right Login menu */}
@@ -20954,6 +21031,26 @@ balanceAfterAdvance:
                     {m.category && (
                       <p style={{ color: "#777", fontSize: 12 }}>{m.category}</p>
                     )}
+                    {isAdmin && (m.price_updated_at || m.created_at) && (
+                      <div style={{ color: "#94a3b8", fontSize: 10, margin: "0 0 4px", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                        Price last updated {new Date(m.price_updated_at || m.created_at).toLocaleDateString()}
+                        {Number(m.price_change_count || 0) > 0 && (
+                          <button
+                            type="button"
+                            className="product-price-history-trigger"
+                            aria-label={`View price change history for ${m.name}`}
+                            title="View price change history"
+                            onClick={() => openMachinePriceHistory(m)}
+                            style={{ width: 20, height: 20, padding: 0, display: "grid", placeItems: "center", borderRadius: "50%", border: "1px solid #cbd5e1", background: "#fff", color: "#64748b", cursor: "pointer", transition: "transform 160ms ease, color 160ms ease, box-shadow 160ms ease" }}
+                          >
+                            <svg aria-hidden="true" viewBox="0 0 20 20" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M3.5 8a6.5 6.5 0 1 1 .7 4.4" />
+                              <path d="M3.5 3.8V8h4.2M10 6.2v4l2.6 1.5" />
+                            </svg>
+                          </button>
+                        )}
+                      </div>
+                    )}
 
 {isAdmin && (
   <button
@@ -21843,8 +21940,10 @@ onBlur={() => {
 {/* PAGE: SAVED DETAILED */}
 {page === "savedDetailed" && (
   <div
+    className="saved-quotes-page"
     style={{
-      maxWidth: "min(1240px, 92vw)",
+      boxSizing: "border-box",
+      width: "min(1480px, calc(100vw - 160px))",
       margin: "12px auto 48px",
       background: "#fff",
       border: "1px solid #e5e7eb",
@@ -22058,13 +22157,21 @@ onBlur={() => {
 {savedView !== "delivered" && (
   <div style={{ overflowX: "auto" }}>
       <table
+        className={`saved-quotes-table${savedView === "sanctioned" ? " is-sanctioned" : ""}`}
         style={{
-          width: savedView === "sanctioned" ? "95%" : "100%",
+          width: "100%",
+          tableLayout: "fixed",
           borderCollapse: "collapse",
           border: "1px solid #eee",
-          fontSize: 14,
+          fontSize: savedView === "sanctioned" ? 12 : 13,
         }}
       >
+        <colgroup>
+          {(savedView === "sanctioned"
+            ? [8, 8, 8, 10, 11, 7, 10, 9, 9, 6, 6, 8]
+            : [7, 10, 9, 11, 13, 9, 14, 10, 17]
+          ).map((width, index) => <col key={index} style={{ width: `${width}%` }} />)}
+        </colgroup>
         <thead>
   <tr style={{ background: "#f7f7f7" }}>
     {/* NEW: first column only in sanctioned view */}
@@ -22106,7 +22213,7 @@ onBlur={() => {
 )}
 
    {savedView !== "sanctioned" ? (
-  <th style={{ textAlign: "center", padding: 10, borderBottom: "1px solid #eee", width: 220 }}>Actions</th>
+  <th className="saved-action-cell" style={{ textAlign: "center", padding: 8, borderBottom: "1px solid #eee" }}>Actions</th>
 ) : null}
 
   </tr>
@@ -22339,7 +22446,7 @@ const sancAmount = isSanctioned
 
 {savedView !== "sanctioned" ? (
   /* -------- NORMAL VIEW: keep your original inline buttons + Status -------- */
-  <td style={{ padding: 10, textAlign: "center" }}>
+  <td className="saved-action-cell" style={{ padding: 8, textAlign: "center" }}>
     {/* Top row: Edit / PDF / Delete */}
     <div style={{ display: "flex", justifyContent: "center", gap: 8, flexWrap: "wrap" }}>
       <button
@@ -22463,11 +22570,11 @@ onClick={() => {
 
  /* -------- SANCTIONED VIEW: actions cell (Undo + ⋯) -------- */
 <td
+  className="saved-action-cell"
   style={{
-    padding: 10,
-    textAlign: "right",
+    padding: 8,
+    textAlign: "center",
     position: "relative",
-    width: 90,                        // room for both buttons
     borderBottom: "1px solid #eee",
     borderRight: "1px solid #eee"     // closes the right edge
   }}
@@ -22682,10 +22789,11 @@ colSpan={savedView === "sanctioned" ? 12 : 9}
 {/* ===== DELIVERED LIST (simple view) ===== */}
 {page === "savedDetailed" && savedView === "delivered" && (
   <div
-    className="paper"
+    className="paper saved-delivered-page"
     style={{
-      width: "100%",
-      margin: "0 0 24px 0",
+      boxSizing: "border-box",
+      width: "min(1480px, calc(100vw - 160px))",
+      margin: "0 auto 24px",
       border: "1px solid #e5e7eb",
       borderRadius: 12,
       padding: 16,
@@ -22800,6 +22908,7 @@ delivered_date: (() => {
       return (
         <div style={{ overflowX: "visible" }}>
   <table
+    className="delivered-quotes-table"
     style={{
       width: "100%",
       tableLayout: "fixed",
@@ -22815,7 +22924,7 @@ delivered_date: (() => {
     textAlign: "left",
     padding: 10,
     borderBottom: "1px solid #eee",
-    width: "6%",
+    width: "8%",
   }}
 >
   Delivered On
@@ -22837,7 +22946,7 @@ delivered_date: (() => {
     textAlign: "left",
     padding: 10,
     borderBottom: "1px solid #eee",
-    width: "14%",
+    width: "12%",
   }}
 >
   Customer
@@ -22848,7 +22957,7 @@ delivered_date: (() => {
     textAlign: "left",
     padding: 10,
     borderBottom: "1px solid #eee",
-    width: "7%",
+    width: "12%",
   }}
 >
   Address
@@ -22859,7 +22968,7 @@ delivered_date: (() => {
     textAlign: "left",
     padding: 10,
     borderBottom: "1px solid #eee",
-    width: "8%",
+    width: "9%",
   }}
 >
   Phone
@@ -22871,7 +22980,7 @@ delivered_date: (() => {
     textAlign: "left",
     padding: 10,
     borderBottom: "1px solid #eee",
-    width: "18%",
+    width: "15%",
   }}
 >
   Items
@@ -22894,7 +23003,7 @@ delivered_date: (() => {
     textAlign: "left",
     padding: 10,
     borderBottom: "1px solid #eee",
-    width: "14%",
+    width: "10%",
   }}
 >
   Remarks
@@ -22927,7 +23036,7 @@ delivered_date: (() => {
     textAlign: "right",
     padding: 10,
     borderBottom: "1px solid #eee",
-    width: "5%",
+    width: "6%",
   }}
 >
   Actions
@@ -23578,53 +23687,19 @@ delivered_date: (() => {
   </>
 )}
 
-{/* TOP-LEFT: global Undo */}
-<div
-  style={{
-    position: "fixed",
-    left: 12,
-    top: 12,
-    zIndex: 10001,
-  }}
->
-  <button
-    type="button"
-    onClick={onUndo}
-    disabled={!canUndo}
-    className="btn"
-    style={{
-      padding: "6px 10px",
-      borderRadius: 8,
-      border: "1px solid #ddd",
-      background: "#fff",
-      opacity: canUndo ? 1 : 0.5,
-      cursor: canUndo ? "pointer" : "default",
-    }}
-    title={canUndo ? "Undo last action" : "Nothing to undo yet"}
-  >
-    ⟲ Undo
-  </button>
-</div>
-
 {/* FLOATING bottom-right controls */}
 <div
-  style={{
-    position: "fixed",
-    right: 16,
-    bottom: 16,
-    display: "flex",
-    flexDirection: "column",
-    gap: 8,
-    zIndex: 20,
-  }}
+  className="floating-quick-actions"
 >
 
 <button
-  className="btn primary"
+  className="btn primary quick-action-button"
   onClick={() => setPage("attendance")}
-  style={{ marginBottom: 8 }}
+  aria-label="Record Attendance"
+  title="Record Attendance"
 >
-  📋 Record Attendance
+  <span className="quick-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 5H6a2 2 0 0 0-2 2v13h16V7a2 2 0 0 0-2-2h-2M9 4h6v4H9zM8 12h8M8 16h8" /></svg></span>
+  <span className="quick-action-label">Record Attendance</span>
 </button>
 
 
@@ -23634,16 +23709,18 @@ delivered_date: (() => {
     <button
       type="button"
       onClick={openPayrollPage}
-      className="btn"
+      className="btn quick-action-button"
+      aria-label="Payroll"
+      title="Payroll"
       style={{
         background: "#1f7a3f",
         color: "#fff",
         border: "none",
         fontWeight: 700,
-        marginBottom: 8,
       }}
     >
-      💼 Payroll
+      <span className="quick-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 8h18v12H3zM8 8V5h8v3M3 13h18M10 12v3h4v-3" /></svg></span>
+      <span className="quick-action-label">Payroll</span>
     </button>
   )}
 
@@ -23651,16 +23728,18 @@ delivered_date: (() => {
     <button
       type="button"
       onClick={() => setPage("advance")}
-      className="btn"
+      className="btn quick-action-button"
+      aria-label="Advance Payment"
+      title="Advance Payment"
       style={{
         background: "#b45309",
         color: "#fff",
         border: "none",
         fontWeight: 700,
-        marginBottom: 8,
       }}
     >
-      💰 Advance Payment
+      <span className="quick-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M8 8h8M8 11h8m-7-3v9m0 0 5-5" /></svg></span>
+      <span className="quick-action-label">Advance Payment</span>
     </button>
   )}
 
@@ -23668,21 +23747,25 @@ delivered_date: (() => {
     <button
       onClick={startNewQuote}
       title="Start a fresh quotation"
-      className="btn primary"
+      className="btn primary quick-action-button"
+      aria-label="New Quote"
     >
-      + New Quote
+      <span className="quick-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg></span>
+      <span className="quick-action-label">New Quote</span>
     </button>
   )}
 
   {quoteMode && (
-    <button onClick={goToEditor} className="btn">
-      View Quote ({cartCount})
+    <button onClick={goToEditor} className="btn quick-action-button quick-action-button-neutral" aria-label={`View Quote (${cartCount})`} title={`View Quote (${cartCount})`}>
+      <span className="quick-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 3h12v18l-2-1.5L14 21l-2-1.5L10 21l-2-1.5L6 21zM9 8h6m-6 4h6m-6 4h4" /></svg></span>
+      <span className="quick-action-label">View Quote ({cartCount})</span>
     </button>
   )}
 
   {quoteMode && (
-    <button onClick={openSavedDetail} className="btn">
-      Saved Quotes
+    <button onClick={openSavedDetail} className="btn quick-action-button quick-action-button-neutral" aria-label="Saved Quotes" title="Saved Quotes">
+      <span className="quick-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 4h14v3H5zM5 10h14v3H5zM5 16h14v3H5z" /></svg></span>
+      <span className="quick-action-label">Saved Quotes</span>
     </button>
   )}
 </div>
@@ -23700,20 +23783,13 @@ delivered_date: (() => {
     <button
       type="button"
       onClick={() => setRecycleOpen(true)}
-      className="btn"
+      className="global-nav-icon recycle-bin-launcher"
+      aria-label="Open Recycle Bin"
       title="Open Recycle Bin"
-      style={{
-        padding: "8px 10px",
-        borderRadius: 999,
-        border: "1px solid #ddd",
-        background: "#fff",
-        display: "flex",
-        alignItems: "center",
-        gap: 6,
-      }}
     >
-      <span aria-hidden>🗑️</span>
-      <span>Recycle Bin</span>
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path d="M4 7h16M9 7V4h6v3m3 0-.8 13H6.8L6 7m4 4v5m4-5v5" />
+      </svg>
     </button>
   </div>
 )}
@@ -23818,6 +23894,63 @@ delivered_date: (() => {
     </div>
   );
 })()}
+
+{priceHistoryProduct && (
+  <div
+    role="presentation"
+    onMouseDown={(event) => {
+      if (event.target === event.currentTarget) setPriceHistoryProduct(null);
+    }}
+    style={{ position: "fixed", inset: 0, zIndex: 10020, display: "flex", alignItems: "center", justifyContent: "center", padding: 18, background: "rgba(15, 23, 42, .48)" }}
+  >
+    <section
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="machine-price-history-title"
+      style={{ width: "min(100%, 560px)", maxHeight: "82vh", display: "flex", flexDirection: "column", borderRadius: 16, background: "#fff", boxShadow: "0 24px 70px rgba(15,23,42,.25)", overflow: "hidden" }}
+    >
+      <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "18px 20px", borderBottom: "1px solid #e5eaf1" }}>
+        <div>
+          <h2 id="machine-price-history-title" style={{ margin: 0, color: "#172033", fontSize: 19 }}>Price change history</h2>
+          <p style={{ margin: "5px 0 0", color: "#64748b", fontSize: 13 }}>{priceHistoryProduct.name}</p>
+        </div>
+        <button type="button" aria-label="Close price history" onClick={() => setPriceHistoryProduct(null)} style={{ width: 34, height: 34, borderRadius: "50%", border: "1px solid #dbe3ed", background: "#fff", cursor: "pointer", fontSize: 19 }}>×</button>
+      </header>
+      <div style={{ padding: 18, overflowY: "auto" }}>
+        {priceHistoryLoading ? (
+          <p style={{ margin: 0, color: "#64748b" }}>Loading price history…</p>
+        ) : priceHistoryError ? (
+          <p role="alert" style={{ margin: 0, color: "#b42318" }}>Could not load price history. {priceHistoryError}</p>
+        ) : priceHistoryRows.length === 0 ? (
+          <p style={{ margin: 0, color: "#64748b" }}>No price changes have been recorded yet.</p>
+        ) : (
+          <ol style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: 10 }}>
+            {priceHistoryRows.map((row) => {
+              const fields = [["mrp", "MRP"], ["sell_price", "Selling price"], ["cost_price", "Purchase cost"]];
+              const changedFields = row.changed_fields?.length
+                ? fields.filter(([key]) => row.changed_fields.includes(key))
+                : fields.filter(([key]) => row.old_prices?.[key] !== row.new_prices?.[key]);
+              const formatPrice = (value) => value == null ? "—" : `₹${inr(Number(value))}`;
+              return (
+                <li key={row.id} style={{ padding: "12px 14px", border: "1px solid #e5eaf1", borderRadius: 10, background: "#fbfcfe" }}>
+                  <time dateTime={row.changed_at} style={{ display: "block", marginBottom: 8, color: "#475569", fontSize: 12, fontWeight: 700 }}>
+                    {new Date(row.changed_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}
+                  </time>
+                  {changedFields.map(([key, label]) => (
+                    <div key={key} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "3px 0", color: "#334155", fontSize: 13 }}>
+                      <span>{label}</span>
+                      <span style={{ textAlign: "right" }}>{row.previous_values_known === false ? "Previous value not recorded" : formatPrice(row.old_prices?.[key])} <span aria-hidden="true">→</span> {formatPrice(row.new_prices?.[key])}</span>
+                    </div>
+                  ))}
+                </li>
+              );
+            })}
+          </ol>
+        )}
+      </div>
+    </section>
+  </div>
+)}
 
 {/* end root container (now inside the <div> children, valid JSX) */}
 </div>
