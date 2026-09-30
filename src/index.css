@@ -116,6 +116,17 @@ body { margin: 0; background: #f6f7f9; }
   margin: 4px 0;
 }
 
+/* Keep the catalog image field visually continuous with the product card. */
+.catalog-product-thumb {
+  background: #fff !important;
+  border-bottom: 0 !important;
+}
+.catalog-product-photo {
+  filter: contrast(1.08) brightness(1.012) drop-shadow(0 10px 12px rgba(15, 23, 42, .12));
+  -webkit-mask-image: radial-gradient(ellipse 96% 96% at center, #000 86%, rgba(0, 0, 0, .96) 92%, rgba(0, 0, 0, .72) 96%, transparent 100%);
+  mask-image: radial-gradient(ellipse 96% 96% at center, #000 86%, rgba(0, 0, 0, .96) 92%, rgba(0, 0, 0, .72) 96%, transparent 100%);
+}
+
 /* Safety guard: never allow global dim/blur */
 html, body, #root {
   opacity: 1 !important;

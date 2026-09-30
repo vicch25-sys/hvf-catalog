@@ -115,6 +115,49 @@ const PROJECT_QUOTE_BUNDLES = [
 ];
 
 const PROJECT_BUNDLE_STORAGE_KEY = "hvf.projectQuoteBundles";
+const PAYROLL_SHARED_TABLE = "payroll_shared_state";
+const PAYROLL_SHARED_KEYS = [
+  "hvf.payrollEmployees",
+  "hvf.attendanceEntries",
+  "hvf.attendanceHistory",
+  "hvf.savedPayrollWorksheets",
+  "hvf.savedAdvanceBatches",
+  "hvf.savedStartingPayableBalances",
+  "hvf.savedHistoricalSalaryPaymentBatches",
+];
+
+const parsePayrollStorageValue = (value, fallback) => {
+  if (value == null) return fallback;
+  try { return JSON.parse(value); } catch { return fallback; }
+};
+
+const mergePayrollSnapshots = (local, remote) => {
+  const merged = {};
+  for (const key of PAYROLL_SHARED_KEYS) {
+    const localValue = local?.[key];
+    const remoteValue = remote?.[key];
+    if (Array.isArray(localValue) || Array.isArray(remoteValue)) {
+      const byIdentity = new Map();
+      [...(Array.isArray(remoteValue) ? remoteValue : []),
+        ...(Array.isArray(localValue) ? localValue : [])].forEach((record) => {
+        const identity = record?.id != null
+          ? `id:${record.id}`
+          : `value:${JSON.stringify(record)}`;
+        byIdentity.set(identity, record);
+      });
+      merged[key] = [...byIdentity.values()];
+    } else if (
+      localValue && typeof localValue === "object" &&
+      remoteValue && typeof remoteValue === "object"
+    ) {
+      merged[key] = { ...remoteValue, ...localValue };
+    } else {
+      merged[key] = localValue ?? remoteValue ?? null;
+    }
+  }
+  return merged;
+};
+
 const readProjectBundleCache = () => {
   try {
     const cached = JSON.parse(localStorage.getItem(PROJECT_BUNDLE_STORAGE_KEY) || "[]");
@@ -2613,6 +2656,14 @@ const [attendanceHistory, setAttendanceHistory] = useState(() => {
     return [];
   }
 });
+const [payrollSyncStatus, setPayrollSyncStatus] = useState(
+  "Sign in with the admin email link on this device to sync payroll data."
+);
+const payrollSyncReadyRef = useRef(false);
+const payrollSyncLastJsonRef = useRef("");
+const payrollSyncUserRef = useRef("");
+const payrollRealtimeChannelRef = useRef(null);
+const startPayrollSyncRef = useRef(null);
 
   const enableQuoteMode = () => {
     if (quoteMode) {
@@ -2686,6 +2737,128 @@ const [catalogIncludeCost, setCatalogIncludeCost] = useState(false);
 const [showCatalogExportPanel, setShowCatalogExportPanel] = useState(false);
 
   /* ---------- AUTH ---------- */
+  const applySharedPayrollSnapshot = (payload) => {
+    PAYROLL_SHARED_KEYS.forEach((key) => {
+      if (payload?.[key] !== undefined) {
+        try { localStorage.setItem(key, JSON.stringify(payload[key])); }
+        catch (error) { console.warn("Could not cache synced payroll data", error); }
+      }
+    });
+    setPayrollEmployees(Array.isArray(payload?.["hvf.payrollEmployees"]) ? payload["hvf.payrollEmployees"] : []);
+    setAttendanceEntries(payload?.["hvf.attendanceEntries"] && typeof payload["hvf.attendanceEntries"] === "object" ? payload["hvf.attendanceEntries"] : {});
+    setAttendanceHistory(Array.isArray(payload?.["hvf.attendanceHistory"]) ? payload["hvf.attendanceHistory"] : []);
+    setSavedPayrollWorksheets(Array.isArray(payload?.["hvf.savedPayrollWorksheets"]) ? payload["hvf.savedPayrollWorksheets"] : []);
+    setSavedAdvanceBatches(Array.isArray(payload?.["hvf.savedAdvanceBatches"]) ? payload["hvf.savedAdvanceBatches"] : []);
+    setSavedStartingPayableBalances(Array.isArray(payload?.["hvf.savedStartingPayableBalances"]) ? payload["hvf.savedStartingPayableBalances"] : []);
+    setSavedHistoricalSalaryPaymentBatches(Array.isArray(payload?.["hvf.savedHistoricalSalaryPaymentBatches"]) ? payload["hvf.savedHistoricalSalaryPaymentBatches"] : []);
+  };
+  const startSharedPayrollSync = async (activeSession, verifiedAdmin) => {
+    const userId = activeSession?.user?.id;
+    if (!userId || !verifiedAdmin) {
+      payrollSyncReadyRef.current = false;
+      payrollSyncUserRef.current = "";
+      setPayrollSyncStatus("Sign in with the admin email link on this device to sync payroll data.");
+      return;
+    }
+    if (payrollSyncUserRef.current === userId && payrollSyncReadyRef.current) return;
+
+    payrollSyncReadyRef.current = false;
+    payrollSyncUserRef.current = userId;
+    setPayrollSyncStatus("Syncing payroll data…");
+    try {
+      const fallbackSnapshot = {
+        "hvf.payrollEmployees": payrollEmployees,
+        "hvf.attendanceEntries": attendanceEntries,
+        "hvf.attendanceHistory": attendanceHistory,
+        "hvf.savedPayrollWorksheets": savedPayrollWorksheets,
+        "hvf.savedAdvanceBatches": savedAdvanceBatches,
+        "hvf.savedStartingPayableBalances": savedStartingPayableBalances,
+        "hvf.savedHistoricalSalaryPaymentBatches": savedHistoricalSalaryPaymentBatches,
+      };
+      const localSnapshot = Object.fromEntries(PAYROLL_SHARED_KEYS.map((key) => [
+        key,
+        parsePayrollStorageValue(localStorage.getItem(key), fallbackSnapshot[key]),
+      ]));
+      const { data: row, error: readError } = await supabase
+        .from(PAYROLL_SHARED_TABLE)
+        .select("payload, updated_at")
+        .eq("id", "primary")
+        .maybeSingle();
+      if (readError) throw readError;
+
+      const hasSyncedBefore = localStorage.getItem("hvf.payrollCloudSynced") === "1";
+      const payload = row?.payload
+        ? (hasSyncedBefore ? { ...row.payload } : mergePayrollSnapshots(localSnapshot, row.payload))
+        : localSnapshot;
+      applySharedPayrollSnapshot(payload);
+      const serialized = JSON.stringify(payload);
+      const { error: writeError } = await supabase
+        .from(PAYROLL_SHARED_TABLE)
+        .upsert({ id: "primary", payload, updated_at: new Date().toISOString() });
+      if (writeError) throw writeError;
+
+      localStorage.setItem("hvf.payrollCloudSynced", "1");
+      payrollSyncLastJsonRef.current = serialized;
+      payrollSyncReadyRef.current = true;
+      setPayrollSyncStatus("Payroll data synced across devices.");
+      if (payrollRealtimeChannelRef.current) {
+        supabase.removeChannel(payrollRealtimeChannelRef.current);
+      }
+      payrollRealtimeChannelRef.current = supabase
+        .channel(`shared-payroll-${userId}`)
+        .on("postgres_changes", {
+          event: "*",
+          schema: "public",
+          table: PAYROLL_SHARED_TABLE,
+          filter: "id=eq.primary",
+        }, (change) => {
+          const incoming = change?.new?.payload;
+          if (!incoming || JSON.stringify(incoming) === payrollSyncLastJsonRef.current) return;
+          applySharedPayrollSnapshot(incoming);
+          payrollSyncLastJsonRef.current = JSON.stringify(incoming);
+          localStorage.setItem("hvf.payrollCloudSynced", "1");
+          setPayrollSyncStatus("Latest payroll data received from another device.");
+        })
+        .subscribe();
+    } catch (error) {
+      payrollSyncReadyRef.current = false;
+      setPayrollSyncStatus(`Payroll sync needs setup: ${error?.message || "could not reach the shared database"}`);
+    }
+  };
+  startPayrollSyncRef.current = startSharedPayrollSync;
+
+  useEffect(() => {
+    if (!payrollSyncReadyRef.current || !session?.user?.id) return undefined;
+    const payload = {
+      "hvf.payrollEmployees": payrollEmployees,
+      "hvf.attendanceEntries": attendanceEntries,
+      "hvf.attendanceHistory": attendanceHistory,
+      "hvf.savedPayrollWorksheets": savedPayrollWorksheets,
+      "hvf.savedAdvanceBatches": savedAdvanceBatches,
+      "hvf.savedStartingPayableBalances": savedStartingPayableBalances,
+      "hvf.savedHistoricalSalaryPaymentBatches": savedHistoricalSalaryPaymentBatches,
+    };
+    const serialized = JSON.stringify(payload);
+    if (serialized === payrollSyncLastJsonRef.current) return undefined;
+    const timer = setTimeout(async () => {
+      setPayrollSyncStatus("Saving payroll changes to shared storage…");
+      try {
+        const { error } = await supabase
+          .from(PAYROLL_SHARED_TABLE)
+          .upsert({ id: "primary", payload, updated_at: new Date().toISOString() });
+        if (error) throw error;
+        payrollSyncLastJsonRef.current = serialized;
+        localStorage.setItem("hvf.payrollCloudSynced", "1");
+        setPayrollSyncStatus("Payroll data synced across devices.");
+      } catch (error) {
+        setPayrollSyncStatus(`Payroll changes are saved on this device; cloud sync failed: ${error?.message || "database error"}`);
+      }
+    }, 650);
+    return () => clearTimeout(timer);
+  }, [session?.user?.id, payrollEmployees, attendanceEntries, attendanceHistory,
+    savedPayrollWorksheets, savedAdvanceBatches, savedStartingPayableBalances,
+    savedHistoricalSalaryPaymentBatches]);
+
   useEffect(() => {
     // ensure today's date is in the editor on mount too
     setQHeader((h) => ({ ...h, date: todayStr() }));
@@ -2722,8 +2895,10 @@ const [showCatalogExportPanel, setShowCatalogExportPanel] = useState(false);
         .eq("user_id", data.session.user.id)
         .maybeSingle();
       setIsAdmin(Boolean(prof?.is_admin) || adminPersist);
+      await startPayrollSyncRef.current?.(data.session, Boolean(prof?.is_admin));
     } else {
       setIsAdmin(adminPersist);
+      await startPayrollSyncRef.current?.(null, false);
     }
   };
   init();
@@ -2737,13 +2912,23 @@ const [showCatalogExportPanel, setShowCatalogExportPanel] = useState(false);
         .select("is_admin")
         .eq("user_id", s.user.id)
         .maybeSingle()
-        .then(({ data }) => setIsAdmin(Boolean(data?.is_admin) || adminPersist));
+        .then(async ({ data }) => {
+          setIsAdmin(Boolean(data?.is_admin) || adminPersist);
+          await startPayrollSyncRef.current?.(s, Boolean(data?.is_admin));
+        });
     } else {
       setIsAdmin(adminPersist);
+      startPayrollSyncRef.current?.(null, false);
     }
     setShowLoginBox(false);
   });
-  return () => sub.subscription.unsubscribe();
+  return () => {
+    sub.subscription.unsubscribe();
+    if (payrollRealtimeChannelRef.current) {
+      supabase.removeChannel(payrollRealtimeChannelRef.current);
+      payrollRealtimeChannelRef.current = null;
+    }
+  };
 }, []);
 
   // --- Admin two-step (email -> PIN) ---
@@ -11272,6 +11457,29 @@ return (
         background: "linear-gradient(to bottom right,#f8f9fa,#eef2f7)",
       }}
     >
+
+    {["attendance", "payroll", "advance", "startingPayableBalance"].includes(page) && (
+      <div
+        role="status"
+        style={{
+          position: "fixed",
+          top: 10,
+          right: 12,
+          zIndex: 80,
+          maxWidth: "min(440px, calc(100vw - 24px))",
+          padding: "8px 12px",
+          borderRadius: 10,
+          background: payrollSyncStatus.includes("failed") || payrollSyncStatus.includes("setup")
+            ? "#fff7ed" : "rgba(255,255,255,.94)",
+          border: "1px solid #dbe3ed",
+          color: "#475569",
+          boxShadow: "0 4px 14px rgba(15,23,42,.08)",
+          fontSize: 12,
+        }}
+      >
+        {payrollSyncStatus || "Payroll records are currently saved on this device."}
+      </div>
+    )}
 
     {/* Global tokens & utilities */}
 
@@ -20951,7 +21159,7 @@ balanceAfterAdvance:
               {filtered.map((m) => (
                 <div key={m.id} className="card">
                   <div
-                    className="thumb"
+                    className="thumb catalog-product-thumb"
                     style={{
                       height: 240,
                       display: "flex",
@@ -20966,6 +21174,7 @@ balanceAfterAdvance:
                   >
                     {m.image_url && (
                       <img
+                        className="catalog-product-photo"
                         src={m.image_url}
                         alt={m.name}
                         loading="lazy"
