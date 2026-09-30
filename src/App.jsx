@@ -131,6 +131,14 @@ const parsePayrollStorageValue = (value, fallback) => {
   try { return JSON.parse(value); } catch { return fallback; }
 };
 
+const stablePayrollJson = (value) => JSON.stringify(value, (_key, item) => {
+  if (!item || typeof item !== "object" || Array.isArray(item)) return item;
+  return Object.keys(item).sort().reduce((sorted, key) => {
+    sorted[key] = item[key];
+    return sorted;
+  }, {});
+});
+
 const mergePayrollSnapshots = (local, remote) => {
   const merged = {};
   for (const key of PAYROLL_SHARED_KEYS) {
@@ -2791,14 +2799,19 @@ const [showCatalogExportPanel, setShowCatalogExportPanel] = useState(false);
         ? (hasSyncedBefore ? { ...row.payload } : mergePayrollSnapshots(localSnapshot, row.payload))
         : localSnapshot;
       applySharedPayrollSnapshot(payload);
-      const serialized = JSON.stringify(payload);
-      const { error: writeError } = await supabase
-        .from(PAYROLL_SHARED_TABLE)
-        .upsert({ id: "primary", payload, updated_at: new Date().toISOString() });
-      if (writeError) throw writeError;
+      const serialized = stablePayrollJson(payload);
+      const cloudAlreadyMatches = row?.payload && stablePayrollJson(row.payload) === serialized;
+      // Set this before the write so our own realtime echo is recognized even if it
+      // arrives before the upsert promise resolves.
+      payrollSyncLastJsonRef.current = serialized;
+      if (!cloudAlreadyMatches) {
+        const { error: writeError } = await supabase
+          .from(PAYROLL_SHARED_TABLE)
+          .upsert({ id: "primary", payload, updated_at: new Date().toISOString() });
+        if (writeError) throw writeError;
+      }
 
       localStorage.setItem("hvf.payrollCloudSynced", "1");
-      payrollSyncLastJsonRef.current = serialized;
       payrollSyncReadyRef.current = true;
       setPayrollSyncStatus("Payroll data synced across devices.");
       if (payrollRealtimeChannelRef.current) {
@@ -2813,9 +2826,9 @@ const [showCatalogExportPanel, setShowCatalogExportPanel] = useState(false);
           filter: "id=eq.primary",
         }, (change) => {
           const incoming = change?.new?.payload;
-          if (!incoming || JSON.stringify(incoming) === payrollSyncLastJsonRef.current) return;
+          if (!incoming || stablePayrollJson(incoming) === payrollSyncLastJsonRef.current) return;
           applySharedPayrollSnapshot(incoming);
-          payrollSyncLastJsonRef.current = JSON.stringify(incoming);
+          payrollSyncLastJsonRef.current = stablePayrollJson(incoming);
           localStorage.setItem("hvf.payrollCloudSynced", "1");
           setPayrollSyncStatus("Latest payroll data received from another device.");
         })
@@ -2838,7 +2851,7 @@ const [showCatalogExportPanel, setShowCatalogExportPanel] = useState(false);
       "hvf.savedStartingPayableBalances": savedStartingPayableBalances,
       "hvf.savedHistoricalSalaryPaymentBatches": savedHistoricalSalaryPaymentBatches,
     };
-    const serialized = JSON.stringify(payload);
+    const serialized = stablePayrollJson(payload);
     if (serialized === payrollSyncLastJsonRef.current) return undefined;
     const timer = setTimeout(async () => {
       setPayrollSyncStatus("Saving payroll changes to shared storage…");
