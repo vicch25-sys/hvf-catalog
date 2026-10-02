@@ -78,6 +78,55 @@ if (typeof window !== "undefined") {
 }
 
 /* --- Helpers --- */
+const PRODUCT_IMAGE_MAX_EDGE = 2400;
+const PRODUCT_IMAGE_MIN_BYTES = 256 * 1024;
+const PRODUCT_IMAGE_WEBP_QUALITY = 0.9;
+
+async function optimizeProductImage(file) {
+  if (
+    !file ||
+    !file.type.startsWith("image/") ||
+    ["image/gif", "image/svg+xml"].includes(file.type.toLowerCase()) ||
+    file.size <= PRODUCT_IMAGE_MIN_BYTES ||
+    typeof createImageBitmap !== "function"
+  ) {
+    return file;
+  }
+
+  let bitmap;
+  try {
+    bitmap = await createImageBitmap(file);
+    const scale = Math.min(
+      1,
+      PRODUCT_IMAGE_MAX_EDGE / Math.max(bitmap.width, bitmap.height),
+    );
+    const width = Math.max(1, Math.round(bitmap.width * scale));
+    const height = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d");
+    if (!context) return file;
+    context.drawImage(bitmap, 0, 0, width, height);
+
+    const optimizedBlob = await new Promise((resolve) =>
+      canvas.toBlob(resolve, "image/webp", PRODUCT_IMAGE_WEBP_QUALITY),
+    );
+    if (!optimizedBlob || optimizedBlob.size >= file.size) return file;
+
+    const baseName = file.name.replace(/\.[^.]+$/, "") || "product-image";
+    return new File([optimizedBlob], `${baseName}.webp`, {
+      type: "image/webp",
+      lastModified: file.lastModified,
+    });
+  } catch (error) {
+    console.warn("Image optimization skipped; uploading the original file.", error);
+    return file;
+  } finally {
+    bitmap?.close();
+  }
+}
+
 const forceTodayDate = (set) => {
   const t = todayStr();
   set((h) => (h?.date === t ? h : { ...h, date: t }));
@@ -2091,6 +2140,8 @@ useLayoutEffect(() => {
 const [session, setSession] = useState(null);
 const [isAdmin, setIsAdmin] = useState(false);
 const [canManageCatalog, setCanManageCatalog] = useState(false);
+const [profileAccessStatus, setProfileAccessStatus] = useState("checking");
+const profileAccessRequestRef = useRef(0);
 const canAddCatalogProducts = isAdmin || canManageCatalog;
 
 // two-step local admin
@@ -3005,22 +3056,37 @@ const [showCatalogExportPanel, setShowCatalogExportPanel] = useState(false);
   useEffect(() => {
   const init = async () => {
     const { data } = await supabase.auth.getSession();
-    setSession(data.session ?? null);
-
     const adminPersist = localStorage.getItem("adminLogin") === "1";
-    if (data.session?.user?.id) {
-      const { data: prof } = await supabase
+    setSession(data.session ?? null);
+    const requestId = ++profileAccessRequestRef.current;
+    if (!data.session?.user?.id) {
+      setIsAdmin(adminPersist);
+      setCanManageCatalog(false);
+      setProfileAccessStatus("ready");
+      await startPayrollSyncRef.current?.(null, false);
+      return;
+    }
+
+    setProfileAccessStatus("checking");
+    try {
+      const { data: prof, error } = await supabase
         .from("profiles")
         .select("is_admin, can_manage_catalog")
         .eq("user_id", data.session.user.id)
         .maybeSingle();
+      if (error) throw error;
+      if (requestId !== profileAccessRequestRef.current) return;
       setIsAdmin(Boolean(prof?.is_admin) || adminPersist);
       setCanManageCatalog(Boolean(prof?.can_manage_catalog));
+      setProfileAccessStatus("ready");
       await startPayrollSyncRef.current?.(data.session, Boolean(prof?.is_admin));
-    } else {
+    } catch (error) {
+      if (requestId !== profileAccessRequestRef.current) return;
+      console.error("Could not load account permissions:", error);
       setIsAdmin(adminPersist);
       setCanManageCatalog(false);
-      await startPayrollSyncRef.current?.(null, false);
+      setProfileAccessStatus("error");
+      await startPayrollSyncRef.current?.(data.session, adminPersist);
     }
   };
   init();
@@ -3028,20 +3094,34 @@ const [showCatalogExportPanel, setShowCatalogExportPanel] = useState(false);
   const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => {
     setSession(s);
     const adminPersist = localStorage.getItem("adminLogin") === "1";
+    const requestId = ++profileAccessRequestRef.current;
     if (s?.user?.id) {
+      setProfileAccessStatus("checking");
       supabase
         .from("profiles")
         .select("is_admin, can_manage_catalog")
         .eq("user_id", s.user.id)
         .maybeSingle()
-        .then(async ({ data }) => {
+        .then(async ({ data, error }) => {
+          if (error) throw error;
+          if (requestId !== profileAccessRequestRef.current) return;
           setIsAdmin(Boolean(data?.is_admin) || adminPersist);
           setCanManageCatalog(Boolean(data?.can_manage_catalog));
+          setProfileAccessStatus("ready");
           await startPayrollSyncRef.current?.(s, Boolean(data?.is_admin));
+        })
+        .catch(async (error) => {
+          if (requestId !== profileAccessRequestRef.current) return;
+          console.error("Could not load account permissions:", error);
+          setIsAdmin(adminPersist);
+          setCanManageCatalog(false);
+          setProfileAccessStatus("error");
+          await startPayrollSyncRef.current?.(s, adminPersist);
         });
     } else {
       setIsAdmin(adminPersist);
       setCanManageCatalog(false);
+      setProfileAccessStatus("ready");
       startPayrollSyncRef.current?.(null, false);
     }
     setShowLoginBox(false);
@@ -3343,11 +3423,11 @@ const setCatalogStaffPassword = async (event) => {
   }, []);
 
   useEffect(() => {
-    if (isAdmin) loadMachines();
+    if (isAdmin || canManageCatalog) loadMachines();
     else setItems((current) => current.map((machine) => ({ ...machine, cost_price: null })));
     // Refresh the catalog when the signed-in role changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAdmin]);
+  }, [isAdmin, canManageCatalog]);
 
   /* ---------- SEARCH / FILTER ---------- */
   const [search, setSearch] = useState("");
@@ -3430,7 +3510,8 @@ const onSave = async (e) => {
     let image_url = editingImageUrl || "";
 
     if (form.imageFile) {
-      const ext = form.imageFile.name.split(".").pop().toLowerCase();
+      const uploadImage = await optimizeProductImage(form.imageFile);
+      const ext = uploadImage.name.split(".").pop().toLowerCase();
       const safeBase = form.name
         .trim()
         .toLowerCase()
@@ -3441,9 +3522,9 @@ const onSave = async (e) => {
 
       const { error: upErr } = await supabase.storage
         .from("images")
-        .upload(filePath, form.imageFile, {
+        .upload(filePath, uploadImage, {
           cacheControl: "3600",
-          contentType: form.imageFile.type || "image/jpeg",
+          contentType: uploadImage.type || "image/jpeg",
         });
 
       if (upErr) throw new Error("UPLOAD: " + upErr.message);
@@ -3588,7 +3669,8 @@ const onEditSave = async (e) => {
     let image_url = editingImageUrl || "";
 
     if (editForm.imageFile) {
-      const ext = editForm.imageFile.name.split(".").pop().toLowerCase();
+      const uploadImage = await optimizeProductImage(editForm.imageFile);
+      const ext = uploadImage.name.split(".").pop().toLowerCase();
       const safeBase = editForm.name
         .trim()
         .toLowerCase()
@@ -3599,9 +3681,9 @@ const onEditSave = async (e) => {
 
       const { error: upErr } = await supabase.storage
         .from("images")
-        .upload(filePath, editForm.imageFile, {
+        .upload(filePath, uploadImage, {
           cacheControl: "3600",
-          contentType: editForm.imageFile.type || "image/jpeg",
+          contentType: uploadImage.type || "image/jpeg",
         });
 
       if (upErr) throw new Error("UPLOAD: " + upErr.message);
@@ -12294,7 +12376,8 @@ body{
 .muted{ color:var(--muted); }
 .title{ margin:0; font-weight:800; letter-spacing:.2px; }
 
-.btn{ padding:6px 12px; border-radius:6px; border:1px solid var(--border); background:#f8f9fa; cursor:pointer; font-weight:600; }
+.btn{ padding:6px 12px; border-radius:6px; border:1px solid var(--border); background:#f8f9fa; color:var(--text); cursor:pointer; font-weight:600; }
+.session-badge-row > button:first-child{ color:#1f2937 !important; }
 .btn:hover{ background:#eef1f5; }
 .btn.primary{ background:var(--primary); border-color:var(--primary); color:#fff; }
 .btn.danger{ background:#fff5f5; border-color:#f3d1d1; color:#b11e1e; }
@@ -12773,7 +12856,7 @@ button.mini.primary{
 
       {/* session badge */}
       {(session || isAdmin) && (
-  <div style={{ marginTop: 8 }}>
+  <div className="session-badge-row" style={{ marginTop: 8 }}>
     <button onClick={signOut} style={{ marginRight: 8 }}>
       {session ? "Sign Out" : "Logout Admin"}
     </button>
@@ -12781,12 +12864,32 @@ button.mini.primary{
       style={{
         padding: "4px 8px",
         borderRadius: 6,
-        background: (isAdmin || canManageCatalog) ? "#e8f6ed" : "#f7e8e8",
-        color: (isAdmin || canManageCatalog) ? "#1f7a3f" : "#b11e1e",
+        background: (isAdmin || canManageCatalog)
+          ? "#e8f6ed"
+          : profileAccessStatus === "checking"
+            ? "#eef2f7"
+            : profileAccessStatus === "error"
+              ? "#fff4e5"
+              : "#f7e8e8",
+        color: (isAdmin || canManageCatalog)
+          ? "#1f7a3f"
+          : profileAccessStatus === "checking"
+            ? "#475467"
+            : profileAccessStatus === "error"
+              ? "#9a6700"
+              : "#b11e1e",
         marginRight: 8,
       }}
     >
-      {isAdmin ? "Admin: ON" : canManageCatalog ? "Manager logged in" : "Not admin"}
+      {isAdmin
+        ? "Admin: ON"
+        : canManageCatalog
+          ? "Manager logged in"
+          : profileAccessStatus === "checking"
+            ? "Checking access…"
+            : profileAccessStatus === "error"
+              ? "Access check failed"
+              : "Not admin"}
     </span>
     {session && (
       <span style={{ color: "#777", fontSize: 12 }}>
