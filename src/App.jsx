@@ -22206,7 +22206,7 @@ balanceAfterAdvance:
                     <h3 className="pname" title={m.name}>{m.name}</h3>
                     {m.specs && <p className="specs">{m.specs}</p>}
                     <p style={{ fontWeight: 700 }}>₹{inr(m.mrp)}</p>
-                    {(staffMode || isAdmin) && m.sell_price != null && (
+                    {(staffMode || isAdmin || canManageCatalog) && m.sell_price != null && (
   <div
     style={{
       fontWeight: 700,
