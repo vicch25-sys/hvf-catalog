@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import { createClient } from "@supabase/supabase-js";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+import SmartPayrollUpdate from "./SmartPayrollUpdate.jsx";
 
 // BodyPortal: safely render small overlays at <body> level
 const BodyPortal = ({ children }) => {
@@ -122,8 +123,10 @@ const PAYROLL_SHARED_KEYS = [
   "hvf.attendanceHistory",
   "hvf.savedPayrollWorksheets",
   "hvf.savedAdvanceBatches",
+  "hvf.advanceNoPaymentConfirmations",
   "hvf.savedStartingPayableBalances",
   "hvf.savedHistoricalSalaryPaymentBatches",
+  "hvf.smartPayrollCycleDrafts",
 ];
 
 const parsePayrollStorageValue = (value, fallback) => {
@@ -2074,8 +2077,10 @@ useLayoutEffect(() => {
   const [msg, setMsg] = useState("");
 
   /*** AUTH / MENUS ***/
-  const [session, setSession] = useState(null);
+const [session, setSession] = useState(null);
 const [isAdmin, setIsAdmin] = useState(false);
+const [canManageCatalog, setCanManageCatalog] = useState(false);
+const canAddCatalogProducts = isAdmin || canManageCatalog;
 
 // two-step local admin
 const [adminEmail, setAdminEmail] = useState("");
@@ -2083,6 +2088,10 @@ const [adminPin, setAdminPin] = useState("");
 const [adminStep, setAdminStep] = useState(null);
 
 const [showLoginBox, setShowLoginBox] = useState(false);
+const [showProductCreatorLogin, setShowProductCreatorLogin] = useState(false);
+const [productCreatorEmail, setProductCreatorEmail] = useState("");
+const [productCreatorPassword, setProductCreatorPassword] = useState("");
+const [productCreatorSigningIn, setProductCreatorSigningIn] = useState(false);
 
 // --- login menu refs & auto-close ---
 const loginMenuRef = useRef(null);
@@ -2111,7 +2120,7 @@ const closeLoginMenu = () => {
     else alert("Wrong PIN");
   };
 
-  // quotation “cart” mode (PIN 9990)
+  // quotation “cart” mode; the PIN is validated by Supabase, not in this bundle
   // seed from localStorage immediately so refresh doesn't reset UI
 const __boot = (() => {
   try { return JSON.parse(localStorage.getItem("quoteState") || "{}"); }
@@ -2176,6 +2185,28 @@ const [savedAdvanceBatches, setSavedAdvanceBatches] = useState(() => {
     return JSON.parse(
       localStorage.getItem("hvf.savedAdvanceBatches") || "[]"
     );
+  } catch {
+    return [];
+  }
+});
+const sortedSavedAdvanceDates = savedAdvanceBatches
+  .map((batch) => batch.advanceDate || batch.employees?.[0]?.payableToDate || "")
+  .filter((dateValue) => /^\d{4}-\d{2}-\d{2}$/.test(dateValue))
+  .sort();
+const latestSavedAdvanceDate = sortedSavedAdvanceDates[sortedSavedAdvanceDates.length - 1];
+const advanceReportDefaultEnd = latestSavedAdvanceDate || advanceDate;
+const [advanceReportFromDate, setAdvanceReportFromDate] = useState(() =>
+  advanceReportDefaultEnd
+    ? `${advanceReportDefaultEnd.slice(0, 7)}-01`
+    : ""
+);
+const [advanceReportToDate, setAdvanceReportToDate] = useState(
+  advanceReportDefaultEnd
+);
+const [advanceReportEmployeeType, setAdvanceReportEmployeeType] = useState(advanceTab);
+const [advanceNoPaymentConfirmations, setAdvanceNoPaymentConfirmations] = useState(() => {
+  try {
+    return JSON.parse(localStorage.getItem("hvf.advanceNoPaymentConfirmations") || "[]");
   } catch {
     return [];
   }
@@ -2345,6 +2376,18 @@ const [
     return [];
   }
 });
+
+const [smartPayrollCycleDrafts, setSmartPayrollCycleDrafts] = useState(() => {
+  try {
+    return JSON.parse(localStorage.getItem("hvf.smartPayrollCycleDrafts") || "[]");
+  } catch {
+    return [];
+  }
+});
+
+useEffect(() => {
+  localStorage.setItem("hvf.smartPayrollCycleDrafts", JSON.stringify(smartPayrollCycleDrafts));
+}, [smartPayrollCycleDrafts]);
 
 useEffect(() => {
   localStorage.setItem(
@@ -2554,6 +2597,13 @@ useEffect(() => {
 }, [savedAdvanceBatches]);
 
 useEffect(() => {
+  localStorage.setItem(
+    "hvf.advanceNoPaymentConfirmations",
+    JSON.stringify(advanceNoPaymentConfirmations)
+  );
+}, [advanceNoPaymentConfirmations]);
+
+useEffect(() => {
   if (advanceDate) {
     localStorage.setItem("hvf.advanceDate", advanceDate);
   }
@@ -2667,6 +2717,7 @@ const [attendanceHistory, setAttendanceHistory] = useState(() => {
 const [payrollSyncStatus, setPayrollSyncStatus] = useState(
   "Sign in with the admin email link on this device to sync payroll data."
 );
+const [payrollSyncRetrying, setPayrollSyncRetrying] = useState(false);
 const payrollSyncReadyRef = useRef(false);
 const payrollSyncLastJsonRef = useRef("");
 const payrollSyncUserRef = useRef("");
@@ -2757,8 +2808,10 @@ const [showCatalogExportPanel, setShowCatalogExportPanel] = useState(false);
     setAttendanceHistory(Array.isArray(payload?.["hvf.attendanceHistory"]) ? payload["hvf.attendanceHistory"] : []);
     setSavedPayrollWorksheets(Array.isArray(payload?.["hvf.savedPayrollWorksheets"]) ? payload["hvf.savedPayrollWorksheets"] : []);
     setSavedAdvanceBatches(Array.isArray(payload?.["hvf.savedAdvanceBatches"]) ? payload["hvf.savedAdvanceBatches"] : []);
+    setAdvanceNoPaymentConfirmations(Array.isArray(payload?.["hvf.advanceNoPaymentConfirmations"]) ? payload["hvf.advanceNoPaymentConfirmations"] : []);
     setSavedStartingPayableBalances(Array.isArray(payload?.["hvf.savedStartingPayableBalances"]) ? payload["hvf.savedStartingPayableBalances"] : []);
     setSavedHistoricalSalaryPaymentBatches(Array.isArray(payload?.["hvf.savedHistoricalSalaryPaymentBatches"]) ? payload["hvf.savedHistoricalSalaryPaymentBatches"] : []);
+    setSmartPayrollCycleDrafts(Array.isArray(payload?.["hvf.smartPayrollCycleDrafts"]) ? payload["hvf.smartPayrollCycleDrafts"] : []);
   };
   const startSharedPayrollSync = async (activeSession, verifiedAdmin) => {
     const userId = activeSession?.user?.id;
@@ -2780,8 +2833,10 @@ const [showCatalogExportPanel, setShowCatalogExportPanel] = useState(false);
         "hvf.attendanceHistory": attendanceHistory,
         "hvf.savedPayrollWorksheets": savedPayrollWorksheets,
         "hvf.savedAdvanceBatches": savedAdvanceBatches,
+        "hvf.advanceNoPaymentConfirmations": advanceNoPaymentConfirmations,
         "hvf.savedStartingPayableBalances": savedStartingPayableBalances,
         "hvf.savedHistoricalSalaryPaymentBatches": savedHistoricalSalaryPaymentBatches,
+        "hvf.smartPayrollCycleDrafts": smartPayrollCycleDrafts,
       };
       const localSnapshot = Object.fromEntries(PAYROLL_SHARED_KEYS.map((key) => [
         key,
@@ -2848,8 +2903,10 @@ const [showCatalogExportPanel, setShowCatalogExportPanel] = useState(false);
       "hvf.attendanceHistory": attendanceHistory,
       "hvf.savedPayrollWorksheets": savedPayrollWorksheets,
       "hvf.savedAdvanceBatches": savedAdvanceBatches,
+      "hvf.advanceNoPaymentConfirmations": advanceNoPaymentConfirmations,
       "hvf.savedStartingPayableBalances": savedStartingPayableBalances,
       "hvf.savedHistoricalSalaryPaymentBatches": savedHistoricalSalaryPaymentBatches,
+      "hvf.smartPayrollCycleDrafts": smartPayrollCycleDrafts,
     };
     const serialized = stablePayrollJson(payload);
     if (serialized === payrollSyncLastJsonRef.current) return undefined;
@@ -2869,8 +2926,43 @@ const [showCatalogExportPanel, setShowCatalogExportPanel] = useState(false);
     }, 650);
     return () => clearTimeout(timer);
   }, [session?.user?.id, payrollEmployees, attendanceEntries, attendanceHistory,
-    savedPayrollWorksheets, savedAdvanceBatches, savedStartingPayableBalances,
-    savedHistoricalSalaryPaymentBatches]);
+    savedPayrollWorksheets, savedAdvanceBatches, advanceNoPaymentConfirmations, savedStartingPayableBalances,
+    savedHistoricalSalaryPaymentBatches, smartPayrollCycleDrafts]);
+
+  const retryCurrentPayrollCloudSync = async () => {
+    if (!session?.user?.id || !isAdmin) {
+      setPayrollSyncStatus("Sign in with the admin email link on this device to sync payroll data.");
+      return;
+    }
+    setPayrollSyncRetrying(true);
+    setPayrollSyncStatus("Retrying payroll sync…");
+    const payload = {
+      "hvf.payrollEmployees": payrollEmployees,
+      "hvf.attendanceEntries": attendanceEntries,
+      "hvf.attendanceHistory": attendanceHistory,
+      "hvf.savedPayrollWorksheets": savedPayrollWorksheets,
+      "hvf.savedAdvanceBatches": savedAdvanceBatches,
+      "hvf.advanceNoPaymentConfirmations": advanceNoPaymentConfirmations,
+      "hvf.savedStartingPayableBalances": savedStartingPayableBalances,
+      "hvf.savedHistoricalSalaryPaymentBatches": savedHistoricalSalaryPaymentBatches,
+      "hvf.smartPayrollCycleDrafts": smartPayrollCycleDrafts,
+    };
+    const serialized = stablePayrollJson(payload);
+    try {
+      const { error } = await supabase
+        .from(PAYROLL_SHARED_TABLE)
+        .upsert({ id: "primary", payload, updated_at: new Date().toISOString() });
+      if (error) throw error;
+      payrollSyncLastJsonRef.current = serialized;
+      payrollSyncReadyRef.current = true;
+      localStorage.setItem("hvf.payrollCloudSynced", "1");
+      setPayrollSyncStatus("Payroll data synced across devices.");
+    } catch (error) {
+      setPayrollSyncStatus(`Payroll changes are saved on this device; cloud sync failed: ${error?.message || "could not reach the shared database"}`);
+    } finally {
+      setPayrollSyncRetrying(false);
+    }
+  };
 
   useEffect(() => {
     // ensure today's date is in the editor on mount too
@@ -2904,13 +2996,15 @@ const [showCatalogExportPanel, setShowCatalogExportPanel] = useState(false);
     if (data.session?.user?.id) {
       const { data: prof } = await supabase
         .from("profiles")
-        .select("is_admin")
+        .select("is_admin, can_manage_catalog")
         .eq("user_id", data.session.user.id)
         .maybeSingle();
       setIsAdmin(Boolean(prof?.is_admin) || adminPersist);
+      setCanManageCatalog(Boolean(prof?.can_manage_catalog));
       await startPayrollSyncRef.current?.(data.session, Boolean(prof?.is_admin));
     } else {
       setIsAdmin(adminPersist);
+      setCanManageCatalog(false);
       await startPayrollSyncRef.current?.(null, false);
     }
   };
@@ -2922,15 +3016,17 @@ const [showCatalogExportPanel, setShowCatalogExportPanel] = useState(false);
     if (s?.user?.id) {
       supabase
         .from("profiles")
-        .select("is_admin")
+        .select("is_admin, can_manage_catalog")
         .eq("user_id", s.user.id)
         .maybeSingle()
         .then(async ({ data }) => {
           setIsAdmin(Boolean(data?.is_admin) || adminPersist);
+          setCanManageCatalog(Boolean(data?.can_manage_catalog));
           await startPayrollSyncRef.current?.(s, Boolean(data?.is_admin));
         });
     } else {
       setIsAdmin(adminPersist);
+      setCanManageCatalog(false);
       startPayrollSyncRef.current?.(null, false);
     }
     setShowLoginBox(false);
@@ -2995,6 +3091,7 @@ const signOut = async () => {
   try { await supabase.auth.signOut(); } catch {}
   localStorage.removeItem("adminLogin");
   setIsAdmin(false);
+  setCanManageCatalog(false);
 };
 
 // Sign in with a magic link so Supabase gives us a real user session (auth.uid())
@@ -3009,6 +3106,47 @@ const magicLogin = async () => {
 
   if (error) return alert(error.message);
   alert("Magic link sent. Open it from your email, then return to this tab.");
+};
+
+const signInAsProductCreator = async (event) => {
+  event.preventDefault();
+  if (!productCreatorEmail.trim() || !productCreatorPassword) {
+    alert("Enter the staff email and password.");
+    return;
+  }
+
+  setProductCreatorSigningIn(true);
+  try {
+    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+      email: productCreatorEmail.trim(),
+      password: productCreatorPassword,
+    });
+    if (authError) throw authError;
+
+    const { data: profile, error: profileError } = await supabase
+      .from("profiles")
+      .select("is_admin, can_manage_catalog")
+      .eq("user_id", authData.user.id)
+      .maybeSingle();
+    if (profileError) throw profileError;
+    if (!profile?.can_manage_catalog && !profile?.is_admin) {
+      await supabase.auth.signOut();
+      throw new Error("This account has not been granted catalog management access.");
+    }
+
+    setCanManageCatalog(Boolean(profile.can_manage_catalog));
+    setIsAdmin(Boolean(profile.is_admin));
+    setProductCreatorPassword("");
+    setShowProductCreatorLogin(false);
+    alert(profile.is_admin
+      ? "Signed in. This account has admin access."
+      : "Signed in with permission to add and edit catalog products.");
+  } catch (error) {
+    console.error("Product-creator sign-in failed:", error);
+    alert(error?.message || "Could not sign in. Check the email and password.");
+  } finally {
+    setProductCreatorSigningIn(false);
+  }
 };
 
   /* ---------- LOAD DATA ---------- */
@@ -3060,7 +3198,7 @@ const magicLogin = async () => {
         (signal) =>
           supabase
             .from("machines")
-            .select("*")
+            .select("id,name,category,mrp,sell_price,is_hidden,specs,image_url,created_at,price_updated_at,price_change_count")
             .order("created_at", { ascending: false })
             .abortSignal(signal),
         // Keep transient failures out of the red error slot; the loading state
@@ -3068,15 +3206,69 @@ const magicLogin = async () => {
         () => setMsg("")
       );
 
-      setItems(data || []);
+      let safeItems = data || [];
+      if (isAdmin || canManageCatalog) {
+        let { data: privateCosts, error: privateError } = await supabase.rpc("get_catalog_machine_costs");
+        if (privateError && /get_catalog_machine_costs|schema cache|could not find the function/i.test(privateError.message || "")) {
+          if (canManageCatalog && !isAdmin) {
+            privateCosts = [];
+            privateError = null;
+          } else {
+          // Keep the current localhost build usable until the matching migration
+          // is applied. Once installed, the guarded RPC is the only cost path.
+          const privateResult = await supabase
+            .from("machine_private_costs")
+            .select("machine_id,cost_price");
+          if (!privateResult.error) {
+            privateCosts = privateResult.data || [];
+            privateError = null;
+          } else {
+            const legacyResult = await supabase
+              .from("machines")
+              .select("id,cost_price");
+            if (legacyResult.error) throw legacyResult.error;
+            privateCosts = (legacyResult.data || []).map((row) => ({ machine_id: row.id, cost_price: row.cost_price }));
+            privateError = null;
+          }
+          }
+        }
+        if (privateError) throw privateError;
+        const costsByMachineId = new Map(privateCosts.map((row) => [String(row.machine_id), row.cost_price]));
+        safeItems = (data || []).map((machine) => ({ ...machine, cost_price: costsByMachineId.get(String(machine.id)) ?? null }));
+      } else {
+        safeItems = (data || []).map((machine) => ({ ...machine, cost_price: null }));
+      }
+      setItems(safeItems);
       setMsg("");
+      return safeItems;
     } catch (error) {
       console.error("Catalog loading failed:", error);
       setMsg(error.message || "Catalog loading failed.");
       setItems([]);
+      return [];
     } finally {
       setLoading(false);
     }
+  };
+
+  const writeMachineCost = async (machineId, costPrice) => {
+    if (!isAdmin && !canManageCatalog) throw new Error("This account cannot save catalog prices.");
+    const { error } = await supabase.rpc("set_catalog_machine_cost", {
+      p_machine_id: String(machineId),
+      p_cost_price: costPrice,
+    });
+    if (error && /set_catalog_machine_cost|schema cache|could not find the function/i.test(error.message || "") && isAdmin) {
+      const legacyResult = await supabase
+        .from("machines")
+        .update({ cost_price: costPrice })
+        .eq("id", machineId);
+      if (!legacyResult.error) return;
+      throw legacyResult.error;
+    }
+    if (error && canManageCatalog && !isAdmin && /set_catalog_machine_cost|schema cache|could not find the function/i.test(error.message || "")) {
+      throw new Error("The protected catalog price migration must be applied before staff can save prices.");
+    }
+    if (error) throw error;
   };
 
   const loadCategories = async () => {
@@ -3103,6 +3295,13 @@ const magicLogin = async () => {
     loadMachines();
     loadCategories();
   }, []);
+
+  useEffect(() => {
+    if (isAdmin) loadMachines();
+    else setItems((current) => current.map((machine) => ({ ...machine, cost_price: null })));
+    // Refresh the catalog when the signed-in role changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdmin]);
 
   /* ---------- SEARCH / FILTER ---------- */
   const [search, setSearch] = useState("");
@@ -3160,13 +3359,14 @@ useEffect(() => {
     if (files) setForm((f) => ({ ...f, imageFile: files[0] || null }));
     else setForm((f) => ({ ...f, [name]: value }));
   };
- const onSave = async (e) => {
+const onSave = async (e) => {
   e.preventDefault();
-  if (!isAdmin) return alert("Admins only.");
+  if (!canAddCatalogProducts) return alert("Sign in with an authorized product-creator account to add products.");
+  if (editingProductId && !canAddCatalogProducts) return alert("This account cannot edit catalog products.");
 
   const { data: s } = await supabase.auth.getSession();
   if (!s?.session?.user?.id) {
-    alert("Please use 'Sign in (email link)' first, then try again.");
+    alert("Please sign in with your staff email and password before saving.");
     return;
   }
 
@@ -3216,7 +3416,6 @@ useEffect(() => {
       category: form.category,
       mrp: Number(form.mrp),
       sell_price: form.sell_price ? Number(form.sell_price) : null,
-      cost_price: form.cost_price ? Number(form.cost_price) : null,
       is_hidden: Boolean(form.is_hidden),
       specs: form.specs || "",
       image_url,
@@ -3231,12 +3430,14 @@ useEffect(() => {
       if (updErr) throw new Error("UPDATE: " + updErr.message);
     } else {
       const insertMachine = async () => {
-        const { error } = await supabase.from("machines").insert(payload);
+        const { data, error } = await supabase.from("machines").insert(payload).select("id").single();
         if (error) throw error;
+        return data?.id;
       };
 
+      let insertedMachineId = null;
       try {
-        await insertMachine();
+        insertedMachineId = await insertMachine();
       } catch (insertError) {
         const insertMessage = insertError?.message || String(insertError);
         const isNetworkFailure =
@@ -3252,26 +3453,23 @@ useEffect(() => {
         // A lost response can mean the database committed the first insert.
         // Check for this exact hidden item before retrying to avoid duplicates.
         const isAlreadySaved = async () => {
-          let query = supabase
+          const { data, error } = await supabase
             .from("machines")
             .select("id")
             .eq("name", payload.name)
             .eq("category", payload.category)
             .eq("mrp", payload.mrp)
             .eq("is_hidden", true);
-
-          query = payload.sell_price == null
-            ? query.is("sell_price", null)
-            : query.eq("sell_price", payload.sell_price);
-
-          const { data, error } = await query.limit(1);
           if (error) throw error;
-          return Boolean(data?.length);
+          const match = (data || [])[0];
+          return match?.id || null;
         };
 
         const verifyAfterFailure = async (cause) => {
           try {
-            return await isAlreadySaved();
+            const existingId = await isAlreadySaved();
+            if (existingId) insertedMachineId = existingId;
+            return Boolean(existingId);
           } catch (verifyError) {
             throw new Error(
               `INSERT: ${cause?.message || String(cause)}. Could not verify whether it saved: ${verifyError?.message || String(verifyError)}. Please check the hidden products list before trying again.`
@@ -3283,7 +3481,7 @@ useEffect(() => {
         if (!savedAfterFirstFailure) {
           await new Promise((resolve) => setTimeout(resolve, 700));
           try {
-            await insertMachine();
+            insertedMachineId = await insertMachine();
           } catch (retryError) {
             const savedAfterRetryFailure = await verifyAfterFailure(retryError);
             if (!savedAfterRetryFailure) {
@@ -3292,6 +3490,14 @@ useEffect(() => {
               );
             }
           }
+        }
+      }
+
+      if ((isAdmin || canManageCatalog) && form.cost_price !== "" && insertedMachineId) {
+        try {
+          await writeMachineCost(insertedMachineId, Number(form.cost_price));
+        } catch (costError) {
+          throw new Error("COST PRICE: " + (costError?.message || costError));
         }
       }
     }
@@ -3323,7 +3529,7 @@ useEffect(() => {
 
 const onEditSave = async (e) => {
   e.preventDefault();
-  if (!isAdmin) return alert("Admins only.");
+  if (!canAddCatalogProducts || (!isAdmin && !quoteMode)) return alert("This account cannot edit catalog products.");
   if (!editingProductId) return alert("No product selected for editing.");
 
   if (!editForm.name || !editForm.category || !editForm.mrp) {
@@ -3369,7 +3575,6 @@ const onEditSave = async (e) => {
       category: editForm.category,
       mrp: Number(editForm.mrp),
       sell_price: nextSellPrice,
-      cost_price: nextCostPrice,
       is_hidden: Boolean(editForm.is_hidden),
       specs: editForm.specs || "",
       image_url,
@@ -3381,6 +3586,14 @@ const onEditSave = async (e) => {
       .eq("id", editingProductId);
 
     if (updErr) throw new Error("UPDATE: " + updErr.message);
+
+    if (isAdmin || canManageCatalog) {
+      try {
+        await writeMachineCost(editingProductId, nextCostPrice);
+      } catch (costError) {
+        throw new Error("COST PRICE: " + (costError?.message || costError));
+      }
+    }
 
     setEditingProductId(null);
     setEditingImageUrl("");
@@ -5225,7 +5438,7 @@ const getEmployeeWeeklyOffForDate = (emp, dateKey) => {
   return applicableHistory[applicableHistory.length - 1].weekly_off || fallbackWeeklyOff;
 };
 
-const calculateWeeklyBonusForEmployee = (emp, fromDate, toDate) => {
+const calculateWeeklyBonusForEmployee = (emp, fromDate, toDate, attendanceSource = attendanceEntries) => {
   if (!emp || !fromDate || !toDate) return 0;
 
   let bonusDays = 0;
@@ -5306,7 +5519,7 @@ const calculateWeeklyBonusForEmployee = (emp, fromDate, toDate) => {
       }
 
       const key = `${workDateKey}_${emp.id}`;
-      const status = attendanceEntries[key] || "";
+      const status = attendanceSource[key] || "";
 
       previousSixStatuses.push(status);
     }
@@ -7149,6 +7362,291 @@ setShowHistoricalAdvanceConfirmDialog(true);
   };
 
   reader.readAsArrayBuffer(file);
+};
+
+const buildAdvanceRegisterReport = () => {
+  const normalizeType = (value) =>
+    String(value || "")
+      .trim()
+      .toLowerCase()
+      .replace(/[\s-]+/g, "_");
+
+  const selectedType = normalizeType(advanceReportEmployeeType);
+  const employeeById = new Map(
+    payrollEmployees.map((employee) => [String(employee.id), employee])
+  );
+  const rowsByKey = new Map();
+
+  const typeIsIncluded = (employeeType) =>
+    selectedType === "all" || normalizeType(employeeType) === selectedType;
+
+  payrollEmployees
+    .filter((employee) => typeIsIncluded(employee.type))
+    .forEach((employee) => {
+      rowsByKey.set(`id:${employee.id}`, {
+        name: employee.name || "Unnamed employee",
+        employeeId: String(employee.id),
+        regularAmounts: new Map(),
+        emergencyEntries: [],
+        total: 0,
+      });
+    });
+
+  const regularDates = new Set();
+  let paidEntries = 0;
+
+  savedAdvanceBatches.forEach((batch) => {
+    (batch.employees || []).forEach((entry) => {
+      const entryDate =
+        entry.advanceDate ||
+        batch.advanceDate ||
+        entry.paymentDate ||
+        entry.payableToDate ||
+        "";
+      if (
+        !/^\d{4}-\d{2}-\d{2}$/.test(entryDate) ||
+        entryDate < advanceReportFromDate ||
+        entryDate > advanceReportToDate
+      ) {
+        return;
+      }
+
+      const amount = Number(entry.advanceAmount ?? entry.amount ?? 0);
+      if (!Number.isFinite(amount) || amount <= 0) return;
+
+      const currentEmployee = employeeById.get(String(entry.employeeId));
+      const employeeType = entry.employeeType || currentEmployee?.type || "";
+      if (!typeIsIncluded(employeeType)) return;
+
+      const employeeId =
+        entry.employeeId ?? currentEmployee?.id ?? "";
+      const rowKey = employeeId !== ""
+        ? `id:${employeeId}`
+        : `name:${String(entry.employeeName || currentEmployee?.name || "Unknown").toLowerCase()}`;
+      let row = rowsByKey.get(rowKey);
+      if (!row) {
+        row = {
+          name: entry.employeeName || currentEmployee?.name || "Unknown employee",
+          employeeId: String(employeeId),
+          regularAmounts: new Map(),
+          emergencyEntries: [],
+          total: 0,
+        };
+        rowsByKey.set(rowKey, row);
+      }
+
+      const weekday = new Date(`${entryDate}T12:00:00`).getDay();
+      const explicitlyEmergency = /emergency/i.test(
+        `${batch.remarks || ""} ${entry.remarks || ""}`
+      );
+      const isEmergency = explicitlyEmergency || ![2, 6].includes(weekday);
+
+      row.total += amount;
+      paidEntries += 1;
+      if (isEmergency) {
+        row.emergencyEntries.push({ date: entryDate, amount });
+      } else {
+        regularDates.add(entryDate);
+        row.regularAmounts.set(
+          entryDate,
+          (row.regularAmounts.get(entryDate) || 0) + amount
+        );
+      }
+    });
+  });
+
+  return {
+    rows: [...rowsByKey.values()].sort((a, b) =>
+      a.name.localeCompare(b.name, "en", { sensitivity: "base" })
+    ),
+    regularDates: [...regularDates].sort(),
+    paidEntries,
+  };
+};
+
+const downloadAdvanceRegisterPdf = async () => {
+  if (!advanceReportFromDate || !advanceReportToDate) {
+    alert("Select both a From Date and a To Date.");
+    return;
+  }
+  if (advanceReportFromDate > advanceReportToDate) {
+    alert("From Date must be on or before To Date.");
+    return;
+  }
+
+  const report = buildAdvanceRegisterReport();
+  if (!report.paidEntries) {
+    alert("There are no paid advances in this date range for the selected employee type.");
+    return;
+  }
+  if (report.regularDates.length > 34) {
+    alert("This range has too many regular advance dates for a readable one-page PDF. Choose a shorter date range.");
+    return;
+  }
+
+  const formatDate = (dateValue, includeYear = false) => {
+    const [year, month, day] = dateValue.split("-");
+    return includeYear ? `${day}/${month}/${year}` : `${day}/${month}`;
+  };
+  const formatAmount = (amount) =>
+    Math.round(Number(amount || 0)).toLocaleString("en-IN");
+  const includeYearInColumns = new Set(
+    report.regularDates.map((dateValue) => dateValue.slice(0, 4))
+  ).size > 1;
+
+  const pageFormat = report.regularDates.length > 16 || report.rows.length > 35
+    ? "a3"
+    : "a4";
+  const doc = new jsPDF({
+    orientation: "landscape",
+    unit: "pt",
+    format: pageFormat,
+  });
+  try {
+    await loadRupeeFont(doc);
+  } catch (error) {
+    console.error("Advance register PDF font could not be loaded:", error);
+  }
+
+  const pdfFont = doc.getFontList?.()?.NotoSans ? "NotoSans" : "helvetica";
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const margin = 18;
+  const nameWidth = 112;
+  const emergencyDateWidth = 92;
+  const emergencyAmountWidth = 78;
+  const totalWidth = 56;
+  const regularColumnWidth = report.regularDates.length
+    ? Math.max(
+        24,
+        Math.min(
+          48,
+          (pageWidth - margin * 2 - nameWidth - emergencyDateWidth - emergencyAmountWidth - totalWidth) /
+            report.regularDates.length
+        )
+      )
+    : 0;
+  const fontSize = report.regularDates.length > 24 ? 5.8 : report.regularDates.length > 14 ? 6.4 : 7.2;
+
+  const title = "HVF Agency — Advance Register";
+  const dateRange = `${formatDate(advanceReportFromDate, true)} to ${formatDate(advanceReportToDate, true)}`;
+  doc.setFont(pdfFont, "bold");
+  doc.setFontSize(16);
+  doc.text(title, pageWidth / 2, 26, { align: "center" });
+  doc.setFont(pdfFont, "normal");
+  doc.setFontSize(8);
+  const reportTypeKey = String(advanceReportEmployeeType || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+  const typeLabel = reportTypeKey === "all"
+    ? "All employees"
+    : reportTypeKey === "contractual"
+      ? "Contractual employees"
+      : "Non-contractual employees";
+  doc.text(`${dateRange}  •  ${typeLabel}`, pageWidth / 2, 40, { align: "center" });
+  doc.setTextColor(90, 98, 110);
+  doc.setFontSize(6.5);
+  doc.text(
+    "Regular Tuesday/Saturday advances are shown by date; emergency and off-schedule advances are listed separately.",
+    pageWidth / 2,
+    51,
+    { align: "center" }
+  );
+  doc.setTextColor(17, 24, 39);
+
+  const headers = [
+    "Employee",
+    ...report.regularDates.map((dateValue) => formatDate(dateValue, includeYearInColumns)),
+    "Emergency date(s)",
+    "Emergency amount(s)",
+    "Total advance",
+  ];
+  const regularTotals = report.regularDates.map((dateValue) =>
+    report.rows.reduce((total, row) => total + (row.regularAmounts.get(dateValue) || 0), 0)
+  );
+  const emergencyTotal = report.rows.reduce(
+    (total, row) => total + row.emergencyEntries.reduce((sum, entry) => sum + entry.amount, 0),
+    0
+  );
+  const grandTotal = report.rows.reduce((total, row) => total + row.total, 0);
+
+  const body = report.rows.map((row) => {
+    const emergencyEntries = [...row.emergencyEntries].sort((a, b) => a.date.localeCompare(b.date));
+    return [
+      row.name,
+      ...report.regularDates.map((dateValue) => {
+        const amount = row.regularAmounts.get(dateValue) || 0;
+        return amount > 0 ? formatAmount(amount) : "—";
+      }),
+      emergencyEntries.length
+        ? emergencyEntries.map((entry) => formatDate(entry.date, true)).join(", ")
+        : "—",
+      emergencyEntries.length
+        ? emergencyEntries.map((entry) => `₹${formatAmount(entry.amount)}`).join(", ")
+        : "—",
+      formatAmount(row.total),
+    ];
+  });
+
+  body.push([
+    "TOTAL",
+    ...regularTotals.map(formatAmount),
+    "",
+    `₹${formatAmount(emergencyTotal)}`,
+    `₹${formatAmount(grandTotal)}`,
+  ]);
+
+  autoTable(doc, {
+    head: [headers],
+    body,
+    startY: 58,
+    margin: { left: margin, right: margin, top: 58, bottom: 18 },
+    tableWidth: "auto",
+    theme: "grid",
+    pageBreak: "avoid",
+    rowPageBreak: "avoid",
+    styles: {
+      font: pdfFont,
+      fontSize,
+      cellPadding: 2.2,
+      lineColor: [203, 213, 225],
+      lineWidth: 0.35,
+      textColor: [31, 41, 55],
+      overflow: "linebreak",
+      valign: "middle",
+      minCellHeight: 11,
+    },
+    headStyles: {
+      fillColor: [31, 78, 64],
+      textColor: [255, 255, 255],
+      fontStyle: "bold",
+      halign: "center",
+      minCellHeight: 17,
+    },
+    columnStyles: {
+      0: { cellWidth: nameWidth, fontStyle: "bold", halign: "left" },
+      ...Object.fromEntries(
+        report.regularDates.map((_, index) => [index + 1, { cellWidth: regularColumnWidth, halign: "right" }])
+      ),
+      [headers.length - 3]: { cellWidth: emergencyDateWidth, halign: "center" },
+      [headers.length - 2]: { cellWidth: emergencyAmountWidth, halign: "right" },
+      [headers.length - 1]: { cellWidth: totalWidth, halign: "right", fontStyle: "bold" },
+    },
+    didParseCell: (data) => {
+      if (data.section === "body" && data.row.index === body.length - 1) {
+        data.cell.styles.fillColor = [226, 232, 240];
+        data.cell.styles.textColor = [15, 23, 42];
+        data.cell.styles.fontStyle = "bold";
+      }
+    },
+  });
+
+  if (doc.getNumberOfPages() > 1) {
+    alert("This range will not fit legibly on one page. Choose a shorter date range and print again.");
+    return;
+  }
+
+  doc.save(`HVF_Advance_Register_${advanceReportFromDate}_to_${advanceReportToDate}.pdf`);
 };
 
 const downloadAdvanceSummaryPdf = async (batch) => {
@@ -11418,6 +11916,214 @@ function restoreSnapshot(snap) {
   }
 }
 
+const saveSmartPayrollUpdate = (preview) => {
+  const attendanceNext = { ...attendanceEntries };
+  preview.attendance.forEach((entry) => {
+    if (!attendanceNext[entry.key]) attendanceNext[entry.key] = entry.value;
+  });
+
+  const groupedAdvances = preview.advances.reduce((groups, entry) => {
+    (groups[entry.advanceDate] ||= []).push(entry);
+    return groups;
+  }, {});
+  const now = new Date().toISOString();
+  const importedBatches = Object.entries(groupedAdvances).map(([advanceDate, entries]) => ({
+    id: `SMART-ADV-${Date.now()}-${advanceDate}`,
+    advanceDate,
+    createdAt: now,
+    employees: entries.map((entry) => ({
+      employeeId: entry.employeeId,
+      employeeName: entry.employeeName,
+      employeeType: entry.employeeType,
+      branch: entry.branch,
+      payableFromDate: "",
+      payableToDate: advanceDate,
+      grossPayable: 0,
+      openingPayable: 0,
+      payableDays: 0,
+      present: 0,
+      halfday: 0,
+      absent: 0,
+      publicholiday: 0,
+      bonus: 0,
+      previousAdvance: 0,
+      carryForwardBalance: 0,
+      payableBeforeAdvance: 0,
+      advanceAmount: entry.amount,
+      paymentMode: String(entry.paymentMode).toLowerCase() === "online" ? "online" : "cash",
+      remarks: `${entry.emergency?.toLowerCase() === "yes" ? "Emergency advance. " : ""}${entry.remarks || "Imported from Smart Payroll Update"}`,
+      balanceAfterAdvance: 0,
+      smartPayrollImport: true,
+    })),
+  }));
+  const advancesNext = [...savedAdvanceBatches, ...importedBatches];
+  const paidAdvanceKeys = new Set(preview.advances.map((entry) => `${entry.advanceDate}|${entry.employeeId}`));
+  const noPaymentKeys = new Set(advanceNoPaymentConfirmations.map((entry) => `${entry.date}|${entry.employeeId}`));
+  preview.noAdvanceConfirmations.forEach((entry) => noPaymentKeys.add(`${entry.date}|${entry.employeeId}`));
+  paidAdvanceKeys.forEach((key) => noPaymentKeys.delete(key));
+  const noPaymentNext = Array.from(noPaymentKeys).map((key) => {
+    const [date, employeeId] = key.split("|");
+    const existing = advanceNoPaymentConfirmations.find((entry) => `${entry.date}|${entry.employeeId}` === key)
+      || preview.noAdvanceConfirmations.find((entry) => `${entry.date}|${entry.employeeId}` === key);
+    return existing || { date, employeeId };
+  });
+
+  const historicalSalaryGroups = preview.previousSalary.reduce((groups, payment) => {
+    const groupKey = `${payment.employeeType || "non_contractual"}|${payment.paymentDate}`;
+    (groups[groupKey] ||= []).push({
+      employeeId: payment.employeeId,
+      employeeName: payment.employeeName,
+      employeeType: payment.employeeType,
+      branch: payment.branch,
+      salaryPeriodFrom: payment.salaryPeriodFrom,
+      salaryPeriodTo: payment.salaryPeriodTo,
+      paymentDate: payment.paymentDate,
+      amount: payment.amount,
+      paymentMode: String(payment.paymentMode).toLowerCase() === "online" ? "Online" : "Cash",
+      remarks: payment.remarks || "Imported from Smart Payroll Update",
+      source: "smart_payroll_update",
+    });
+    return groups;
+  }, {});
+  const historicalSalaryNext = [...savedHistoricalSalaryPaymentBatches, ...Object.entries(historicalSalaryGroups).map(([groupKey, payments]) => {
+    const [employeeType, paymentDate] = groupKey.split("|");
+    return {
+    id: `SMART-SALARY-HISTORY-${Date.now()}-${employeeType}-${paymentDate}`,
+    source: "smart_payroll_update",
+    paymentDate,
+    createdAt: now,
+    employeeType,
+    periodFrom: payments.reduce((min, payment) => payment.salaryPeriodFrom < min ? payment.salaryPeriodFrom : min, payments[0].salaryPeriodFrom),
+    periodTo: payments.reduce((max, payment) => payment.salaryPeriodTo > max ? payment.salaryPeriodTo : max, payments[0].salaryPeriodTo),
+    payments,
+  };})];
+
+  const priorDraft = smartPayrollCycleDrafts.find((draft) =>
+    draft.periodStart === preview.cycle.periodStart && draft.periodEnd === preview.cycle.periodEnd
+  );
+  const adjustmentByEmployee = new Map((priorDraft?.employees || []).map((entry) => [String(entry.employeeId), {
+    adjustment: Number(entry.adjustment || 0),
+    reason: entry.adjustmentReason || "",
+  }]));
+  preview.salaryAdjustments.forEach((entry) => adjustmentByEmployee.set(String(entry.employeeId), entry));
+  const monthName = new Date(`${preview.cycle.periodEnd}T12:00:00`).toLocaleDateString("en-US", { month: "long" });
+  const attendanceCoverageGaps = payrollEmployees.filter((employee) =>
+    employee.type === "non_contractual" && (employee.status || "active") === "active"
+  ).reduce((total, employee) => total + getDateRangeList(preview.cycle.periodStart, preview.cycle.periodEnd).filter((date) => {
+    if (employee.joining_date && date < employee.joining_date) return false;
+    const dayName = new Date(`${date}T12:00:00`).toLocaleDateString("en-US", { weekday: "long" }).toLowerCase();
+    const isWeeklyOff = getEmployeeWeeklyOffForDate(employee, date) === dayName;
+    return !attendanceNext[`${date}_${employee.id}`] && !isWeeklyOff;
+  }).length, 0);
+  const employeesDraft = payrollEmployees
+    .filter((employee) => employee.type === "non_contractual" && (employee.status || "active") === "active")
+    .map((employee) => {
+      let present = 0;
+      let absent = 0;
+      let halfday = 0;
+      let publicholiday = 0;
+      getDateRangeList(preview.cycle.periodStart, preview.cycle.periodEnd).forEach((date) => {
+        if (employee.joining_date && date < employee.joining_date) return;
+        const status = attendanceNext[`${date}_${employee.id}`];
+        if (status === "present") present += 1;
+        else if (status === "absent") absent += 1;
+        else if (status === "halfday") halfday += 1;
+        else if (status === "publicholiday") publicholiday += 1;
+      });
+      const bonusDays = Number(calculateWeeklyBonusForEmployee(employee, preview.cycle.periodStart, preview.cycle.periodEnd, attendanceNext) || 0);
+      const payableDays = present + halfday * 0.5 + publicholiday + bonusDays;
+      const attendancePay = (Number(employee.base_salary || 0) / 30) * payableDays;
+      const opening = getEmployeeStartingPayableBalanceForPayroll(employee, monthName);
+      const carryForward = getEmployeeCarryForwardBeforePayroll(employee, monthName);
+      const advanceTotal = advancesNext.reduce((sum, batch) => {
+        if (batch.advanceDate < preview.cycle.periodStart || batch.advanceDate > preview.cycle.periodEnd) return sum;
+        return sum + (batch.employees || []).filter((entry) => String(entry.employeeId) === String(employee.id)).reduce((subtotal, entry) => subtotal + Number(entry.advanceAmount || 0), 0);
+      }, 0);
+      const adjustment = adjustmentByEmployee.get(String(employee.id)) || { adjustment: 0, reason: "" };
+      const calculatedNet = Number(opening.totalOpeningPayable || 0) + attendancePay + Number(carryForward || 0) - advanceTotal;
+      return {
+        employeeId: employee.id,
+        employeeName: employee.name,
+        branch: employee.branch || "",
+        baseSalary: Number(employee.base_salary || 0),
+        present,
+        absent,
+        halfday,
+        publicholiday,
+        payableDays,
+        bonusDays,
+        attendancePay,
+        advanceTotal,
+        openingBalance: Number(opening.totalOpeningPayable || 0),
+        carryForward: Number(carryForward || 0),
+        calculatedNet,
+        adjustment: Number(adjustment.adjustment || 0),
+        adjustmentReason: adjustment.reason || "",
+        adjustedNet: calculatedNet + Number(adjustment.adjustment || 0),
+      };
+    });
+
+  setAttendanceEntries(attendanceNext);
+  localStorage.setItem("hvf.attendanceEntries", JSON.stringify(attendanceNext));
+  if (importedBatches.length) {
+    setSavedAdvanceBatches(advancesNext);
+    localStorage.setItem("hvf.savedAdvanceBatches", JSON.stringify(advancesNext));
+  }
+  if (preview.noAdvanceConfirmations.length || paidAdvanceKeys.size) {
+    setAdvanceNoPaymentConfirmations(noPaymentNext);
+    localStorage.setItem("hvf.advanceNoPaymentConfirmations", JSON.stringify(noPaymentNext));
+  }
+  if (preview.previousSalary.length) {
+    setSavedHistoricalSalaryPaymentBatches(historicalSalaryNext);
+    localStorage.setItem("hvf.savedHistoricalSalaryPaymentBatches", JSON.stringify(historicalSalaryNext));
+  }
+  const savedSummary = `Saved ${preview.attendance.length} attendance marks, ${preview.advances.length} actual advances, and ${preview.noAdvanceConfirmations.length} confirmed no-advance dates, plus ${preview.previousSalary.length} missed historical salary payments.`;
+  if (preview.employeeScope === "contractual") {
+    alert(`${savedSummary} Contractual salary calculations were left unchanged because they follow separate rules; no salary payment was recorded.`);
+    return;
+  }
+  const newDraft = {
+    id: `SMART-SALARY-${preview.cycle.periodStart}-${preview.cycle.periodEnd}`,
+    ...preview.cycle,
+    status: attendanceCoverageGaps ? "Draft — attendance gaps remain; not paid" : "Draft — not paid",
+    attendanceCoverageGaps,
+    createdAt: now,
+    employees: employeesDraft,
+  };
+  const draftsNext = [...smartPayrollCycleDrafts.filter((draft) => draft.id !== newDraft.id), newDraft];
+  setSmartPayrollCycleDrafts(draftsNext);
+  localStorage.setItem("hvf.smartPayrollCycleDrafts", JSON.stringify(draftsNext));
+  alert(`${savedSummary} The unpaid ${monthName} salary draft for non-contractual employees was recalculated from saved data; no salary payment was recorded.`);
+};
+
+const updateSmartPayrollDraftEmployee = (draftId, employeeId, changes) => {
+  setSmartPayrollCycleDrafts((current) => {
+    const updated = current.map((draft) => draft.id !== draftId ? draft : {
+      ...draft,
+      employees: (draft.employees || []).map((employee) => {
+        if (String(employee.employeeId) !== String(employeeId)) return employee;
+        const next = { ...employee, ...changes };
+        if (Object.prototype.hasOwnProperty.call(changes, "adjustment")) {
+          next.adjustment = Number(changes.adjustment || 0);
+        }
+        next.adjustedNet = Number(next.calculatedNet || 0) + Number(next.adjustment || 0);
+        return next;
+      }),
+      updatedAt: new Date().toISOString(),
+    });
+    localStorage.setItem("hvf.smartPayrollCycleDrafts", JSON.stringify(updated));
+    return updated;
+  });
+};
+
+const deleteSmartPayrollDraft = (draftId) => {
+  setSmartPayrollCycleDrafts((current) => {
+    const updated = current.filter((draft) => draft.id !== draftId);
+    localStorage.setItem("hvf.smartPayrollCycleDrafts", JSON.stringify(updated));
+    return updated;
+  });
+};
+
 // -- undo handler used by the top-left button (with DB compensation)
 const canUndo = undoStack.length > 0;
 const onUndo = async () => {
@@ -11471,7 +12177,7 @@ return (
       }}
     >
 
-    {["attendance", "payroll", "advance", "startingPayableBalance"].includes(page) && (
+    {["attendance", "payroll", "advance", "startingPayableBalance", "smartPayrollUpdate"].includes(page) && (
       <div
         role="status"
         style={{
@@ -11490,7 +12196,29 @@ return (
           fontSize: 12,
         }}
       >
-        {payrollSyncStatus || "Payroll records are currently saved on this device."}
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span>{payrollSyncStatus || "Payroll records are currently saved on this device."}</span>
+          {payrollSyncStatus.includes("cloud sync failed") && (
+            <button
+              type="button"
+              onClick={retryCurrentPayrollCloudSync}
+              disabled={payrollSyncRetrying}
+              style={{
+                flex: "0 0 auto",
+                border: "1px solid #cbd5e1",
+                borderRadius: 7,
+                padding: "5px 8px",
+                background: "#fff",
+                color: "#334155",
+                cursor: payrollSyncRetrying ? "wait" : "pointer",
+                fontSize: 12,
+                fontWeight: 600,
+              }}
+            >
+              {payrollSyncRetrying ? "Retrying…" : "Retry sync"}
+            </button>
+          )}
+        </div>
       </div>
     )}
 
@@ -11826,6 +12554,15 @@ button.mini.primary{
   Sign in (email link)
 </button>
 
+<button
+  type="button"
+  onClick={() => { setShowProductCreatorLogin(true); closeLoginMenu(); }}
+  className="btn"
+  style={{ width: "100%", marginBottom: "var(--space-2)" }}
+>
+  Staff sign in (email and password)
+</button>
+
      <button
         onClick={() => { startAdminFlow(); closeLoginMenu(); }}
         className="btn"
@@ -11936,6 +12673,58 @@ button.mini.primary{
   </div>
 )}
 
+{showProductCreatorLogin && (
+  <form
+    onSubmit={signInAsProductCreator}
+    style={{
+      display: "inline-flex",
+      gap: 8,
+      alignItems: "center",
+      flexWrap: "wrap",
+      justifyContent: "center",
+      marginTop: 8,
+      padding: 10,
+      border: "1px solid #e5e7eb",
+      borderRadius: 10,
+    }}
+  >
+    <input
+      type="email"
+      autoComplete="username"
+      placeholder="Staff email"
+      value={productCreatorEmail}
+      onChange={(event) => setProductCreatorEmail(event.target.value)}
+      required
+      style={{ padding: "8px 10px", borderRadius: 6, border: "1px solid #ddd", minWidth: 210 }}
+    />
+    <input
+      type="password"
+      autoComplete="current-password"
+      placeholder="Staff password"
+      value={productCreatorPassword}
+      onChange={(event) => setProductCreatorPassword(event.target.value)}
+      required
+      style={{ padding: "8px 10px", borderRadius: 6, border: "1px solid #ddd", minWidth: 170 }}
+    />
+    <button type="submit" className="btn primary" disabled={productCreatorSigningIn}>
+      {productCreatorSigningIn ? "Signing in…" : "Sign in"}
+    </button>
+    <button
+      type="button"
+      className="btn"
+      onClick={() => {
+        setShowProductCreatorLogin(false);
+        setProductCreatorPassword("");
+      }}
+    >
+      Cancel
+    </button>
+    <span style={{ flexBasis: "100%", color: "#667085", fontSize: 12 }}>
+      Only Supabase accounts approved to manage catalog products can sign in here.
+    </span>
+  </form>
+)}
+
       {/* session badge */}
       {(session || isAdmin) && (
   <div style={{ marginTop: 8 }}>
@@ -11946,12 +12735,12 @@ button.mini.primary{
       style={{
         padding: "4px 8px",
         borderRadius: 6,
-        background: isAdmin ? "#e8f6ed" : "#f7e8e8",
-        color: isAdmin ? "#1f7a3f" : "#b11e1e",
+        background: (isAdmin || canManageCatalog) ? "#e8f6ed" : "#f7e8e8",
+        color: (isAdmin || canManageCatalog) ? "#1f7a3f" : "#b11e1e",
         marginRight: 8,
       }}
     >
-      {isAdmin ? "Admin: ON" : "Not admin"}
+      {isAdmin ? "Admin: ON" : canManageCatalog ? "Catalog staff" : "Not admin"}
     </span>
     {session && (
       <span style={{ color: "#777", fontSize: 12 }}>
@@ -12062,8 +12851,16 @@ button.mini.primary{
   </div>
 </div>
 
-    {/* --- Admin-only: Add Product panel --- */}
-    {isAdmin && (
+    {page === "catalog" && quoteMode && !canAddCatalogProducts && (
+      <p style={{ maxWidth: 1100, margin: "0 auto 12px", padding: "0 12px", color: "#667085", fontSize: 13 }}>
+        {session
+          ? "This account does not have catalog access yet. Ask an admin to enable catalog management for this staff account."
+          : "To manage catalog products in quotation mode, sign in with an approved staff email and password."}
+      </p>
+    )}
+
+    {/* Approved catalog staff can add and edit visible products in quotation mode. */}
+    {(isAdmin || (quoteMode && canManageCatalog)) && (
       <details className="paper section" style={{ maxWidth: 1100, margin: "0 auto 16px" }}>
         <summary className="btn" style={{ cursor: "pointer" }}>
           ➕ Add Product
@@ -12122,7 +12919,7 @@ button.mini.primary{
               />
             </label>
 
-            <label>
+            {(isAdmin || canManageCatalog) && <label>
               <div style={{ fontSize: 12, color: "#666" }}>Cost Price (₹)</div>
               <input
                 type="number"
@@ -12131,7 +12928,7 @@ button.mini.primary{
                 onChange={onChange}
                 min="0"
               />
-            </label>
+            </label>}
 
             <label>
               <div style={{ fontSize: 12, color: "#666" }}>Image{form.is_hidden ? " (optional)" : " *"}</div>
@@ -12143,7 +12940,7 @@ button.mini.primary{
               />
             </label>
 
-            <label style={{ gridColumn: "1 / -1", display: "flex", alignItems: "center", gap: 8 }}>
+            {isAdmin && <label style={{ gridColumn: "1 / -1", display: "flex", alignItems: "center", gap: 8 }}>
               <input
                 type="checkbox"
                 style={{ width: "auto", flex: "0 0 auto", margin: 0 }}
@@ -12152,7 +12949,7 @@ button.mini.primary{
                 onChange={(e) => setForm((f) => ({ ...f, is_hidden: e.target.checked }))}
               />
               <span>Hide from public catalog (keep available for quotations)</span>
-            </label>
+            </label>}
 
             {isAdmin && (
               <label style={{ gridColumn: "1 / -1", display: "flex", alignItems: "center", gap: 8 }}>
@@ -12189,7 +12986,7 @@ button.mini.primary{
         </form>
       </details>
     )}
-{isAdmin && editingProductId && (
+{(isAdmin || (quoteMode && canManageCatalog)) && editingProductId && (
   <details className="paper section" style={{ maxWidth: 1100, margin: "0 auto 16px" }} open>
     <summary className="btn" style={{ cursor: "pointer", background: "#fff3cd" }}>
       ✏️ Edit Product
@@ -12246,7 +13043,7 @@ button.mini.primary{
       />
     </label>
 
-    <label>
+    {(isAdmin || canManageCatalog) && <label>
       <div style={{ fontSize: 12, color: "#666" }}>Cost Price (₹)</div>
       <input
         type="number"
@@ -12255,7 +13052,7 @@ button.mini.primary{
         onChange={(e) => setEditForm((f) => ({ ...f, cost_price: e.target.value }))}
         min="0"
       />
-    </label>
+    </label>}
 
     <label>
       <div style={{ fontSize: 12, color: "#666" }}>Replace Image</div>
@@ -12271,7 +13068,7 @@ button.mini.primary{
       />
     </label>
 
-    <label style={{ gridColumn: "1 / -1", display: "flex", alignItems: "center", gap: 8 }}>
+    {isAdmin && <label style={{ gridColumn: "1 / -1", display: "flex", alignItems: "center", gap: 8 }}>
       <input
         type="checkbox"
         style={{ width: "auto", flex: "0 0 auto", margin: 0 }}
@@ -12279,7 +13076,7 @@ button.mini.primary{
         onChange={(e) => setEditForm((f) => ({ ...f, is_hidden: e.target.checked }))}
       />
       <span>Hide from public catalog (keep available for quotations)</span>
-    </label>
+    </label>}
 
     <label style={{ gridColumn: "1 / -1" }}>
       <div style={{ fontSize: 12, color: "#666" }}>Specs / description</div>
@@ -13336,6 +14133,21 @@ alert("Starting Payable Balance saved successfully.");
   </div>
 )}
 
+{page === "smartPayrollUpdate" && (
+  <SmartPayrollUpdate
+    employees={payrollEmployees}
+    attendanceEntries={attendanceEntries}
+    savedAdvanceBatches={savedAdvanceBatches}
+    advanceNoPaymentConfirmations={advanceNoPaymentConfirmations}
+    savedSalaryBatches={savedHistoricalSalaryPaymentBatches}
+    salaryDrafts={smartPayrollCycleDrafts}
+    onSave={saveSmartPayrollUpdate}
+    onAdjustDraft={updateSmartPayrollDraftEmployee}
+    onDeleteDraft={deleteSmartPayrollDraft}
+    onBack={() => setPage("advance")}
+  />
+)}
+
 {page === "attendance" && (
 
   <div style={{ maxWidth: 1160, margin: "0 auto 40px", padding: "0 12px" }}>
@@ -13391,6 +14203,14 @@ alert("Starting Payable Balance saved successfully.");
   onClick={() => setShowAttendanceImport((v) => !v)}
 >
   Import Attendance
+</button>
+
+<button
+  type="button"
+  className="btn primary"
+  onClick={() => setPage("smartPayrollUpdate")}
+>
+  Smart Payroll Update
 </button>
 
   <button
@@ -16685,6 +17505,10 @@ setTimeout(() => {
     justifyContent: "flex-end",
   }}
 >
+  <button type="button" className="btn primary" onClick={() => setPage("smartPayrollUpdate")}>
+    Smart Payroll Update
+  </button>
+
   <button
     type="button"
     className="btn"
@@ -19911,6 +20735,80 @@ balanceAfterAdvance:
 
 <div
   className="paper section"
+  style={{ marginTop: 20, padding: 20 }}
+>
+  <div
+    style={{
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "flex-start",
+      gap: 14,
+      flexWrap: "wrap",
+    }}
+  >
+    <div>
+      <h3 style={{ margin: 0 }}>Print Advance Register PDF</h3>
+      <p style={{ margin: "6px 0 0", color: "#6b7280", fontSize: 13 }}>
+        Choose a date range and employee group. Regular Tuesday and Saturday advances are arranged by date; emergency or off-schedule payments are listed separately.
+      </p>
+    </div>
+    <button
+      type="button"
+      className="btn primary"
+      onClick={downloadAdvanceRegisterPdf}
+      style={{ fontWeight: 800, whiteSpace: "nowrap" }}
+    >
+      Print Advance Register PDF
+    </button>
+  </div>
+
+  <div
+    style={{
+      display: "grid",
+      gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+      gap: 12,
+      marginTop: 16,
+      alignItems: "end",
+    }}
+  >
+    <label style={{ display: "flex", flexDirection: "column", gap: 6, fontWeight: 700 }}>
+      From Date
+      <input
+        type="date"
+        value={advanceReportFromDate}
+        onChange={(event) => setAdvanceReportFromDate(event.target.value)}
+        style={{ padding: "9px 10px", border: "1px solid #d1d5db", borderRadius: 8, minWidth: 0 }}
+      />
+    </label>
+    <label style={{ display: "flex", flexDirection: "column", gap: 6, fontWeight: 700 }}>
+      To Date
+      <input
+        type="date"
+        value={advanceReportToDate}
+        onChange={(event) => setAdvanceReportToDate(event.target.value)}
+        style={{ padding: "9px 10px", border: "1px solid #d1d5db", borderRadius: 8, minWidth: 0 }}
+      />
+    </label>
+    <label style={{ display: "flex", flexDirection: "column", gap: 6, fontWeight: 700 }}>
+      Employee Type
+      <select
+        value={advanceReportEmployeeType}
+        onChange={(event) => setAdvanceReportEmployeeType(event.target.value)}
+        style={{ padding: "9px 10px", border: "1px solid #d1d5db", borderRadius: 8, minWidth: 0, background: "#fff" }}
+      >
+        <option value="contractual">Contractual</option>
+        <option value="non_contractual">Non-contractual</option>
+        <option value="all">All Employees</option>
+      </select>
+    </label>
+  </div>
+  <p style={{ margin: "12px 0 0", color: "#6b7280", fontSize: 12 }}>
+    The report includes actual positive payments only. It adds a total for each employee and a grand-total row, and keeps the selected date range to one page when it can remain legible.
+  </p>
+</div>
+
+<div
+  className="paper section"
   style={{
     marginTop: 20,
     padding: 20,
@@ -21240,7 +22138,7 @@ balanceAfterAdvance:
     }}
   >
     <span style={{ color: "#d32f2f" }}>₹{inr(m.sell_price)}</span>
-    {isAdmin && m.cost_price != null && (
+    {(isAdmin || canManageCatalog) && m.cost_price != null && (
       <>
         <span style={{ color: "#bbb" }}>/</span>
         <span style={{ color: "#d4a106" }}>
@@ -21274,7 +22172,7 @@ balanceAfterAdvance:
                       </div>
                     )}
 
-{isAdmin && (
+{(isAdmin || (quoteMode && canManageCatalog && !m.is_hidden)) && (
   <button
     onClick={() => {
       setEditingProductId(m.id);
