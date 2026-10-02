@@ -13048,11 +13048,13 @@ button.mini.primary{
   </div>
 </div>
 
-    {page === "catalog" && !canAddCatalogProducts && (
+    {page === "catalog" && !canAddCatalogProducts && profileAccessStatus !== "checking" && (
       <p style={{ maxWidth: 1100, margin: "0 auto 12px", padding: "0 12px", color: "#667085", fontSize: 13 }}>
-        {session
-          ? "This account does not have catalog access yet. Ask an admin to enable catalog management for this staff account."
-          : "Sign in with an approved manager email and password to manage catalog products."}
+        {profileAccessStatus === "error"
+          ? "We couldn’t verify catalog access. Please retry in a moment."
+          : session
+            ? "This account does not have catalog access. Ask an admin to enable catalog management for this account."
+            : "Sign in with an approved manager email and password to manage catalog products."}
       </p>
     )}
 
