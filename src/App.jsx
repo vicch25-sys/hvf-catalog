@@ -3115,7 +3115,7 @@ const magicLogin = async () => {
 const signInAsProductCreator = async (event) => {
   event.preventDefault();
   if (!productCreatorEmail.trim() || !productCreatorPassword) {
-    alert("Enter the staff email and password.");
+    alert("Enter the manager email and password.");
     return;
   }
 
@@ -3156,7 +3156,7 @@ const signInAsProductCreator = async (event) => {
 const setCatalogStaffPassword = async (event) => {
   event.preventDefault();
   if (!session?.user?.id || !canManageCatalog || isAdmin) {
-    alert("Sign in to the approved catalog staff account before setting its password.");
+    alert("Sign in to the approved manager account before setting its password.");
     return;
   }
   if (staffNewPassword.length < 8) {
@@ -3175,10 +3175,10 @@ const setCatalogStaffPassword = async (event) => {
     setStaffNewPassword("");
     setStaffConfirmPassword("");
     setShowStaffPasswordForm(false);
-    alert("Staff password set. Use this email and password for future sign-ins.");
+    alert("Manager password set. Use this email and password for future sign-ins.");
   } catch (error) {
-    console.error("Catalog staff password update failed:", error);
-    alert(error?.message || "Could not update the staff password.");
+    console.error("Manager password update failed:", error);
+    alert(error?.message || "Could not update the manager password.");
   } finally {
     setStaffPasswordUpdating(false);
   }
@@ -3401,7 +3401,7 @@ const onSave = async (e) => {
 
   const { data: s } = await supabase.auth.getSession();
   if (!s?.session?.user?.id) {
-    alert("Please sign in with your staff email and password before saving.");
+    alert("Please sign in with your manager email and password before saving.");
     return;
   }
 
@@ -12595,7 +12595,7 @@ button.mini.primary{
   className="btn"
   style={{ width: "100%", marginBottom: "var(--space-2)" }}
 >
-  Staff sign in (email and password)
+  Manager sign-in (email and password)
 </button>
 
      <button
@@ -12726,7 +12726,7 @@ button.mini.primary{
     <input
       type="email"
       autoComplete="username"
-      placeholder="Staff email"
+      placeholder="Manager email"
       value={productCreatorEmail}
       onChange={(event) => setProductCreatorEmail(event.target.value)}
       required
@@ -12735,7 +12735,7 @@ button.mini.primary{
     <input
       type="password"
       autoComplete="current-password"
-      placeholder="Staff password"
+      placeholder="Manager password"
       value={productCreatorPassword}
       onChange={(event) => setProductCreatorPassword(event.target.value)}
       required
@@ -12775,7 +12775,7 @@ button.mini.primary{
         marginRight: 8,
       }}
     >
-      {isAdmin ? "Admin: ON" : canManageCatalog ? "Catalog staff" : "Not admin"}
+      {isAdmin ? "Admin: ON" : canManageCatalog ? "Manager logged in" : "Not admin"}
     </span>
     {session && (
       <span style={{ color: "#777", fontSize: 12 }}>
@@ -12787,7 +12787,7 @@ button.mini.primary{
       <div style={{ marginTop: 8 }}>
         {!showStaffPasswordForm ? (
           <button type="button" className="btn" onClick={() => setShowStaffPasswordForm(true)}>
-            Set or change staff password
+            Set or change manager password
           </button>
         ) : (
           <form onSubmit={setCatalogStaffPassword} style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
@@ -12824,7 +12824,7 @@ button.mini.primary{
               Cancel
             </button>
             <span style={{ flexBasis: "100%", color: "#667085", fontSize: 12 }}>
-              This changes the password for the signed-in staff account.
+              This changes the password for the signed-in manager account.
             </span>
           </form>
         )}
@@ -12938,7 +12938,7 @@ button.mini.primary{
       <p style={{ maxWidth: 1100, margin: "0 auto 12px", padding: "0 12px", color: "#667085", fontSize: 13 }}>
         {session
           ? "This account does not have catalog access yet. Ask an admin to enable catalog management for this staff account."
-          : "Sign in with an approved staff email and password to manage catalog products."}
+          : "Sign in with an approved manager email and password to manage catalog products."}
       </p>
     )}
 
