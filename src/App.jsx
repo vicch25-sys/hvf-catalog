@@ -3205,7 +3205,7 @@ const setCatalogStaffPassword = async (event) => {
       const timeoutId = setTimeout(() => {
         timedOut = true;
         controller.abort();
-      }, 12000);
+      }, 20000);
 
       try {
         const { data, error } = await makeQuery(controller.signal);
@@ -3213,7 +3213,7 @@ const setCatalogStaffPassword = async (event) => {
         return data;
       } catch (error) {
         lastError = timedOut
-          ? new Error("Supabase request timed out after 12 seconds.")
+          ? new Error("Supabase request timed out after 20 seconds.")
           : error;
         const message = lastError?.message || String(lastError);
         const isTransientFailure =
