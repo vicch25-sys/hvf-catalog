@@ -2092,6 +2092,10 @@ const [showProductCreatorLogin, setShowProductCreatorLogin] = useState(false);
 const [productCreatorEmail, setProductCreatorEmail] = useState("");
 const [productCreatorPassword, setProductCreatorPassword] = useState("");
 const [productCreatorSigningIn, setProductCreatorSigningIn] = useState(false);
+const [showStaffPasswordForm, setShowStaffPasswordForm] = useState(false);
+const [staffNewPassword, setStaffNewPassword] = useState("");
+const [staffConfirmPassword, setStaffConfirmPassword] = useState("");
+const [staffPasswordUpdating, setStaffPasswordUpdating] = useState(false);
 
 // --- login menu refs & auto-close ---
 const loginMenuRef = useRef(null);
@@ -3149,6 +3153,37 @@ const signInAsProductCreator = async (event) => {
   }
 };
 
+const setCatalogStaffPassword = async (event) => {
+  event.preventDefault();
+  if (!session?.user?.id || !canManageCatalog || isAdmin) {
+    alert("Sign in to the approved catalog staff account before setting its password.");
+    return;
+  }
+  if (staffNewPassword.length < 8) {
+    alert("Use a password with at least 8 characters.");
+    return;
+  }
+  if (staffNewPassword !== staffConfirmPassword) {
+    alert("The passwords do not match.");
+    return;
+  }
+
+  setStaffPasswordUpdating(true);
+  try {
+    const { error } = await supabase.auth.updateUser({ password: staffNewPassword });
+    if (error) throw error;
+    setStaffNewPassword("");
+    setStaffConfirmPassword("");
+    setShowStaffPasswordForm(false);
+    alert("Staff password set. Use this email and password for future sign-ins.");
+  } catch (error) {
+    console.error("Catalog staff password update failed:", error);
+    alert(error?.message || "Could not update the staff password.");
+  } finally {
+    setStaffPasswordUpdating(false);
+  }
+};
+
   /* ---------- LOAD DATA ---------- */
   const withSupabaseReadRetry = async (makeQuery, onRetry) => {
     let lastError;
@@ -3529,7 +3564,7 @@ const onSave = async (e) => {
 
 const onEditSave = async (e) => {
   e.preventDefault();
-  if (!canAddCatalogProducts || (!isAdmin && !quoteMode)) return alert("This account cannot edit catalog products.");
+  if (!canAddCatalogProducts) return alert("This account cannot edit catalog products.");
   if (!editingProductId) return alert("No product selected for editing.");
 
   if (!editForm.name || !editForm.category || !editForm.mrp) {
@@ -12748,6 +12783,54 @@ button.mini.primary{
       </span>
     )}
 
+    {session && canManageCatalog && !isAdmin && (
+      <div style={{ marginTop: 8 }}>
+        {!showStaffPasswordForm ? (
+          <button type="button" className="btn" onClick={() => setShowStaffPasswordForm(true)}>
+            Set or change staff password
+          </button>
+        ) : (
+          <form onSubmit={setCatalogStaffPassword} style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <input
+              type="password"
+              autoComplete="new-password"
+              placeholder="New password (at least 8 characters)"
+              value={staffNewPassword}
+              onChange={(event) => setStaffNewPassword(event.target.value)}
+              minLength={8}
+              required
+            />
+            <input
+              type="password"
+              autoComplete="new-password"
+              placeholder="Confirm new password"
+              value={staffConfirmPassword}
+              onChange={(event) => setStaffConfirmPassword(event.target.value)}
+              minLength={8}
+              required
+            />
+            <button type="submit" className="btn primary" disabled={staffPasswordUpdating}>
+              {staffPasswordUpdating ? "Saving…" : "Save password"}
+            </button>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => {
+                setShowStaffPasswordForm(false);
+                setStaffNewPassword("");
+                setStaffConfirmPassword("");
+              }}
+            >
+              Cancel
+            </button>
+            <span style={{ flexBasis: "100%", color: "#667085", fontSize: 12 }}>
+              This changes the password for the signed-in staff account.
+            </span>
+          </form>
+        )}
+      </div>
+    )}
+
 {isAdmin && (
   <button
     type="button"
@@ -12851,16 +12934,16 @@ button.mini.primary{
   </div>
 </div>
 
-    {page === "catalog" && quoteMode && !canAddCatalogProducts && (
+    {page === "catalog" && !canAddCatalogProducts && (
       <p style={{ maxWidth: 1100, margin: "0 auto 12px", padding: "0 12px", color: "#667085", fontSize: 13 }}>
         {session
           ? "This account does not have catalog access yet. Ask an admin to enable catalog management for this staff account."
-          : "To manage catalog products in quotation mode, sign in with an approved staff email and password."}
+          : "Sign in with an approved staff email and password to manage catalog products."}
       </p>
     )}
 
-    {/* Approved catalog staff can add and edit visible products in quotation mode. */}
-    {(isAdmin || (quoteMode && canManageCatalog)) && (
+    {/* Approved catalog staff can manage visible products after staff sign-in. */}
+    {(isAdmin || canManageCatalog) && (
       <details className="paper section" style={{ maxWidth: 1100, margin: "0 auto 16px" }}>
         <summary className="btn" style={{ cursor: "pointer" }}>
           ➕ Add Product
@@ -12986,7 +13069,7 @@ button.mini.primary{
         </form>
       </details>
     )}
-{(isAdmin || (quoteMode && canManageCatalog)) && editingProductId && (
+{(isAdmin || canManageCatalog) && editingProductId && (
   <details className="paper section" style={{ maxWidth: 1100, margin: "0 auto 16px" }} open>
     <summary className="btn" style={{ cursor: "pointer", background: "#fff3cd" }}>
       ✏️ Edit Product
@@ -22172,7 +22255,7 @@ balanceAfterAdvance:
                       </div>
                     )}
 
-{(isAdmin || (quoteMode && canManageCatalog && !m.is_hidden)) && (
+{(isAdmin || (canManageCatalog && !m.is_hidden)) && (
   <button
     onClick={() => {
       setEditingProductId(m.id);
