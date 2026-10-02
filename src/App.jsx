@@ -61,6 +61,17 @@ const supabase = createClient(supabaseUrl, supabaseKey, {
   auth: { persistSession: true, autoRefreshToken: true },
 });
 
+// Catalog cards and category names are intentionally public. Read them through
+// an isolated anonymous client so a stale authenticated JWT cannot stall the
+// public catalog request. Manager-only costs still use the authenticated client.
+const publicCatalogClient = createClient(supabaseUrl, supabaseKey, {
+  auth: {
+    persistSession: false,
+    autoRefreshToken: false,
+    detectSessionInUrl: false,
+  },
+});
+
 // Expose for browser-console diagnostics (safe in dev)
 if (typeof window !== "undefined") {
   window.__supabase = supabase;
@@ -3231,7 +3242,7 @@ const setCatalogStaffPassword = async (event) => {
     try {
       const data = await withSupabaseReadRetry(
         (signal) =>
-          supabase
+          publicCatalogClient
             .from("machines")
             .select("id,name,category,mrp,sell_price,is_hidden,specs,image_url,created_at,price_updated_at,price_change_count")
             .order("created_at", { ascending: false })
@@ -3310,7 +3321,7 @@ const setCatalogStaffPassword = async (event) => {
     try {
       const data = await withSupabaseReadRetry(
         (signal) =>
-          supabase
+          publicCatalogClient
             .from("categories")
             .select("name")
             .order("name")
