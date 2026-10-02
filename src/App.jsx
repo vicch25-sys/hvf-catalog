@@ -3500,10 +3500,6 @@ const onSave = async (e) => {
     return alert("Name, Category and MRP are required.");
   }
 
-  if (!editingProductId && !form.imageFile && !form.is_hidden) {
-    return alert("Image is required for new product.");
-  }
-
   setSaving(true);
 
   try {
@@ -13130,12 +13126,11 @@ button.mini.primary{
             </label>}
 
             <label>
-              <div style={{ fontSize: 12, color: "#666" }}>Image{form.is_hidden ? " (optional)" : " *"}</div>
+              <div style={{ fontSize: 12, color: "#666" }}>Image (optional)</div>
               <input
                 type="file"
                 accept="image/*"
                 onChange={onChange}
-                required={!editingProductId && !form.is_hidden}
               />
             </label>
 
@@ -22300,9 +22295,9 @@ balanceAfterAdvance:
                         onError={(e) => (e.currentTarget.style.display = "none")}
                       />
                     )}
-                    {!m.image_url && m.is_hidden && (
+                    {!m.image_url && (
                       <img
-                        src="/hvf-logo.png"
+                        src="/hvf-logo-fallback.jpg"
                         alt="HVF Agency"
                         loading="lazy"
                         style={{
