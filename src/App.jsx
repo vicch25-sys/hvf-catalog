@@ -5,6 +5,7 @@ import { createClient } from "@supabase/supabase-js";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import SmartPayrollUpdate from "./SmartPayrollUpdate.jsx";
+import { validateReportRange, weekdayName } from "./reportDates.js";
 
 // BodyPortal: safely render small overlays at <body> level
 const BodyPortal = ({ children }) => {
@@ -4853,10 +4854,10 @@ const buildAttendanceSummaryForEmployee = (emp, monthName) => {
 
 const getAttendanceRegisterRange = () => {
   if (attendanceRegisterMode === "custom") {
-    return {
-      from: attendanceRegisterFromDate,
-      to: attendanceRegisterToDate,
-    };
+    const error = validateReportRange(attendanceRegisterFromDate, attendanceRegisterToDate);
+    return error
+      ? { from: "", to: "", error }
+      : { from: attendanceRegisterFromDate, to: attendanceRegisterToDate, error: "" };
   }
 
   const selectedDate = new Date(attendanceDate);
@@ -4954,7 +4955,7 @@ const printAttendanceRegisterPdf = () => {
   const dates = getDateRangeList(range.from, range.to);
 
   if (!dates.length) {
-    alert("Please select a valid attendance date range first.");
+    alert(range.error || "Please select a valid attendance date range first.");
     return;
   }
 
@@ -4981,9 +4982,7 @@ const printAttendanceRegisterPdf = () => {
   const getStatusForPdf = (emp, dateKey) => {
     const key = `${dateKey}_${emp.id}`;
 
-    const dayName = new Date(dateKey)
-      .toLocaleDateString("en-US", { weekday: "long" })
-      .toLowerCase();
+    const dayName = weekdayName(dateKey);
 
     const joined =
       !emp.joining_date || new Date(dateKey) >= new Date(emp.joining_date);
@@ -5570,9 +5569,7 @@ const calculateWeeklyBonusForEmployee = (emp, fromDate, toDate, attendanceSource
   const dates = getDateRangeList(fromDate, toDate);
 
   dates.forEach((dateKey) => {
-    const dayName = new Date(dateKey)
-      .toLocaleDateString("en-US", { weekday: "long" })
-      .toLowerCase();
+    const dayName = weekdayName(dateKey);
 
     const effectiveWeeklyOff = getEmployeeWeeklyOffForDate(emp, dateKey);
 
@@ -5613,9 +5610,7 @@ const calculateWeeklyBonusForEmployee = (emp, fromDate, toDate, attendanceSource
         continue;
       }
 
-      const workDayName = new Date(workDateKey)
-        .toLocaleDateString("en-US", { weekday: "long" })
-        .toLowerCase();
+      const workDayName = weekdayName(workDateKey);
 
       const workDateWeeklyOff =
         getEmployeeWeeklyOffForDate(emp, workDateKey);
@@ -14750,9 +14745,7 @@ alert("Starting Payable Balance saved successfully.");
   .map((emp, index, filteredEmployees) => {
  
             const attendanceKey = `${attendanceDate}_${emp.id}`;
-           const dayName = new Date(attendanceDate)
-  .toLocaleDateString("en-US", { weekday: "long" })
-  .toLowerCase();
+           const dayName = weekdayName(attendanceDate);
 
 const effectiveWeeklyOff = getEmployeeWeeklyOffForDate(emp, attendanceDate);
 
@@ -14950,6 +14943,11 @@ localStorage.setItem(
 
   {attendanceRegisterMode === "custom" && (
     <>
+      {getAttendanceRegisterRange().error && (
+        <div role="alert" style={{ color: "#b91c1c", flexBasis: "100%" }}>
+          {getAttendanceRegisterRange().error}
+        </div>
+      )}
      <input
   type="date"
   value={attendanceRegisterFromDate}
@@ -15283,9 +15281,7 @@ if (attendanceEntries[key] === "publicholiday") return 1;
             getAttendanceRegisterRange().to
           ).map((dateKey, i) => {
             const key = `${dateKey}_${emp.id}`;
-            const dayName = new Date(dateKey)
-  .toLocaleDateString("en-US", { weekday: "long" })
-  .toLowerCase();
+            const dayName = weekdayName(dateKey);
 
 const joined =
   emp.joining_date &&
@@ -15397,9 +15393,7 @@ payrollEmployees
 
     if (updated[key]) return;
 
-    const dayName = new Date(attendanceDate)
-      .toLocaleDateString("en-US", { weekday: "long" })
-      .toLowerCase();
+    const dayName = weekdayName(attendanceDate);
 
     if (
       emp.weekly_off &&
