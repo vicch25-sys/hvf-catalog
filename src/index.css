@@ -121,10 +121,20 @@ body { margin: 0; background: #f6f7f9; }
   background: #fff !important;
   border-bottom: 0 !important;
 }
+/* Fade each actual image edge, including the middle of its straight sides.
+   The white thumbnail beneath the mask provides the fade-to-white finish. */
 .catalog-product-photo {
-  filter: contrast(1.08) brightness(1.012) drop-shadow(0 10px 12px rgba(15, 23, 42, .12));
-  -webkit-mask-image: radial-gradient(ellipse 96% 96% at center, #000 86%, rgba(0, 0, 0, .96) 92%, rgba(0, 0, 0, .72) 96%, transparent 100%);
-  mask-image: radial-gradient(ellipse 96% 96% at center, #000 86%, rgba(0, 0, 0, .96) 92%, rgba(0, 0, 0, .72) 96%, transparent 100%);
+  filter: none;
+  -webkit-mask-image:
+    linear-gradient(to right, transparent, #000 6%, #000 94%, transparent),
+    linear-gradient(to bottom, transparent, #000 6%, #000 94%, transparent);
+  mask-image:
+    linear-gradient(to right, transparent, #000 6%, #000 94%, transparent),
+    linear-gradient(to bottom, transparent, #000 6%, #000 94%, transparent);
+  -webkit-mask-composite: source-in;
+  mask-composite: intersect;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
 }
 
 /* Safety guard: never allow global dim/blur */
