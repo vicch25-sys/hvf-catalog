@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { stockQuantity, sortedStockItems } from './stockUtils.js';
+import { stockQuantity, sortedStockItems, isTransientStockError } from './stockUtils.js';
 import './catalogStock.css';
 
 export function useCatalogStock(client, userId, enabled) {
@@ -12,23 +12,62 @@ export function useCatalogStock(client, userId, enabled) {
     const version = ++generation.current;
     setRows({}); setError(''); setStatus('loading');
     if (!enabled || !userId) return;
-    async function load() {
+    let inFlight = false;
+    let loaded = false;
+    let failures = 0;
+    let controller;
+    let lastStarted = 0;
+    async function load(force = false) {
+      if (inFlight || document.hidden || (!force && Date.now() - lastStarted < 5000)) return;
+      inFlight = true;
+      lastStarted = Date.now();
       try {
-        const { data, error: failure } = await client.rpc('get_catalog_stock');
-        if (failure) throw failure;
+        let data;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          if (version !== generation.current) return;
+          controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 15000);
+          try {
+            const result = await client.rpc('get_catalog_stock').abortSignal(controller.signal);
+            if (result.error) throw result.error;
+            data = result.data;
+            break;
+          } catch (failure) {
+            if (attempt === 2 || !isTransientStockError(failure)) throw failure;
+            await new Promise(resolve => setTimeout(resolve, 800 * (attempt + 1)));
+          } finally { clearTimeout(timeout); }
+        }
         if (version === generation.current) {
+          loaded = true; failures = 0;
           setRows(Object.fromEntries((data || []).map(row => [String(row.machine_id), row])));
           setStatus('ready'); setError('');
         }
       } catch (failure) {
-        if (version === generation.current) { setStatus('error'); setError(failure.message || 'Stock could not load.'); }
-      }
+        if (version !== generation.current) return;
+        failures++;
+        if (isTransientStockError(failure) && loaded) {
+          // A background network failure does not invalidate a successful snapshot.
+          setStatus('ready');
+          setError(failures >= 3 ? 'Stock refresh is delayed. Showing the last loaded quantities; retrying automatically.' : '');
+        } else {
+          setStatus('error');
+          setError(isTransientStockError(failure)
+            ? 'Cannot connect to stock right now. Retrying automatically.'
+            : 'Stock access could not be verified. Please sign in again or contact the admin.');
+          if (!isTransientStockError(failure)) { loaded = false; setRows({}); }
+        }
+      } finally { inFlight = false; }
     }
-    load();
+    load(true);
     const onFocus = () => load();
     window.addEventListener('focus', onFocus);
-    const timer = setInterval(load, 30000);
-    return () => { generation.current++; clearInterval(timer); window.removeEventListener('focus', onFocus); };
+    document.addEventListener('visibilitychange', onFocus);
+    const timer = setInterval(() => load(), 30000);
+    return () => {
+      generation.current++; controller?.abort(); clearInterval(timer);
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onFocus);
+    };
   }, [client, userId, enabled]);
   async function save(changes) {
     if (!enabled || status !== 'ready') throw new Error('Stock access is not ready.');

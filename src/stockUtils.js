@@ -8,3 +8,7 @@ export function stockQuantity(value) {
 export function sortedStockItems(items) {
   return [...items].sort((a, b) => String(a.category || 'Uncategorized').localeCompare(String(b.category || 'Uncategorized')) || a.name.localeCompare(b.name));
 }
+
+export function isTransientStockError(error) {
+  return !error?.code && /fetch|network|load fail|abort|timeout|timed out|connection/i.test(error?.message || String(error));
+}

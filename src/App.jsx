@@ -12957,7 +12957,7 @@ button.mini.primary{
     Update stock
   </button>
 )}
-{(isAdmin || canManageCatalog) && stock.status === "error" && <p role="alert" style={{ fontSize: 12, color: "#b42318" }}>Stock unavailable: {stock.error}</p>}
+{(isAdmin || canManageCatalog) && stock.error && <p role={stock.status === "error" ? "alert" : "status"} style={{ fontSize: 12, color: stock.status === "error" ? "#b42318" : "#64748b" }}>{stock.error}</p>}
 {stockEditorItems && (isAdmin || canManageCatalog) && <StockEditor items={stockEditorItems} stock={stock} onClose={() => setStockEditorItems(null)} />}
 
   </div>
