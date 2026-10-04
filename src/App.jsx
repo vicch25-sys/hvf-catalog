@@ -5,6 +5,7 @@ import { createClient } from "@supabase/supabase-js";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import SmartPayrollUpdate from "./SmartPayrollUpdate.jsx";
+import { useCatalogStock, StockLine, StockEditor } from "./CatalogStock.jsx";
 import { validateReportRange, weekdayName } from "./reportDates.js";
 
 // BodyPortal: safely render small overlays at <body> level
@@ -2144,6 +2145,9 @@ const [canManageCatalog, setCanManageCatalog] = useState(false);
 const [profileAccessStatus, setProfileAccessStatus] = useState("checking");
 const profileAccessRequestRef = useRef(0);
 const canAddCatalogProducts = isAdmin || canManageCatalog;
+const stock = useCatalogStock(supabase, session?.user?.id, isAdmin || canManageCatalog);
+const [stockEditorItems, setStockEditorItems] = useState(null);
+useEffect(() => { setStockEditorItems(null); }, [session?.user?.id, isAdmin, canManageCatalog]);
 
 // two-step local admin
 const [adminEmail, setAdminEmail] = useState("");
@@ -12946,6 +12950,16 @@ button.mini.primary{
     📄 Export Catalog
   </button>
 )}
+{(isAdmin || canManageCatalog) && (
+  <button type="button" className="btn" style={{ marginLeft: 8, marginTop: 6 }}
+    disabled={stock.status !== "ready" || !items.length}
+    onClick={() => setStockEditorItems(items.filter(item => isAdmin || !item.is_hidden))}>
+    Update stock
+  </button>
+)}
+{(isAdmin || canManageCatalog) && stock.status === "error" && <p role="alert" style={{ fontSize: 12, color: "#b42318" }}>Stock unavailable: {stock.error}</p>}
+{stockEditorItems && (isAdmin || canManageCatalog) && <StockEditor items={stockEditorItems} stock={stock} onClose={() => setStockEditorItems(null)} />}
+
   </div>
 )}
     </div>
@@ -22359,6 +22373,10 @@ balanceAfterAdvance:
                         )}
                       </div>
                     )}
+
+{(isAdmin || (canManageCatalog && !m.is_hidden)) && (
+  <StockLine item={m} stock={stock} onEdit={() => setStockEditorItems([m])} />
+)}
 
 {(isAdmin || (canManageCatalog && !m.is_hidden)) && (
   <button
