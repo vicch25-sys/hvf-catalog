@@ -12952,7 +12952,7 @@ button.mini.primary{
 )}
 {(isAdmin || canManageCatalog) && (
   <button type="button" className="btn" style={{ marginLeft: 8, marginTop: 6 }}
-    disabled={stock.status !== "ready" || !items.length}
+    disabled={!items.length}
     onClick={() => setStockEditorItems(items.filter(item => isAdmin || !item.is_hidden))}>
     Update stock
   </button>
