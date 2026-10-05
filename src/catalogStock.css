@@ -23,3 +23,6 @@
 .stock-dialog .stock-error { color:#b42318; }
 @media (hover:none), (pointer:coarse) { .stock-reveal { opacity:1; } }
 @media (max-width:600px) { .stock-dialog { padding:12px; } .stock-dialog th,.stock-dialog td { padding:8px 4px; font-size:12px; } .stock-quantity { gap:2px; } .stock-quantity input { width:55px; } .stock-quantity button { padding:6px; } }
+
+.stock-dialog .stock-search { width:100%; box-sizing:border-box; margin:0 0 12px; padding:10px 12px; font:inherit; font-size:14px; color:#1e293b; background:white; border:1px solid #cbd5e1; border-radius:8px; }
+.stock-dialog .stock-search:focus { outline:2px solid #93baff; outline-offset:2px; }

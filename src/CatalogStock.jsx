@@ -109,6 +109,7 @@ function Quantity({ value, onChange, name, disabled }) {
 }
 
 export function StockEditor({ items, stock, onClose, title = 'Update stock' }) {
+  const [search, setSearch] = useState('');
   const [baseline, setBaseline] = useState({});
   const [ready, setReady] = useState(false);
   const [values, setValues] = useState(() => Object.fromEntries(items.map(item => [String(item.id), baseline[String(item.id)]?.quantity ?? ''])));
@@ -127,7 +128,9 @@ export function StockEditor({ items, stock, onClose, title = 'Update stock' }) {
     }).catch(() => { if (active) setError('Cannot load current stock. Close and reopen to retry when connected.'); });
     return () => { active = false; node.close(); };
   }, []);
-  const sorted = sortedStockItems(items);
+  const keywords = search.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
+  const sorted = sortedStockItems(items).filter(item =>
+    keywords.every(keyword => String(item.name || '').toLocaleLowerCase().includes(keyword)));
   const changed = items.filter(item => String(values[String(item.id)]) !== String(baseline[String(item.id)]?.quantity ?? ''));
   async function submit(event) {
     event.preventDefault(); if (!ready) return; setError('');
@@ -142,12 +145,15 @@ export function StockEditor({ items, stock, onClose, title = 'Update stock' }) {
     <form onSubmit={submit}>
       <header><h2>{title}</h2><button type="button" disabled={busy} onClick={onClose} aria-label="Close stock editor">×</button></header>
       <p>Set the current quantity. Changes are saved together when you select Save.</p>
+      <input className="stock-search" type="search" aria-label="Search stock by product name" placeholder="Search product name or keywords…" value={search} onChange={event => setSearch(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') event.preventDefault(); }} />
+      {search.trim() && <p role="status">{sorted.length} of {items.length} products · All edited quantities will be saved.</p>}
       {!ready && !error && <p role="status">Loading current stock…</p>}
       <div className="stock-table-wrap"><table><thead><tr><th>Product name</th><th>MRP</th><th>Stock</th></tr></thead><tbody>
         {sorted.map((item, index) => <React.Fragment key={item.id}>
           {(index === 0 || (item.category || 'Uncategorized') !== (sorted[index - 1].category || 'Uncategorized')) && <tr className="stock-category"><th colSpan="3">{item.category || 'Uncategorized'}</th></tr>}
           <tr><td>{item.name}</td><td>₹{Number(item.mrp || 0).toLocaleString('en-IN')}</td><td><Quantity name={item.name} value={values[String(item.id)]} disabled={busy || !ready} onChange={value => setValues(previous => ({ ...previous, [String(item.id)]: value }))} /></td></tr>
         </React.Fragment>)}
+        {!sorted.length && <tr><td colSpan="3">No matching products. Try another keyword.</td></tr>}
       </tbody></table></div>
       {error && <p role="alert" className="stock-error">{error}</p>}
       <footer><button type="button" disabled={busy} onClick={onClose}>Cancel</button><button type="submit" disabled={busy || !ready || !changed.length}>{busy ? 'Saving…' : 'Save stock'}</button></footer>
