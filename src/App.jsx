@@ -3,6 +3,7 @@ import * as XLSX from "xlsx";
 import { createPortal } from "react-dom";
 import { createClient } from "@supabase/supabase-js";
 import jsPDF from "jspdf";
+import { measureQuotationFooter, drawQuotationFooter } from "./quotationFooter.js";
 import autoTable from "jspdf-autotable";
 import SmartPayrollUpdate from "./SmartPayrollUpdate.jsx";
 import { useCatalogStock, StockLine, StockEditor } from "./CatalogStock.jsx";
@@ -10566,6 +10567,9 @@ const exportPDF = async () => {
     return;
   }
 
+  // Rerender only the PDF, never repeat saving or assigning a quote number.
+  let fittedScale = null;
+  for (;;) {
   const doc = new jsPDF({ unit: "pt", format: "a4" });
   const pw = doc.internal.pageSize.getWidth();
   const ph = doc.internal.pageSize.getHeight();
@@ -10624,6 +10628,8 @@ if (
     );
   }
 }
+
+if (fittedScale !== null) quotationScale = fittedScale;
 
 // Convenient scaler used throughout the HVF PDF layout.
 const qs = (value) =>
@@ -11208,19 +11214,6 @@ let ty =
       : 28
   );
 
-// Keep the old 60% visual anchor only when
-// the quotation does not need adaptive shrinking.
-if (
-  firm === "HVF Agency" &&
-  quotationScale === 1
-) {
-  const minTermsTop = Math.round(ph * 0.60);
-
-  if (ty < minTermsTop) {
-    ty = minTermsTop;
-  }
-}
-
     if (firm === "Internal") {
     // Internal: no Terms & Conditions or Bank section
  } else if (firm === "Victor Engineering") {
@@ -11356,121 +11349,24 @@ if (
   doc.setDrawColor(0);
   doc.setLineWidth(0.5);
   } else {
-    // HVF & Mahabir: unchanged
-    const tableFontLocal =
-      firm === "Mahabir Hardware Stores" ? "courier" : "helvetica";
-
-    doc.setFont(tableFontLocal, "bold");
-    doc.setFontSize(
-  firm === "HVF Agency" ? qs(11) : 11
-);
-    doc.text("Terms & Conditions:", L, ty, { underline: true });
-
-    doc.setFont(tableFontLocal, "normal");
-doc.setFontSize(
-  firm === "HVF Agency" ? qs(10) : 10
-);
-
-// HVF Agency uses the editable Terms & Conditions saved
-// inside this quotation.
-// Mahabir keeps its existing standard terms.
-const quotationTerms =
-  firm === "HVF Agency"
-    ? String(
-        qHeader.terms ||
-          [
-            "This quotation is valid for one month from the date of issue.",
-            "Delivery is subject to stock availability and may take up to 2 weeks.",
-            "Goods once sold are non-returnable and non-exchangeable.",
-          ].join("\n")
-      )
-    : [
-        "This quotation is valid for one month from the date of issue.",
-        "Delivery is subject to stock availability and may take up to 2 weeks.",
-        "Goods once sold are non-returnable and non-exchangeable.",
-      ].join("\n");
-
-const termsStartY =
-  ty + (firm === "HVF Agency" ? qs(16) : 16);
-
-const termsLineHeight =
-  firm === "HVF Agency" ? qs(12) : 12;
-
-// Keep each entered line separate, while also wrapping
-// long lines automatically inside the printable width.
-const printableTermsLines = quotationTerms
-  .split("\n")
-  .flatMap((line) =>
-    line.trim()
-      ? doc.splitTextToSize(line, contentW)
-      : [""]
-  );
-
-doc.text(
-  printableTermsLines,
-  L,
-  termsStartY
-);
-
-// Place Yours Faithfully below however many terms lines
-// are actually present.
-const faithfulY =
-  termsStartY +
-  printableTermsLines.length * termsLineHeight +
-  (firm === "HVF Agency" ? qs(10) : 10);
-
-doc.text(
-  [
-    "Yours Faithfully",
-    firm === "Mahabir Hardware Stores"
-      ? "Mahabir Hardware Stores"
-      : "HVF Agency",
-    firm === "Mahabir Hardware Stores"
-      ? "—"
-      : "9957239143 / 9954425780",
-    firm === "Mahabir Hardware Stores"
-      ? "GST: 18ACBPA2363D1Z9"
-      : "GST: 18AFCPC4260P1ZB",
-  ],
-  L,
-  faithfulY
-);
-
-// Bank details move automatically according to the
-// amount of Terms & Conditions text above.
-const bankTitleY =
-  faithfulY +
-  (firm === "HVF Agency" ? qs(62) : 62);
-
-doc.setFont(tableFontLocal, "bold");
-doc.text(
-  "BANK DETAILS",
-  L,
-  bankTitleY
-);
-
-    bankTitleY + (firm === "HVF Agency" ? qs(16) : 16)
-    let bankLines = [];
-    if (firm === "HVF Agency") {
-      bankLines = [
-        "HVF AGENCY",
-        "ICICI BANK (Moran Branch)",
-        "A/C No - 199505500412",
-        "IFSC Code - ICIC0001995",
-"Email: hvfagency123@gmail.com",
-      ];
-    } else {
-      bankLines = [
-        "AC No. 11010061051",
-        "IFSC Cord - SBIN0007368",
-        "Branch - Moran Branch",
-      ];
+    const footer = measureQuotationFooter(doc, {
+      firm, terms: qHeader.terms, width: contentW,
+      scale: firm === "HVF Agency" ? quotationScale : 1,
+    });
+    const bottom = ph - margin;
+    // Use free space first. Only shrink when the table plus the complete
+    // terms/signature/bank section cannot fit above the bottom margin.
+    if (firm === "HVF Agency" && quotationScale > 0.72 &&
+        (doc.getNumberOfPages() > 1 || ty + footer.height > bottom)) {
+      fittedScale = Math.max(0.72, quotationScale * 0.9);
+      continue;
     }
-    doc.text(
-  bankLines,
-  L,
-  ty + (firm === "HVF Agency" ? qs(136) : 136)
-);
+    if (firm === "HVF Agency" && quotationScale === 1) {
+      ty = Math.max(ty, Math.min(Math.round(ph * 0.60), bottom - footer.height));
+    }
+    // Exceptionally long quotations continue on another page rather than
+    // clipping text or reducing the existing minimum readable scale.
+    drawQuotationFooter(doc, footer, { x: L, y: ty, top: margin, bottom });
   }
 
   // ===== INTERNAL WATERMARK (draw LAST so it overlays table with low opacity) =====
@@ -11507,6 +11403,8 @@ if (pdfWindow && !pdfWindow.closed) {
   // Fallback if the pre-opened window could not be created
   window.open(pdfBlobUrl, "_blank");
 }
+  break;
+  }
 };
 
 // Helper: safely read delivered records from localStorage
