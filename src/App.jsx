@@ -7,6 +7,7 @@ import { measureQuotationFooter, drawQuotationFooter } from "./quotationFooter.j
 import autoTable from "jspdf-autotable";
 import SmartPayrollUpdate from "./SmartPayrollUpdate.jsx";
 import { useCatalogStock, StockLine, StockEditor } from "./CatalogStock.jsx";
+import ProductShareModal from "./ProductShare.jsx";
 import { validateReportRange, weekdayName } from "./reportDates.js";
 
 // BodyPortal: safely render small overlays at <body> level
@@ -2824,6 +2825,8 @@ const startPayrollSyncRef = useRef(null);
 const [editingProductId, setEditingProductId] = useState(null);
 const [editingImageUrl, setEditingImageUrl] = useState("");
 const [priceHistoryProduct, setPriceHistoryProduct] = useState(null);
+const [openProductMenuId, setOpenProductMenuId] = useState(null);
+const [shareProduct, setShareProduct] = useState(null);
 const [priceHistoryRows, setPriceHistoryRows] = useState([]);
 const [priceHistoryLoading, setPriceHistoryLoading] = useState(false);
 const [priceHistoryError, setPriceHistoryError] = useState("");
@@ -22220,6 +22223,20 @@ balanceAfterAdvance:
                   </div>
 
                   <div className="card-body" style={{ display: "flex", flexDirection: "column" }}>
+                    <div className="product-card-menu">
+                      <button
+                        type="button"
+                        className="product-card-more"
+                        aria-label={`More options for ${m.name}`}
+                        aria-expanded={openProductMenuId === m.id}
+                        onClick={() => setOpenProductMenuId(current => current === m.id ? null : m.id)}
+                      >⋮</button>
+                      {openProductMenuId === m.id && (
+                        <div className="product-card-menu-popover" role="menu">
+                          <button type="button" role="menuitem" onClick={() => { setShareProduct(m); setOpenProductMenuId(null); }}>Share image</button>
+                        </div>
+                      )}
+                    </div>
                     <h3 className="pname" title={m.name}>{m.name}</h3>
                     {m.specs && <p className="specs">{m.specs}</p>}
                     <p style={{ fontWeight: 700 }}>₹{inr(m.mrp)}</p>
@@ -25183,6 +25200,8 @@ delivered_date: (() => {
     </section>
   </div>
 )}
+
+{shareProduct && <ProductShareModal product={shareProduct} onClose={() => setShareProduct(null)} />}
 
 {/* end root container (now inside the <div> children, valid JSX) */}
 </div>
