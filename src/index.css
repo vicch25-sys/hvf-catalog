@@ -124,7 +124,7 @@ body { margin: 0; background: #f6f7f9; }
 
 .catalog-grid .card { position: relative; }
 .product-card-menu { position: absolute; top: 8px; right: 8px; display: flex; justify-content: flex-end; z-index: 3; }
-.product-card-more { width: 36px; height: 36px; padding: 0; border: 0; border-radius: 50%; background: rgba(255,255,255,.88); color: #334155; font-size: 24px; line-height: 1; opacity: .32; cursor: pointer; transition: opacity .15s ease, color .15s ease, background .15s ease; }
+.product-card-more { width: 36px; height: 36px; padding: 0; border: 0; border-radius: 0; background: transparent; color: #334155; font-size: 24px; line-height: 1; opacity: .32; cursor: pointer; transition: opacity .15s ease, color .15s ease; }
 .product-card-more:hover, .product-card-more:focus-visible, .product-card-menu:focus-within .product-card-more { color: #1677ff; opacity: 1; outline: none; }
 .product-card-menu-popover { position: absolute; top: 34px; right: 0; width: 160px; padding: 5px; border: 1px solid #e2e8f0; border-radius: 10px; background: #fff; box-shadow: 0 10px 28px rgba(15,23,42,.14); }
 .product-card-menu-popover button { width: 100%; padding: 9px 10px; border: 0; border-radius: 7px; background: #fff; color: #1e293b; text-align: left; font: inherit; font-size: 13px; cursor: pointer; }
