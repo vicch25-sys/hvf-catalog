@@ -32,7 +32,7 @@ async function createShareImage(product) {
   const width = 1080;
   const side = 48;
   const contentWidth = width - side * 2;
-  const headerHeight = 132;
+  const headerHeight = 104;
   const [image, logo] = await Promise.all([
     product.image_url ? loadImage(product.image_url) : Promise.resolve(null),
     loadImage('/hvf-logo.png'),
@@ -45,20 +45,22 @@ async function createShareImage(product) {
   const specs = String(product.specs || product.description || '').trim();
   ctx.font = '400 30px system-ui, -apple-system, sans-serif';
   const descriptionLines = specs ? wrapText(ctx, specs, contentWidth) : [];
-  const imageBox = { x: side, y: headerHeight, w: contentWidth, h: 850 };
-  const nameY = imageBox.y + imageBox.h + 48;
-  const descriptionY = nameY + nameLines.length * 58 + (descriptionLines.length ? 20 : 0);
-  const priceY = descriptionY + descriptionLines.length * 43 + 54;
-  const height = priceY + 86;
+  const imageBox = { x: side, y: headerHeight, w: contentWidth, h: 730 };
+  const nameY = imageBox.y + imageBox.h + 34;
+  const nameLineHeight = 52;
+  const descriptionLineHeight = 38;
+  const descriptionY = nameY + nameLines.length * nameLineHeight + (descriptionLines.length ? 14 : 0);
+  const priceY = descriptionY + descriptionLines.length * descriptionLineHeight + 32;
+  const height = priceY + 100;
   canvas.width = width;
   canvas.height = height;
 
   ctx.fillStyle = '#fff';
   ctx.fillRect(0, 0, width, height);
-  const logoScale = Math.min(190 / logo.width, 82 / logo.height);
+  const logoScale = Math.min(190 / logo.width, 76 / logo.height);
   const logoWidth = logo.width * logoScale;
   const logoHeight = logo.height * logoScale;
-  ctx.drawImage(logo, side, 25 + (82 - logoHeight) / 2, logoWidth, logoHeight);
+  ctx.drawImage(logo, side, 14 + (76 - logoHeight) / 2, logoWidth, logoHeight);
 
   if (image) {
     const scale = Math.min(imageBox.w / image.width, imageBox.h / image.height);
@@ -75,16 +77,16 @@ async function createShareImage(product) {
 
   ctx.fillStyle = '#172033';
   ctx.font = '700 44px system-ui, -apple-system, sans-serif';
-  nameLines.forEach((line, index) => ctx.fillText(line, side, nameY + index * 58));
+  nameLines.forEach((line, index) => ctx.fillText(line, side, nameY + index * nameLineHeight));
   ctx.fillStyle = '#64748b';
   ctx.font = '400 30px system-ui, -apple-system, sans-serif';
-  descriptionLines.forEach((line, index) => ctx.fillText(line, side, descriptionY + index * 43));
+  descriptionLines.forEach((line, index) => ctx.fillText(line, side, descriptionY + index * descriptionLineHeight));
   ctx.fillStyle = '#64748b';
   ctx.font = '600 24px system-ui, -apple-system, sans-serif';
   ctx.fillText('MRP', side, priceY);
   ctx.fillStyle = '#172033';
   ctx.font = '700 54px system-ui, -apple-system, sans-serif';
-  ctx.fillText(formatRupees(product.mrp), side, priceY + 62);
+  ctx.fillText(formatRupees(product.mrp), side, priceY + 58);
 
   return new Promise((resolve, reject) => canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('Could not finish creating the share image.')), 'image/jpeg', 0.82));
 }
