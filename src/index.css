@@ -687,3 +687,39 @@ html, body, #root {
   .quote-save-actions { grid-template-columns: minmax(0, 1fr); }
   .quote-save-actions button:last-child { grid-column: auto; }
 }
+
+/* Salary advances: keep the calculation controls and wide employee ledger easy to scan. */
+.advance-page .paper.section { border-color: #e2e8f0; box-shadow: 0 4px 18px rgba(15, 23, 42, .045); }
+.advance-page-title { color: #172033; letter-spacing: -.025em; }
+.advance-secondary-panel { overflow: hidden; border: 1px solid #e2e8f0; border-radius: 12px; background: #f8fafc; }
+.advance-secondary-panel summary { padding: 13px 16px; color: #334155; font-weight: 700; cursor: pointer; }
+.advance-secondary-panel summary::marker { color: #64748b; }
+.advance-secondary-panel[open] summary { border-bottom: 1px solid #e2e8f0; background: #fff; }
+.advance-secondary-panel-body { padding: 16px; }
+.advance-table-scroll { max-height: min(72vh, 760px); overflow: auto; border: 1px solid #dbe3ed; border-radius: 12px; background: #fff; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+.advance-table-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; border: 1px solid #dbe3ed; border-bottom: 0; border-radius: 12px 12px 0 0; background: #fff; }
+.advance-table-heading h3 { margin: 0; color: #172033; font-size: 16px; }
+.advance-table-heading p { margin: 4px 0 0; color: #64748b; font-size: 12px; }
+.advance-table-heading > span { flex: 0 0 auto; padding: 5px 10px; border-radius: 999px; background: #f1f5f9; color: #475569; font-size: 12px; font-weight: 700; }
+.advance-payable-table { border-collapse: separate !important; border-spacing: 0; min-width: 1450px !important; color: #263449; font-size: 13px; }
+.advance-payable-table th { position: sticky; top: 0; z-index: 5; padding: 11px 10px !important; border-bottom: 1px solid #d9e2ee; background: #f1f5f9 !important; color: #475569; font-size: 11px; font-weight: 800; line-height: 1.35; white-space: normal; vertical-align: bottom; }
+.advance-payable-table td { border-bottom: 1px solid #edf1f5; vertical-align: top; }
+.advance-payable-table tbody tr:hover td { background-color: #f8fafc; }
+.advance-payable-table thead th:first-child,
+.advance-payable-table tbody td:first-child { position: sticky; left: 0; width: 56px; min-width: 56px; z-index: 6; background: #fff; }
+.advance-payable-table thead th:nth-child(2),
+.advance-payable-table tbody td:nth-child(2) { position: sticky; left: 56px; min-width: 180px; z-index: 6; background: #fff; box-shadow: 6px 0 10px -10px rgba(15, 23, 42, .45); }
+.advance-payable-table thead th:first-child,
+.advance-payable-table thead th:nth-child(2) { z-index: 9; background: #f1f5f9 !important; }
+.advance-payable-table tbody tr[style*="#fff7ed"] td:first-child,
+.advance-payable-table tbody tr[style*="#fff7ed"] td:nth-child(2) { background: #fff7ed; }
+.advance-payable-table tbody tr:last-child td { border-bottom: 0; }
+
+@media (max-width: 640px) {
+  .advance-table-scroll { max-height: 68vh; border-radius: 0 0 10px 10px; }
+  .advance-table-heading { align-items: flex-start; padding: 12px; }
+  .advance-table-heading h3 { font-size: 14px; }
+  .advance-table-heading p { max-width: 38ch; line-height: 1.4; }
+  .advance-payable-table { min-width: 1450px !important; }
+  .advance-secondary-panel-body { padding: 12px; }
+}

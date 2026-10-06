@@ -17581,7 +17581,7 @@ setTimeout(() => {
 )}
 
 {page === "advance" && (
-  <div style={{ maxWidth: 1160, margin: "0 auto 40px", padding: "0 12px" }}>
+  <div className="advance-page" style={{ maxWidth: 1160, margin: "0 auto 40px", padding: "0 12px" }}>
     <div className="paper section" style={{ padding: 20 }}>
       <div
         style={{
@@ -17593,7 +17593,7 @@ setTimeout(() => {
         }}
       >
         <div>
-          <h1 style={{ margin: 0 }}>Advance Payment</h1>
+          <h1 className="advance-page-title" style={{ margin: 0 }}>Advance Payment</h1>
 
           <p style={{ color: "#666", marginTop: 6 }}>
             Calculate payable till date and record employee advances.
@@ -17652,7 +17652,7 @@ setTimeout(() => {
     </div>
 
     <div
-      className="paper section"
+      className="paper section advance-payable-section"
       style={{ padding: 20, marginTop: 16 }}
     >
       <div
@@ -17792,18 +17792,9 @@ setTimeout(() => {
         </label>
       </div>
 
-      <div
-        style={{
-          marginTop: 20,
-          padding: 16,
-          border: "1px solid #d1d5db",
-          borderRadius: 10,
-          background: "#f9fafb",
-        }}
-      >
-        <h3 style={{ margin: "0 0 14px" }}>
-          Historical Advance Import
-        </h3>
+      <details className="advance-secondary-panel" style={{ marginTop: 16 }}>
+        <summary>Historical Advance Import</summary>
+        <div className="advance-secondary-panel-body">
 
         <div
           style={{
@@ -17917,7 +17908,8 @@ setTimeout(() => {
   onChange={handleHistoricalAdvanceTemplateUpload}
 /> 
         </div>
-      </div>
+        </div>
+      </details>
 
       {showHistoricalAdvanceConfirmDialog &&
         parsedHistoricalAdvanceSummary && (
@@ -18097,18 +18089,9 @@ setTimeout(() => {
           </div>
         )}
 
-      <div
-        style={{
-          marginTop: 20,
-          padding: 16,
-          border: "1px solid #d1d5db",
-          borderRadius: 10,
-          background: "#f9fafb",
-        }}
-      >
-        <h3 style={{ margin: "0 0 14px" }}>
-          Historical Salary Payment Import
-        </h3>
+      <details className="advance-secondary-panel" style={{ marginTop: 12 }}>
+        <summary>Historical Salary Payment Import</summary>
+        <div className="advance-secondary-panel-body">
 
         <div
           style={{
@@ -18226,7 +18209,8 @@ setTimeout(() => {
             onChange={handleHistoricalSalaryPaymentTemplateUpload}
           />
         </div>
-      </div>
+        </div>
+      </details>
 
       {showHistoricalSalaryPaymentConfirmDialog &&
         parsedHistoricalSalaryPaymentSummary && (
@@ -18921,7 +18905,7 @@ return (
             <>
               <div className="paper section" style={{ padding: 14 }}>
                 <div style={{ fontSize: 12, color: "#666" }}>
-                  Total Gross Payable
+                  Gross payable to date
                 </div>
 
                 <div
@@ -18940,7 +18924,7 @@ return (
 
               <div className="paper section" style={{ padding: 14 }}>
                 <div style={{ fontSize: 12, color: "#666" }}>
-                  Previous Advances
+                  Previous advances paid
                 </div>
 
                 <div
@@ -18959,7 +18943,7 @@ return (
 
               <div className="paper section" style={{ padding: 14 }}>
                 <div style={{ fontSize: 12, color: "#666" }}>
-                  Previous Carry Forward
+                  Carry-forward adjustment
                 </div>
 
                 <div
@@ -18981,7 +18965,7 @@ return (
 
               <div className="paper section" style={{ padding: 14 }}>
                 <div style={{ fontSize: 12, color: "#666" }}>
-                  Available Balance
+                  Net available balance
                 </div>
 
                 <div
@@ -19005,12 +18989,20 @@ return (
         })()}
       </div>
 
-      <div style={{ overflowX: "auto", marginTop: 16 }}>
+      <div className="advance-table-heading" style={{ marginTop: 16 }}>
+        <div>
+          <h3>Employee-by-employee breakdown</h3>
+          <p>Attendance, starting balance, prior advances, carry-forward, and available amount through the selected date.</p>
+        </div>
+        <span>{advanceEmployeeRows.length} employees</span>
+      </div>
+      <div className="advance-table-scroll">
         <table
+          className="advance-payable-table"
           style={{
             width: "100%",
             borderCollapse: "collapse",
-            minWidth: 900,
+            minWidth: 1320,
           }}
         >
           <thead>
