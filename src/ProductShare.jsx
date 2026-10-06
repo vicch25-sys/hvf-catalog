@@ -116,7 +116,7 @@ export default function ProductShareModal({ product, onClose }) {
     try {
       const file = new File([blob], fileName, { type: 'image/jpeg' });
       if (navigator.share && navigator.canShare?.({ files: [file] })) {
-        await navigator.share({ files: [file], title: product.name, text: `${product.name} · MRP ${formatRupees(product.mrp)}` });
+        await navigator.share({ files: [file] });
       } else {
         setError('This browser cannot attach an image directly to WhatsApp. Save the image, then attach it in WhatsApp.');
       }
