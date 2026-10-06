@@ -32,7 +32,7 @@ async function createShareImage(product) {
   const width = 1080;
   const side = 48;
   const contentWidth = width - side * 2;
-  const headerHeight = 104;
+  const headerHeight = 116;
   const [image, logo] = await Promise.all([
     product.image_url ? loadImage(product.image_url) : Promise.resolve(null),
     loadImage('/hvf-logo.png'),
@@ -57,10 +57,10 @@ async function createShareImage(product) {
 
   ctx.fillStyle = '#fff';
   ctx.fillRect(0, 0, width, height);
-  const logoScale = Math.min(190 / logo.width, 76 / logo.height);
+  const logoScale = Math.min(219 / logo.width, 87.4 / logo.height);
   const logoWidth = logo.width * logoScale;
   const logoHeight = logo.height * logoScale;
-  ctx.drawImage(logo, side, 14 + (76 - logoHeight) / 2, logoWidth, logoHeight);
+  ctx.drawImage(logo, side + 12, 22 + (87.4 - logoHeight) / 2, logoWidth, logoHeight);
 
   if (image) {
     const scale = Math.min(imageBox.w / image.width, imageBox.h / image.height);
