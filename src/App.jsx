@@ -8845,6 +8845,16 @@ const changePayrollEmployeeWeeklyOff = (
   localStorage.setItem("hvf.payrollEmployees", JSON.stringify(updatedEmployees));
 };
 
+const markPayrollEmployeesLeft = (employeeIds = []) => {
+  const ids = new Set(employeeIds.map(String));
+  if (!ids.size) return;
+  const updatedEmployees = payrollEmployees.map((employee) =>
+    ids.has(String(employee.id)) ? { ...employee, status: "left" } : employee
+  );
+  setPayrollEmployees(updatedEmployees);
+  localStorage.setItem("hvf.payrollEmployees", JSON.stringify(updatedEmployees));
+};
+
 
 // Ensure a clean, non-empty quotation code (string) everywhere we use it.
 function normalizeQuoteCode(v) {
@@ -14245,6 +14255,7 @@ alert("Starting Payable Balance saved successfully.");
     advanceNoPaymentConfirmations={advanceNoPaymentConfirmations}
     savedSalaryBatches={savedHistoricalSalaryPaymentBatches}
     salaryDrafts={smartPayrollCycleDrafts}
+    onMarkEmployeesLeft={markPayrollEmployeesLeft}
     onSave={saveSmartPayrollUpdate}
     onAdjustDraft={updateSmartPayrollDraftEmployee}
     onDeleteDraft={deleteSmartPayrollDraft}

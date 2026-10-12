@@ -52,6 +52,7 @@ export default function SmartPayrollUpdate({
   advanceNoPaymentConfirmations = [],
   savedSalaryBatches = [],
   salaryDrafts = [],
+  onMarkEmployeesLeft,
   onSave,
   onAdjustDraft,
   onDeleteDraft,
@@ -69,6 +70,8 @@ export default function SmartPayrollUpdate({
   });
   const [asOfDate, setAsOfDate] = useState(today);
   const [employeeScope, setEmployeeScope] = useState("non_contractual");
+  const [employeeSelectionByScope, setEmployeeSelectionByScope] = useState({});
+  const [showEmployeePicker, setShowEmployeePicker] = useState(false);
   const [preview, setPreview] = useState(null);
   const [selectedSheets, setSelectedSheets] = useState({
     Attendance: true,
@@ -104,6 +107,35 @@ export default function SmartPayrollUpdate({
     (employeeScope === "all" || employee.type === employeeScope)
       && (employee.status || "active") === "active"
   );
+  const selectedEmployeeIds = employeeSelectionByScope[employeeScope]
+    ?? activeEmployees.map((employee) => String(employee.id));
+  const selectedEmployeeIdSet = new Set(selectedEmployeeIds.map(String));
+  const templateEmployees = activeEmployees.filter((employee) => selectedEmployeeIdSet.has(String(employee.id)));
+  const sortedScopeEmployees = [...activeEmployees].sort((a, b) =>
+    String(a.name || "").localeCompare(String(b.name || ""), undefined, { sensitivity: "base" })
+  );
+  const setScopeEmployeeSelection = (nextIds) => {
+    setEmployeeSelectionByScope((current) => ({ ...current, [employeeScope]: nextIds.map(String) }));
+  };
+  const toggleScopeEmployee = (employeeId, checked) => {
+    const id = String(employeeId);
+    setScopeEmployeeSelection(checked
+      ? [...new Set([...selectedEmployeeIds.map(String), id])]
+      : selectedEmployeeIds.filter((selectedId) => String(selectedId) !== id));
+  };
+  const markSelectedEmployeesAsLeft = () => {
+    const selected = templateEmployees;
+    if (!selected.length) {
+      alert("Select the employee or employees to mark as left.");
+      return;
+    }
+    const names = selected.map((employee) => employee.name || "Unnamed employee");
+    const list = names.join(", ");
+    if (!window.confirm(`Mark ${names.length} selected employee${names.length === 1 ? "" : "s"} as left across payroll?\n\n${list}\n\nThey will no longer appear in active payroll templates.`)) return;
+    onMarkEmployeesLeft?.(selected.map((employee) => employee.id));
+    const markedIds = new Set(selected.map((employee) => String(employee.id)));
+    setScopeEmployeeSelection(selectedEmployeeIds.filter((id) => !markedIds.has(String(id))));
+  };
   const employeeScopeLabel = employeeScope === "all"
     ? "all active employees"
     : employeeScope === "contractual" ? "active contractual employees" : "active non-contractual employees";
@@ -131,16 +163,20 @@ export default function SmartPayrollUpdate({
   const workbookEmployeeId = (employee) => workbookEmployeeIds.get(String(employee.id)) ?? employee.id;
 
   const downloadTemplate = async () => {
+    if (templateEmployees.length === 0) {
+      alert("Select at least one active employee before downloading the template.");
+      return;
+    }
     if (periodStart > periodEnd || periodEnd > asOfDate) {
       alert("Check the dates: the salary cycle must end on or before the as-of date.");
       return;
     }
     const attendanceDateCandidates = datesBetween(periodStart, asOfDate);
-    const attendanceDates = attendanceDateCandidates.filter((date) => activeEmployees.some((employee) => {
+    const attendanceDates = attendanceDateCandidates.filter((date) => templateEmployees.some((employee) => {
       if (employee.joining_date && date < employee.joining_date) return false;
       return !attendanceEntries[`${date}_${employee.id}`];
     }));
-    const attendanceEmployees = activeEmployees.filter((employee) => attendanceDates.some((date) =>
+    const attendanceEmployees = templateEmployees.filter((employee) => attendanceDates.some((date) =>
       !employee.joining_date || date >= employee.joining_date
     ));
     const displayDate = (date) => {
@@ -181,7 +217,7 @@ export default function SmartPayrollUpdate({
       const day = new Date(`${date}T12:00:00`).getDay();
       return day === 2 || day === 6;
     });
-    const advanceRows = activeEmployees.map((employee) => {
+    const advanceRows = templateEmployees.map((employee) => {
       const row = {
       Employee_ID: workbookEmployeeId(employee),
       Employee_Name: employee.name,
@@ -206,7 +242,7 @@ export default function SmartPayrollUpdate({
       Notes: "",
     }));
 
-    const salaryRows = activeEmployees.map((employee) => ({
+    const salaryRows = templateEmployees.map((employee) => ({
       Employee_ID: workbookEmployeeId(employee),
       Employee_Name: employee.name,
       Salary_Period_From: periodStart,
@@ -216,7 +252,7 @@ export default function SmartPayrollUpdate({
       Register_Adjustment: "",
       Adjustment_Reason: "",
     }));
-    const previousSalaryRows = activeEmployees.map((employee) => ({
+    const previousSalaryRows = templateEmployees.map((employee) => ({
       Employee_ID: workbookEmployeeId(employee),
       Employee_Name: employee.name,
       Salary_Period_From: "",
@@ -244,7 +280,7 @@ export default function SmartPayrollUpdate({
       return lines.join("\n");
     };
     const readme = [
-      { Topic: "Scope", Instructions: wrapInstruction(`${employeeScopeLabel[0].toUpperCase()}${employeeScopeLabel.slice(1)}. Salary period ${displayDate(periodStart)} to ${displayDate(periodEnd)}; attendance and actual advances through ${displayDate(asOfDate)}. Dates use DD/MM/YYYY.`) },
+      { Topic: "Scope", Instructions: wrapInstruction(`${templateEmployees.length} selected ${employeeScopeLabel}. Salary period ${displayDate(periodStart)} to ${displayDate(periodEnd)}; attendance and actual advances through ${displayDate(asOfDate)}. Dates use DD/MM/YYYY.`) },
       { Topic: "Attendance", Instructions: wrapInstruction("One employee per row; dates with at least one gap are columns. Enter P (Present), A (Absent), H (Half day), W (Weekly off), PH (Public holiday), or NJ (Not Joined) in blank cells. Use NJ only when you have confirmed the employee had not joined on that date. # means a mark is already saved for that employee/date; leave it unchanged. — means the app knows the date was before joining; do not fill. Known weekly offs are prefilled W. Leave uncertain dates blank and resolve them before upload.") },
       { Topic: "Advances", Instructions: wrapInstruction("One employee per row; scheduled Tuesdays and Saturdays are columns. # means a paid advance is already saved; leave it unchanged. Enter a positive amount only when an advance was actually paid. Enter 0 to confirm that you checked and no advance was taken; this confirmation is saved separately and does not count as a payment. Leave blank if the date is still unknown or unchecked; it will remain a gap next time. Use Emergency Advances for actual off-schedule payments, mark Paid=Yes, and add a note.") },
       { Topic: "Salary Cycle", Instructions: wrapInstruction("One employee per row. Salary period and planned payment dates use DD/MM/YYYY. Use Register_Adjustment only to reconcile against your register; enter a positive or negative amount and explain it. This is an unpaid draft, not a payment record.") },
@@ -575,7 +611,7 @@ export default function SmartPayrollUpdate({
     <div className="paper section" style={{ maxWidth: 1160, margin: "0 auto 40px", padding: 20 }}>
       <h1 style={{ margin: 0 }}>Smart Payroll Update</h1>
       <p style={{ color: "#5b6472", lineHeight: 1.5 }}>
-        One workbook for attendance gaps, actual advances, any missed historical salary payments, and salary-register adjustments. Choose which active employees to include; saved entries are checked before import.
+        One workbook for attendance gaps, actual advances, any missed historical salary payments, and salary-register adjustments. Choose the active employees to include; saved entries are checked before import.
       </p>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(190px,1fr))", gap: 12 }}>
         <label>Employee group<select value={employeeScope} onChange={(event) => { setEmployeeScope(event.target.value); setPreview(null); }} style={{ display: "block", width: "100%", marginTop: 5, padding: 9 }}><option value="non_contractual">Non-contractual</option><option value="contractual">Contractual</option><option value="all">All employees</option></select></label>
@@ -583,8 +619,31 @@ export default function SmartPayrollUpdate({
         <label>Salary period to<input type="date" value={periodEnd} onChange={(event) => setPeriodEnd(event.target.value)} style={{ display: "block", width: "100%", marginTop: 5, padding: 9 }} /></label>
         <label>Attendance and advances through<input type="date" value={asOfDate} onChange={(event) => setAsOfDate(event.target.value)} style={{ display: "block", width: "100%", marginTop: 5, padding: 9 }} /></label>
       </div>
+      <section style={{ marginTop: 14, border: "1px solid #dbe3ed", borderRadius: 12, overflow: "hidden", background: "#fff" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", padding: "12px 14px" }}>
+          <div><b>Employees for this workbook</b><div style={{ color: "#64748b", fontSize: 13, marginTop: 3 }}>{templateEmployees.length} of {activeEmployees.length} active employees selected</div></div>
+          <button type="button" className="btn" aria-expanded={showEmployeePicker} onClick={() => setShowEmployeePicker((open) => !open)}>{showEmployeePicker ? "Hide employee list" : "Choose employees"}</button>
+        </div>
+        {showEmployeePicker && <div style={{ borderTop: "1px solid #e2e8f0", padding: 12 }}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+            <button type="button" className="btn" onClick={() => setScopeEmployeeSelection(activeEmployees.map((employee) => String(employee.id)))}>Select all</button>
+            <button type="button" className="btn" onClick={() => setScopeEmployeeSelection([])}>Deselect all</button>
+            <button type="button" className="btn" disabled={templateEmployees.length === 0} onClick={markSelectedEmployeesAsLeft} style={{ color: "#b42318" }}>Mark selected as left</button>
+          </div>
+          {sortedScopeEmployees.length === 0 ? <p style={{ color: "#64748b", margin: 0 }}>There are no active employees in this group.</p> : <div style={{ maxHeight: 320, overflow: "auto", border: "1px solid #e2e8f0", borderRadius: 8 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
+              <thead style={{ position: "sticky", top: 0, zIndex: 1, background: "#f8fafc" }}><tr><th style={{ width: 42, padding: 10, textAlign: "left" }}>Include</th><th style={{ padding: 10, textAlign: "left" }}>Employee</th><th style={{ padding: 10, textAlign: "left" }}>Type</th><th style={{ padding: 10, textAlign: "left" }}>Branch</th></tr></thead>
+              <tbody>{sortedScopeEmployees.map((employee) => <tr key={employee.id} style={{ borderTop: "1px solid #e2e8f0" }}>
+                <td style={{ padding: 9 }}><input type="checkbox" checked={selectedEmployeeIdSet.has(String(employee.id))} onChange={(event) => toggleScopeEmployee(employee.id, event.target.checked)} aria-label={`Include ${employee.name} in the workbook`} /></td>
+                <td style={{ padding: 9 }}>{employee.name || "Unnamed employee"}</td><td style={{ padding: 9, color: "#64748b" }}>{employee.type === "contractual" ? "Contractual" : "Non-contractual"}</td><td style={{ padding: 9, color: "#64748b" }}>{employee.branch || "—"}</td>
+              </tr>)}</tbody>
+            </table>
+          </div>}
+          <small style={{ display: "block", color: "#64748b", marginTop: 8 }}>Marking selected employees as left changes their status in the shared payroll records and removes them from future active templates.</small>
+        </div>}
+      </section>
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 16 }}>
-        <button type="button" className="btn primary" onClick={downloadTemplate}>Download Excel template</button>
+        <button type="button" className="btn primary" onClick={downloadTemplate} disabled={templateEmployees.length === 0}>Download Excel template</button>
         <button type="button" className="btn" disabled={working} onClick={() => inputRef.current?.click()}>{working ? "Reading workbook…" : "Upload completed workbook"}</button>
         <button type="button" className="btn" onClick={onBack}>Back</button>
         <input ref={inputRef} type="file" accept=".xlsx,.xls" style={{ display: "none" }} onChange={handleFile} />
