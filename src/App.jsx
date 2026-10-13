@@ -14806,7 +14806,7 @@ alert("Starting Payable Balance saved successfully.");
       {
         attendanceRoster.filter((emp) => (emp.status || "active") === "active").filter((emp) => {
           const key = `${attendanceDate}_${emp.id}`;
-          return (attendanceEntries[key] || "present") === "present";
+          return attendanceEntries[key] === "present";
         }).length
       }
     </div>
@@ -14900,18 +14900,7 @@ alert("Starting Payable Balance saved successfully.");
   .map((emp) => {
  
             const attendanceKey = `${attendanceDate}_${emp.id}`;
-           const dayName = weekdayName(attendanceDate);
-
-const effectiveWeeklyOff = getEmployeeWeeklyOffForDate(emp, attendanceDate);
-
-const defaultStatus =
-effectiveWeeklyOff &&
-effectiveWeeklyOff !== "none" &&
-effectiveWeeklyOff === dayName
-? "weekoff"
-: "present";
-
-const currentStatus = attendanceEntries[attendanceKey] || defaultStatus;
+const currentStatus = attendanceEntries[attendanceKey] || "";
 
             return (
               <div
@@ -14933,7 +14922,9 @@ const currentStatus = attendanceEntries[attendanceKey] || defaultStatus;
     ? "#fffbeb"
     : currentStatus === "weekoff"
     ? "#eff6ff"
-    : "#f5f3ff",
+    : currentStatus === "publicholiday"
+    ? "#f5f3ff"
+    : "#fff",
 }}
               >
                 <div>
@@ -14951,9 +14942,11 @@ const currentStatus = attendanceEntries[attendanceKey] || defaultStatus;
     ? "#dc2626"
     : currentStatus === "halfday"
     ? "#b45309"
-    : currentStatus === "weekoff"
-    ? "#2563eb"
-    : "#7c3aed",
+  : currentStatus === "weekoff"
+  ? "#2563eb"
+  : currentStatus === "publicholiday"
+  ? "#7c3aed"
+  : "#94a3b8",
   }}
 >
   {currentStatus === "present"
@@ -14964,7 +14957,9 @@ const currentStatus = attendanceEntries[attendanceKey] || defaultStatus;
   ? "Half Day"
   : currentStatus === "weekoff"
   ? "Weekly Off"
-  : "Public Holiday"}
+  : currentStatus === "publicholiday"
+  ? "Public Holiday"
+  : "Not marked"}
 </div>
 
 <div style={{ fontSize: 13, color: "#666", marginTop: 4 }}>
@@ -14978,7 +14973,7 @@ const currentStatus = attendanceEntries[attendanceKey] || defaultStatus;
                       key={status}
                       type="button"
                       onClick={() => {
-                        const previousStatus = attendanceEntries[attendanceKey] || "present";
+                        const previousStatus = attendanceEntries[attendanceKey] || "";
 
 const updated = {
   ...attendanceEntries,
@@ -15540,24 +15535,6 @@ const status = !joined
   ...attendanceEntries,
   [`${attendanceDate}_saved_at`]: new Date().toISOString(),
 };
-
-attendanceRoster
-  .filter((emp) => emp.type === attendanceTab)
-  .forEach((emp) => {
-    const key = `${attendanceDate}_${emp.id}`;
-
-    if (updated[key]) return;
-
-    const dayName = weekdayName(attendanceDate);
-
-    if (
-      emp.weekly_off &&
-      emp.weekly_off !== "none" &&
-      emp.weekly_off === dayName
-    ) {
-      updated[key] = "weekoff";
-    }
-  });
 
 setAttendanceEntries(updated);
 
