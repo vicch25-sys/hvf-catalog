@@ -2222,6 +2222,13 @@ const [payrollEmployees, setPayrollEmployees] = useState(() => {
     return [];
   }
 });
+const [attendanceOnlyEmployees, setAttendanceOnlyEmployees] = useState([]);
+const [attendanceDirectoryLoaded, setAttendanceDirectoryLoaded] = useState(false);
+const attendanceRoster = isAdmin
+  ? payrollEmployees
+  : profileAccessStatus === "ready" && canManageCatalog
+    ? attendanceOnlyEmployees
+    : [];
 const [showEmployeeForm, setShowEmployeeForm] = useState(false);
 const [selectedPayrollEmployee, setSelectedPayrollEmployee] = useState(null);
 const [editingPayrollEmployeeId, setEditingPayrollEmployeeId] = useState(null);
@@ -2787,6 +2794,11 @@ const [attendanceHistory, setAttendanceHistory] = useState(() => {
     return [];
   }
 });
+const [attendanceCloudStatus, setAttendanceCloudStatus] = useState("");
+const attendanceSyncReadyRef = useRef(false);
+const attendanceSyncUserRef = useRef("");
+const attendanceEntriesBaselineRef = useRef({});
+const attendanceHistoryBaselineRef = useRef([]);
 const [payrollSyncStatus, setPayrollSyncStatus] = useState(
   "Sign in with the admin email link on this device to sync payroll data."
 );
@@ -3039,6 +3051,204 @@ const [showCatalogExportPanel, setShowCatalogExportPanel] = useState(false);
     }
   };
 
+  const startAttendanceOnlySync = async (activeSession, attendanceAccess) => {
+    const userId = activeSession?.user?.id;
+    if (!userId || !attendanceAccess) {
+      attendanceSyncReadyRef.current = false;
+      attendanceSyncUserRef.current = "";
+      setAttendanceDirectoryLoaded(false);
+      setAttendanceOnlyEmployees([]);
+      setAttendanceCloudStatus("");
+      return;
+    }
+    if (attendanceSyncUserRef.current === userId && attendanceSyncReadyRef.current) return;
+
+    attendanceSyncReadyRef.current = false;
+    attendanceSyncUserRef.current = userId;
+    setAttendanceCloudStatus("Loading shared attendance…");
+    try {
+      const fetchAllRows = async (table, columns) => {
+        const all = [];
+        for (let from = 0; ; from += 1000) {
+          const { data, error } = await supabase.from(table).select(columns).range(from, from + 999);
+          if (error) throw error;
+          all.push(...(data || []));
+          if (!data || data.length < 1000) break;
+        }
+        return all;
+      };
+      const [directory, records, saves, history] = await Promise.all([
+        fetchAllRows("attendance_employee_directory", "employee_id, employee_name, employee_type, branch, joining_date, weekly_off, is_active"),
+        fetchAllRows("attendance_records", "attendance_date, employee_id, status"),
+        fetchAllRows("attendance_day_saves", "attendance_date, saved_at"),
+        fetchAllRows("attendance_change_history", "id, attendance_date, employee_id, employee_name, previous_status, new_status, event_type, changed_at, changed_by"),
+      ]);
+      if (attendanceSyncUserRef.current !== userId) return;
+      const employees = directory.map((employee) => ({
+        id: employee.employee_id,
+        name: employee.employee_name,
+        type: employee.employee_type,
+        branch: employee.branch || "",
+        joining_date: employee.joining_date || "",
+        weekly_off: employee.weekly_off || "none",
+        status: employee.is_active ? "active" : "left",
+      }));
+      const entries = {};
+      records.forEach((record) => {
+        entries[`${record.attendance_date}_${record.employee_id}`] = record.status;
+      });
+      saves.forEach((save) => {
+        entries[`${save.attendance_date}_saved_at`] = save.saved_at;
+      });
+      const historyItems = history.map((event) => ({
+        id: event.id,
+        date: event.attendance_date,
+        employee_id: event.employee_id,
+        employee_name: event.employee_name,
+        previous_status: event.previous_status,
+        new_status: event.new_status,
+        type: event.event_type,
+        changed_at: event.changed_at,
+        changed_by: event.changed_by,
+      }));
+      attendanceEntriesBaselineRef.current = entries;
+      attendanceHistoryBaselineRef.current = historyItems;
+      setAttendanceOnlyEmployees(employees);
+      setAttendanceDirectoryLoaded(true);
+      setAttendanceEntries(entries);
+      setAttendanceHistory(historyItems);
+      attendanceSyncReadyRef.current = true;
+      setAttendanceCloudStatus("Attendance synced across devices.");
+    } catch (error) {
+      if (attendanceSyncUserRef.current !== userId) return;
+      attendanceSyncReadyRef.current = false;
+      setAttendanceCloudStatus(`Attendance could not sync: ${error?.message || "database error"}`);
+    }
+  };
+
+  const startAttendanceOnlySyncRef = useRef(startAttendanceOnlySync);
+  startAttendanceOnlySyncRef.current = startAttendanceOnlySync;
+
+  // Admins maintain the minimal roster and share attendance only. No salary or
+  // advance fields are sent to the manager-readable attendance tables.
+  const attendanceDirectoryJsonRef = useRef("");
+  useEffect(() => {
+    if (!isAdmin || !session?.user?.id) return undefined;
+    const roster = payrollEmployees.map((employee) => ({
+      id: String(employee.id),
+      name: String(employee.name || ""),
+      type: employee.type,
+      branch: String(employee.branch || ""),
+      joining_date: employee.joining_date || null,
+      weekly_off: employee.weekly_off || "none",
+      status: employee.status || "active",
+    })).filter((employee) => ["contractual", "non_contractual"].includes(employee.type));
+    const serialized = JSON.stringify(roster);
+    if (serialized === attendanceDirectoryJsonRef.current) return undefined;
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const { error } = await supabase.rpc("sync_attendance_employee_directory", { p_employees: roster });
+        if (error) throw error;
+        if (cancelled) return;
+        attendanceDirectoryJsonRef.current = serialized;
+        attendanceSyncUserRef.current = session.user.id;
+        setAttendanceDirectoryLoaded(true);
+        setAttendanceCloudStatus("Attendance sync is ready.");
+      } catch (error) {
+        if (!cancelled) setAttendanceCloudStatus(`Attendance directory could not sync: ${error?.message || "database error"}`);
+      }
+    }, 250);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [isAdmin, session?.user?.id, payrollEmployees]);
+
+  // Persist just changed attendance rows and history events. Manager changes
+  // never enter the admin-only payroll snapshot.
+  useEffect(() => {
+    if (!attendanceSyncReadyRef.current || !session?.user?.id || attendanceSyncUserRef.current !== session.user.id) return undefined;
+    const beforeEntries = attendanceEntriesBaselineRef.current || {};
+    const beforeHistory = attendanceHistoryBaselineRef.current || [];
+    const changedRecords = [];
+    const removedRecords = [];
+    const changedSaves = [];
+    const removedSaves = [];
+    const allKeys = new Set([...Object.keys(beforeEntries), ...Object.keys(attendanceEntries || {})]);
+    allKeys.forEach((key) => {
+      const date = key.slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+      const isSave = key === `${date}_saved_at`;
+      const oldValue = beforeEntries[key];
+      const newValue = attendanceEntries?.[key];
+      if (oldValue === newValue) return;
+      if (isSave) {
+        if (newValue) changedSaves.push({ attendance_date: date, saved_at: newValue, saved_by: session.user.id });
+        else if (oldValue) removedSaves.push(date);
+      } else {
+        const employeeId = key.slice(11);
+        if (!employeeId) return;
+        if (["present", "absent", "halfday", "weekoff", "publicholiday"].includes(newValue)) {
+          changedRecords.push({ attendance_date: date, employee_id: employeeId, status: newValue, updated_by: session.user.id });
+        } else if (oldValue) removedRecords.push({ attendance_date: date, employee_id: employeeId });
+      }
+    });
+    const oldHistoryIds = new Set(beforeHistory.map((item) => String(item.id)));
+    const newHistory = (attendanceHistory || []).filter((item) => !oldHistoryIds.has(String(item.id)));
+    if (!changedRecords.length && !removedRecords.length && !changedSaves.length && !removedSaves.length && !newHistory.length) return undefined;
+    const timer = setTimeout(async () => {
+      setAttendanceCloudStatus("Saving attendance changes…");
+      try {
+        if (changedRecords.length) {
+          const { error } = await supabase.from("attendance_records").upsert(changedRecords, { onConflict: "attendance_date,employee_id" });
+          if (error) throw error;
+        }
+        if (removedRecords.length) {
+          for (const row of removedRecords) {
+            const { error } = await supabase.from("attendance_records").delete().eq("attendance_date", row.attendance_date).eq("employee_id", row.employee_id);
+            if (error) throw error;
+          }
+        }
+        if (changedSaves.length) {
+          const { error } = await supabase.from("attendance_day_saves").upsert(changedSaves, { onConflict: "attendance_date" });
+          if (error) throw error;
+        }
+        if (removedSaves.length) {
+          const { error } = await supabase.from("attendance_day_saves").delete().in("attendance_date", removedSaves);
+          if (error) throw error;
+        }
+        if (newHistory.length) {
+          const rows = newHistory.map((item) => ({
+            id: String(item.id), attendance_date: item.date, employee_id: item.employee_id ? String(item.employee_id) : null,
+            employee_name: item.employee_name || "", previous_status: item.previous_status || null,
+            new_status: item.new_status || null, event_type: item.type || "status",
+            changed_at: item.changed_at || new Date().toISOString(), changed_by: item.changed_by || "",
+          }));
+          const { error } = await supabase.from("attendance_change_history").insert(rows);
+          if (error && error.code !== "23505") throw error;
+        }
+        attendanceEntriesBaselineRef.current = { ...(attendanceEntries || {}) };
+        attendanceHistoryBaselineRef.current = [...(attendanceHistory || [])];
+        setAttendanceCloudStatus("Attendance synced across devices.");
+      } catch (error) {
+        setAttendanceCloudStatus(`Attendance saved here; cloud sync failed: ${error?.message || "database error"}`);
+      }
+    }, 450);
+    return () => clearTimeout(timer);
+  }, [session?.user?.id, attendanceEntries, attendanceHistory]);
+
+  useEffect(() => {
+    if (session?.user?.id && (isAdmin || canManageCatalog)) return;
+    attendanceSyncReadyRef.current = false;
+    attendanceSyncUserRef.current = "";
+    setAttendanceDirectoryLoaded(false);
+    setAttendanceOnlyEmployees([]);
+    setAttendanceCloudStatus("");
+  }, [session?.user?.id, isAdmin, canManageCatalog]);
+
+  useEffect(() => {
+    if (!canManageCatalog || isAdmin) return;
+    if (page !== "catalog" && page !== "attendance") setPage("catalog");
+  }, [canManageCatalog, isAdmin, page]);
+
   useEffect(() => {
     // ensure today's date is in the editor on mount too
     setQHeader((h) => ({ ...h, date: todayStr() }));
@@ -3085,17 +3295,19 @@ const [showCatalogExportPanel, setShowCatalogExportPanel] = useState(false);
         .maybeSingle();
       if (error) throw error;
       if (requestId !== profileAccessRequestRef.current) return;
-      setIsAdmin(Boolean(prof?.is_admin) || adminPersist);
+      setIsAdmin(Boolean(prof?.is_admin));
       setCanManageCatalog(Boolean(prof?.can_manage_catalog));
       setProfileAccessStatus("ready");
       await startPayrollSyncRef.current?.(data.session, Boolean(prof?.is_admin));
+      await startAttendanceOnlySyncRef.current?.(data.session, Boolean(prof?.is_admin || prof?.can_manage_catalog));
     } catch (error) {
       if (requestId !== profileAccessRequestRef.current) return;
       console.error("Could not load account permissions:", error);
-      setIsAdmin(adminPersist);
+      setIsAdmin(false);
       setCanManageCatalog(false);
       setProfileAccessStatus("error");
-      await startPayrollSyncRef.current?.(data.session, adminPersist);
+      await startPayrollSyncRef.current?.(data.session, false);
+      await startAttendanceOnlySyncRef.current?.(data.session, false);
     }
   };
   init();
@@ -3114,18 +3326,20 @@ const [showCatalogExportPanel, setShowCatalogExportPanel] = useState(false);
         .then(async ({ data, error }) => {
           if (error) throw error;
           if (requestId !== profileAccessRequestRef.current) return;
-          setIsAdmin(Boolean(data?.is_admin) || adminPersist);
+          setIsAdmin(Boolean(data?.is_admin));
           setCanManageCatalog(Boolean(data?.can_manage_catalog));
           setProfileAccessStatus("ready");
           await startPayrollSyncRef.current?.(s, Boolean(data?.is_admin));
+          await startAttendanceOnlySyncRef.current?.(s, Boolean(data?.is_admin || data?.can_manage_catalog));
         })
         .catch(async (error) => {
           if (requestId !== profileAccessRequestRef.current) return;
           console.error("Could not load account permissions:", error);
-          setIsAdmin(adminPersist);
+          setIsAdmin(false);
           setCanManageCatalog(false);
           setProfileAccessStatus("error");
-          await startPayrollSyncRef.current?.(s, adminPersist);
+          await startPayrollSyncRef.current?.(s, false);
+          await startAttendanceOnlySyncRef.current?.(s, false);
         });
     } else {
       setIsAdmin(adminPersist);
@@ -4910,6 +5124,9 @@ const getDateRangeList = (fromDate, toDate) => {
   return dates;
 };
 
+const employeeHasAttendanceInRange = (employee, from, to) =>
+  getDateRangeList(from, to).some((dateKey) => attendanceEntries[`${dateKey}_${employee.id}`]);
+
 const formatExcelEmployeeDate = (value) => {
   if (!value) return "";
 
@@ -4967,11 +5184,11 @@ const printAttendanceRegisterPdf = () => {
     return;
   }
 
-  const employeesToPrint = payrollEmployees
+  const employeesToPrint = attendanceRoster
   .filter(
     (emp) =>
       (attendanceTab === "all" || emp.type === attendanceTab) &&
-      (emp.status || "active") === "active"
+      ((emp.status || "active") === "active" || (!isAdmin && employeeHasAttendanceInRange(emp, range.from, range.to)))
   )
   .sort((a, b) => {
     const typeOrder = {
@@ -5268,7 +5485,7 @@ const generateAttendanceTemplate = () => {
 
   const rows = [];
 
-    payrollEmployees.forEach((emp) => {
+    attendanceRoster.forEach((emp) => {
     rows.push({
       Employee_ID: emp.id,
       Type: emp.type === "contractual" ? "Contractual" : "Non-contractual",
@@ -5336,7 +5553,7 @@ const handleAttendanceExcelImport = async (event) => {
 
       if (!employeeId) return;
 
-      const employee = payrollEmployees.find(
+      const employee = attendanceRoster.find(
         (emp) => Number(emp.id) === employeeId
       );
 
@@ -13249,7 +13466,7 @@ button.mini.primary{
   </>
 )}
 
-{page === "startingPayableBalance" && (
+{isAdmin && page === "startingPayableBalance" && (
   <div
     style={{
       maxWidth: 1160,
@@ -14247,7 +14464,7 @@ alert("Starting Payable Balance saved successfully.");
   </div>
 )}
 
-{page === "smartPayrollUpdate" && (
+{isAdmin && page === "smartPayrollUpdate" && (
   <SmartPayrollUpdate
     employees={payrollEmployees}
     attendanceEntries={attendanceEntries}
@@ -14320,15 +14537,15 @@ alert("Starting Payable Balance saved successfully.");
   Import Attendance
 </button>
 
-<button
+{isAdmin && <button
   type="button"
   className="btn primary"
   onClick={() => setPage("smartPayrollUpdate")}
 >
   Smart Payroll Update
-</button>
+</button>}
 
-  <button
+  {isAdmin && <button
     type="button"
     className="btn primary"
     onClick={() => {
@@ -14354,9 +14571,9 @@ alert("Starting Payable Balance saved successfully.");
     }}
   >
     + Add Employee
-  </button>
+  </button>}
 
-  <button
+  {isAdmin && <button
     type="button"
     className="btn"
     onClick={() => {
@@ -14368,8 +14585,14 @@ alert("Starting Payable Balance saved successfully.");
     }}
   >
     Manage Employees
-  </button>
+  </button>}
 </div>
+
+{attendanceCloudStatus && (
+  <div role="status" style={{ marginTop: 8, fontSize: 12, color: attendanceCloudStatus.includes("failed") || attendanceCloudStatus.includes("could not") ? "#b42318" : "#64748b" }}>
+    {attendanceCloudStatus}
+  </div>
+)}
 
 {showAttendanceImport && (
   <div
@@ -14539,7 +14762,7 @@ alert("Starting Payable Balance saved successfully.");
 </div>
 
 <div style={{ marginTop: 8, fontSize: 13, color: "#374151" }}>
-  Date: <b>{attendanceDate}</b> • Employees: <b>{payrollEmployees.length}</b>
+  Date: <b>{attendanceDate}</b> • Employees: <b>{attendanceRoster.filter((employee) => (employee.status || "active") === "active").length}</b>
 
 {attendanceEntries[`${attendanceDate}_saved_at`] && (
   <span style={{ marginLeft: 10, color: "#666" }}>
@@ -14581,7 +14804,7 @@ alert("Starting Payable Balance saved successfully.");
     <div style={{ fontSize: 12, color: "#666" }}>Present</div>
     <div style={{ fontSize: 22, fontWeight: 800, color: "#166534" }}>
       {
-        payrollEmployees.filter((emp) => {
+        attendanceRoster.filter((emp) => (emp.status || "active") === "active").filter((emp) => {
           const key = `${attendanceDate}_${emp.id}`;
           return (attendanceEntries[key] || "present") === "present";
         }).length
@@ -14593,7 +14816,7 @@ alert("Starting Payable Balance saved successfully.");
     <div style={{ fontSize: 12, color: "#666" }}>Absent</div>
     <div style={{ fontSize: 22, fontWeight: 800, color: "#dc2626" }}>
       {
-        payrollEmployees.filter((emp) => {
+        attendanceRoster.filter((emp) => (emp.status || "active") === "active").filter((emp) => {
           const key = `${attendanceDate}_${emp.id}`;
           return attendanceEntries[key] === "absent";
         }).length
@@ -14605,7 +14828,7 @@ alert("Starting Payable Balance saved successfully.");
     <div style={{ fontSize: 12, color: "#666" }}>Half Day</div>
     <div style={{ fontSize: 22, fontWeight: 800, color: "#b45309" }}>
       {
-        payrollEmployees.filter((emp) => {
+        attendanceRoster.filter((emp) => (emp.status || "active") === "active").filter((emp) => {
           const key = `${attendanceDate}_${emp.id}`;
           return attendanceEntries[key] === "halfday";
         }).length
@@ -14649,16 +14872,22 @@ alert("Starting Payable Balance saved successfully.");
       </div>
 
       <div className="paper section" style={{ marginTop: 18, padding: 0, overflow: "hidden" }}>
-        {payrollEmployees.length === 0 ? (
+        {canManageCatalog && !isAdmin && !attendanceDirectoryLoaded ? (
+          <div role="status" style={{ padding: 20, color: "#64748b" }}>Loading shared attendance and employee list…</div>
+        ) : attendanceRoster.length === 0 ? (
           <div style={{ padding: 20, color: "#777" }}>
             No employees added yet.
           </div>
         ) : (
-          payrollEmployees
+          attendanceRoster
   .filter(
     (emp) =>
       (attendanceTab === "all" || emp.type === attendanceTab) &&
-      (emp.status || "active") === "active"
+      ((emp.status || "active") === "active" || (!isAdmin && employeeHasAttendanceInRange(
+        emp,
+        getAttendanceRegisterRange().from,
+        getAttendanceRegisterRange().to
+      )))
   )
   .sort((a, b) => {
     const typeOrder = {
@@ -14668,7 +14897,7 @@ alert("Starting Payable Balance saved successfully.");
 
     return (typeOrder[a.type] || 99) - (typeOrder[b.type] || 99);
   })
-  .map((emp, index, filteredEmployees) => {
+  .map((emp) => {
  
             const attendanceKey = `${attendanceDate}_${emp.id}`;
            const dayName = weekdayName(attendanceDate);
@@ -15013,13 +15242,13 @@ localStorage.setItem(
 <th style={{ padding: 8, textAlign: "center" }}>H</th>
 <th style={{ padding: 8, textAlign: "center" }}>PH</th>
 <th style={{ padding: 8, textAlign: "center" }}>W</th>
-<th style={{ padding: 8, textAlign: "center" }}>Payable</th>
+{isAdmin && <th style={{ padding: 8, textAlign: "center" }}>Payable</th>}
         {(() => {
   const range = getAttendanceRegisterRange();
   const dates = getDateRangeList(range.from, range.to);
 
   return dates.map((dateKey, i) => {
-    const [year, month, day] = dateKey.split("-");
+    const [, month, day] = dateKey.split("-");
 
     return (
       <th key={i} style={{ padding: 8, textAlign: "center" }}>
@@ -15032,7 +15261,7 @@ localStorage.setItem(
     </thead>
 
     <tbody>
-      {payrollEmployees
+      {attendanceRoster
   .filter(
     (emp) =>
       (attendanceTab === "all" || emp.type === attendanceTab) &&
@@ -15062,7 +15291,7 @@ localStorage.setItem(
         <tr>
           <td
             colSpan={
-              7 +
+              (isAdmin ? 7 : 6) +
               getDateRangeList(
                 getAttendanceRegisterRange().from,
                 getAttendanceRegisterRange().to
@@ -15174,7 +15403,7 @@ localStorage.setItem(
 </td>
 
 
-<td
+{isAdmin && <td
   style={{
     padding: 8,
     textAlign: "center",
@@ -15200,7 +15429,7 @@ if (attendanceEntries[key] === "publicholiday") return 1;
         .reduce((a, b) => a + b, 0)
     ).toFixed(1)
   }
-</td>
+</td>}
 
 {getDateRangeList(
             getAttendanceRegisterRange().from,
@@ -15287,7 +15516,7 @@ const status = !joined
     flexWrap: "wrap",
   }}
 >
-  <button
+  {isAdmin && <button
     type="button"
     className="btn"
     style={{
@@ -15299,7 +15528,7 @@ const status = !joined
     onClick={() => setPage("startingPayableBalance")}
   >
     Manage Starting Payable Balance
-  </button>
+  </button>}
 
   <div style={{ textAlign: "right" }}>
 
@@ -15312,7 +15541,7 @@ const status = !joined
   [`${attendanceDate}_saved_at`]: new Date().toISOString(),
 };
 
-payrollEmployees
+attendanceRoster
   .filter((emp) => emp.type === attendanceTab)
   .forEach((emp) => {
     const key = `${attendanceDate}_${emp.id}`;
@@ -15435,7 +15664,7 @@ if (!window.confirm("Clear attendance for this selected date?")) return;
 
 
 
-{page === "payroll" && (
+{isAdmin && page === "payroll" && (
   <div style={{ maxWidth: 1100, margin: "0 auto 40px", padding: "0 12px" }}>
     <div className="paper section" style={{ padding: 20 }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
@@ -17591,7 +17820,7 @@ setTimeout(() => {
   </div>
 )}
 
-{page === "advance" && (
+{isAdmin && page === "advance" && (
   <div className="advance-page" style={{ maxWidth: 1160, margin: "0 auto 40px", padding: "0 12px" }}>
     <div className="paper section" style={{ padding: 20 }}>
       <div
