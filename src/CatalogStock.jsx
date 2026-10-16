@@ -92,7 +92,13 @@ export function useCatalogStock(client, userId, enabled) {
       setError('');
     }
   }
-  return { rows, status, error, save, refresh };
+  async function confirmChecked(includeHidden = false) {
+    if (!enabled || status !== 'ready') throw new Error('Stock access is not ready.');
+    const { error: failure } = await client.rpc('confirm_catalog_stock_check', { include_hidden: includeHidden });
+    if (failure) throw new Error(failure.message || 'Could not record the inventory check.');
+    await refresh();
+  }
+  return { rows, status, error, save, refresh, confirmChecked };
 }
 
 function Quantity({ value, onChange, name, disabled }) {
@@ -161,11 +167,49 @@ export function StockEditor({ items, stock, onClose, title = 'Update stock' }) {
   </dialog>, document.body);
 }
 
+export function StockCheckDialog({ stock, includeHidden, productCount, onClose, onSuccess }) {
+  const dialog = useRef(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    const node = dialog.current;
+    node.showModal();
+    return () => node.close();
+  }, []);
+  async function submit(event) {
+    event.preventDefault();
+    setBusy(true);
+    setError('');
+    try {
+      await stock.confirmChecked(includeHidden);
+      onSuccess();
+      onClose();
+    } catch (failure) {
+      setError(failure.message || 'Could not record the inventory check.');
+    } finally {
+      setBusy(false);
+    }
+  }
+  return createPortal(<dialog ref={dialog} className="stock-dialog stock-check-dialog" aria-labelledby="stock-check-title" onCancel={event => { event.preventDefault(); if (!busy) onClose(); }}>
+    <form onSubmit={submit}>
+      <header><h2 id="stock-check-title">Confirm inventory check</h2><button type="button" disabled={busy} onClick={onClose} aria-label="Close confirmation">×</button></header>
+      <p>This records today’s check date for {productCount} {productCount === 1 ? 'product' : 'products'} without changing any quantities.</p>
+      <p className="stock-check-note">Only confirm after the inventory list has been reviewed. Save any quantity changes first.</p>
+      {error && <p role="alert" className="stock-error">{error}</p>}
+      <footer><button type="button" disabled={busy} onClick={onClose}>Cancel</button><button type="submit" disabled={busy}>{busy ? 'Recording…' : 'Confirm check'}</button></footer>
+    </form>
+  </dialog>, document.body);
+}
+
 export function StockLine({ item, stock, onEdit }) {
   const row = stock.rows[String(item.id)];
+  const updatedAt = row?.updated_at ? new Date(row.updated_at) : null;
+  const checkedAt = row?.checked_at ? new Date(row.checked_at) : null;
+  const isCheckedDateLatest = checkedAt && (!updatedAt || checkedAt >= updatedAt);
+  const latestAt = isCheckedDateLatest ? checkedAt : updatedAt;
   return <div className="stock-line">
     <span>Stock: <strong>{stock.status === 'loading' ? '…' : stock.status === 'error' ? 'Unavailable' : row?.quantity ?? 'Not set'}</strong></span>
     <button type="button" className="stock-reveal" onClick={onEdit} aria-label={`Update stock for ${item.name}`} title="Update stock">✎</button>
-    {row?.updated_at && <span>Last updated {new Date(row.updated_at).toLocaleDateString('en-IN')}</span>}
+    {latestAt && <span>{isCheckedDateLatest ? 'Stock checked' : 'Last updated'} {latestAt.toLocaleDateString('en-IN')}</span>}
   </div>;
 }

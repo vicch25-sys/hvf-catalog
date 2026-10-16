@@ -21,6 +21,10 @@
 .stock-quantity input { width:80px; min-width:0; padding:7px; font-weight:700; color:#1e293b; background:white; border:1px solid #cbd5e1; border-radius:6px; appearance:textfield; }
 .stock-quantity input::-webkit-inner-spin-button { -webkit-appearance:none; }
 .stock-dialog .stock-error { color:#b42318; }
+.stock-check-dialog { width:min(480px, calc(100vw - 32px)); }
+.stock-check-action { font-weight:700; box-shadow:0 1px 3px rgba(15,23,42,.14); }
+.stock-check-dialog .stock-check-note { margin:12px 0 4px; padding:10px 12px; border:1px solid #e2e8f0; border-radius:8px; background:#f8fafc; color:#475569; line-height:1.5; }
+.stock-check-dialog footer button:last-child { color:white; background:#1677ff; border-color:#1677ff; font-weight:700; }
 @media (hover:none), (pointer:coarse) { .stock-reveal { opacity:1; } }
 @media (max-width:600px) { .stock-dialog { padding:12px; } .stock-dialog th,.stock-dialog td { padding:8px 4px; font-size:12px; } .stock-quantity { gap:2px; } .stock-quantity input { width:55px; } .stock-quantity button { padding:6px; } }
 

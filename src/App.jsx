@@ -6,7 +6,7 @@ import jsPDF from "jspdf";
 import { measureQuotationFooter, drawQuotationFooter } from "./quotationFooter.js";
 import autoTable from "jspdf-autotable";
 import SmartPayrollUpdate from "./SmartPayrollUpdate.jsx";
-import { useCatalogStock, StockLine, StockEditor } from "./CatalogStock.jsx";
+import { useCatalogStock, StockLine, StockEditor, StockCheckDialog } from "./CatalogStock.jsx";
 import ProductShareModal from "./ProductShare.jsx";
 import { validateReportRange, weekdayName } from "./reportDates.js";
 
@@ -2149,14 +2149,10 @@ const profileAccessRequestRef = useRef(0);
 const canAddCatalogProducts = isAdmin || canManageCatalog;
 const stock = useCatalogStock(supabase, session?.user?.id, isAdmin || canManageCatalog);
 const [stockEditorItems, setStockEditorItems] = useState(null);
+const [stockCheckMessage, setStockCheckMessage] = useState("");
+const [showStockCheckDialog, setShowStockCheckDialog] = useState(false);
 useEffect(() => { setStockEditorItems(null); }, [session?.user?.id, isAdmin, canManageCatalog]);
 
-// two-step local admin
-const [adminEmail, setAdminEmail] = useState("");
-const [adminPin, setAdminPin] = useState("");
-const [adminStep, setAdminStep] = useState(null);
-
-const [showLoginBox, setShowLoginBox] = useState(false);
 const [showProductCreatorLogin, setShowProductCreatorLogin] = useState(false);
 const [productCreatorEmail, setProductCreatorEmail] = useState("");
 const [productCreatorPassword, setProductCreatorPassword] = useState("");
@@ -3275,11 +3271,10 @@ const [showCatalogExportPanel, setShowCatalogExportPanel] = useState(false);
   useEffect(() => {
   const init = async () => {
     const { data } = await supabase.auth.getSession();
-    const adminPersist = localStorage.getItem("adminLogin") === "1";
     setSession(data.session ?? null);
     const requestId = ++profileAccessRequestRef.current;
     if (!data.session?.user?.id) {
-      setIsAdmin(adminPersist);
+      setIsAdmin(false);
       setCanManageCatalog(false);
       setProfileAccessStatus("ready");
       await startPayrollSyncRef.current?.(null, false);
@@ -3314,7 +3309,6 @@ const [showCatalogExportPanel, setShowCatalogExportPanel] = useState(false);
 
   const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => {
     setSession(s);
-    const adminPersist = localStorage.getItem("adminLogin") === "1";
     const requestId = ++profileAccessRequestRef.current;
     if (s?.user?.id) {
       setProfileAccessStatus("checking");
@@ -3342,12 +3336,11 @@ const [showCatalogExportPanel, setShowCatalogExportPanel] = useState(false);
           await startAttendanceOnlySyncRef.current?.(s, false);
         });
     } else {
-      setIsAdmin(adminPersist);
+      setIsAdmin(false);
       setCanManageCatalog(false);
       setProfileAccessStatus("ready");
       startPayrollSyncRef.current?.(null, false);
     }
-    setShowLoginBox(false);
   });
   return () => {
     sub.subscription.unsubscribe();
@@ -3358,9 +3351,8 @@ const [showCatalogExportPanel, setShowCatalogExportPanel] = useState(false);
   };
 }, []);
 
-  // --- Admin two-step (email -> PIN) ---
+// --- Admin magic-link sign-in ---
 const ADMIN_EMAIL = "vic.ch25@icloud.com";
-const ADMIN_PIN = "9957";
 
 // --- passwordless sign-in via email link ---
 const sendMagicLink = async () => {
@@ -3376,56 +3368,13 @@ const sendMagicLink = async () => {
   }
 };
 
-const startAdminFlow = () => {
-  setShowLoginBox(true);
-  setAdminStep("email");
-  setAdminEmail("");
-  setAdminPin("");
-};
-
-const verifyAdminEmail = () => {
-  if ((adminEmail || "").trim().toLowerCase() === ADMIN_EMAIL) {
-    setAdminStep("pin");
-  } else {
-    alert("Email not recognized.");
-  }
-};
-
-const verifyAdminPin = () => {
-  if ((adminPin || "").trim() === ADMIN_PIN) {
-    setIsAdmin(true);
-    localStorage.setItem("adminLogin", "1"); // persist until manual logout
-    setShowLoginBox(false);
-    setAdminStep(null);
-    setAdminEmail("");
-    setAdminPin("");
-  } else {
-    alert("Wrong PIN.");
-  }
-};
-
 const signOut = async () => {
-  // clear both Supabase session (if any) and local admin login
   try { await supabase.auth.signOut(); } catch {}
-  localStorage.removeItem("adminLogin");
   setIsAdmin(false);
   setCanManageCatalog(false);
 };
 
 // Sign in with a magic link so Supabase gives us a real user session (auth.uid())
-const magicLogin = async () => {
-  const email = prompt("Enter your email to sign in:");
-  if (!email) return;
-
-  const { error } = await supabase.auth.signInWithOtp({
-    email: email.trim(),
-    options: { emailRedirectTo: window.location.origin }
-  });
-
-  if (error) return alert(error.message);
-  alert("Magic link sent. Open it from your email, then return to this tab.");
-};
-
 const signInAsProductCreator = async (event) => {
   event.preventDefault();
   if (!productCreatorEmail.trim() || !productCreatorPassword) {
@@ -12815,14 +12764,6 @@ button.mini.primary{
   Manager sign-in (email and password)
 </button>
 
-     <button
-        onClick={() => { startAdminFlow(); closeLoginMenu(); }}
-        className="btn"
-        style={{ width: "100%", marginBottom: "var(--space-2)" }}
-      >
-        Login as Admin
-      </button>
-
       <button
         onClick={() => { enableQuoteMode(); closeLoginMenu(); }}
         className="btn"
@@ -12875,55 +12816,6 @@ button.mini.primary{
           </button>
         </div>
       )}
-
-      {/* inline admin two-step box */}
-{showLoginBox && (
-  <div
-    style={{
-      display: "inline-flex",
-      gap: 8,
-      alignItems: "center",
-      flexWrap: "wrap",
-      justifyContent: "center",
-      marginTop: 8
-    }}
-  >
-    {/* Step 1: email */}
-    {(!adminStep || adminStep === "email") && (
-      <>
-        <input
-          type="email"
-          placeholder="Enter admin email"
-          value={adminEmail}
-          onChange={(e) => setAdminEmail(e.target.value)}
-          style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #ddd", minWidth: 240 }}
-        />
-        <button onClick={verifyAdminEmail}>Verify</button>
-        <button onClick={() => { setShowLoginBox(false); setAdminStep(null); }}>
-          Cancel
-        </button>
-      </>
-    )}
-
-    {/* Step 2: PIN */}
-    {adminStep === "pin" && (
-      <>
-        <input
-          type="password"
-          inputMode="numeric"
-          placeholder="Enter PIN"
-          value={adminPin}
-          onChange={(e) => setAdminPin(e.target.value)}
-          style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #ddd", minWidth: 160 }}
-        />
-        <button onClick={verifyAdminPin}>Login</button>
-        <button onClick={() => { setAdminStep("email"); setAdminPin(""); }}>
-          Back
-        </button>
-      </>
-    )}
-  </div>
-)}
 
 {showProductCreatorLogin && (
   <form
@@ -13079,12 +12971,27 @@ button.mini.primary{
   </button>
 )}
 {(isAdmin || canManageCatalog) && (
-  <button type="button" className="btn" style={{ marginLeft: 8, marginTop: 6 }}
+  <button type="button" className="btn primary stock-check-action" style={{ marginLeft: 8, marginTop: 6 }}
     disabled={!items.length}
     onClick={() => setStockEditorItems(items.filter(item => isAdmin || !item.is_hidden))}>
     Update stock
   </button>
 )}
+{(isAdmin || canManageCatalog) && (
+  <button type="button" className="btn" style={{ marginLeft: 8, marginTop: 6 }}
+    disabled={!items.length || stock.status !== "ready"}
+    onClick={() => { setStockCheckMessage(""); setShowStockCheckDialog(true); }}>
+    Mark inventory checked
+  </button>
+)}
+{showStockCheckDialog && <StockCheckDialog
+  stock={stock}
+  includeHidden={isAdmin}
+  productCount={items.filter(item => isAdmin || !item.is_hidden).length}
+  onClose={() => setShowStockCheckDialog(false)}
+  onSuccess={() => setStockCheckMessage("Inventory check recorded. Product quantities were not changed.")}
+/>}
+{stockCheckMessage && <p role="status" style={{ fontSize: 12, color: stockCheckMessage.startsWith("Could not") ? "#b42318" : "#166534" }}>{stockCheckMessage}</p>}
 {(isAdmin || canManageCatalog) && stock.error && <p role={stock.status === "error" ? "alert" : "status"} style={{ fontSize: 12, color: stock.status === "error" ? "#b42318" : "#64748b" }}>{stock.error}</p>}
 {stockEditorItems && (isAdmin || canManageCatalog) && <StockEditor items={stockEditorItems} stock={stock} onClose={() => setStockEditorItems(null)} />}
 
